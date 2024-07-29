@@ -70,13 +70,10 @@ internal class Overlay : IDisposable
 			Mute(_muted);
 		};
 
-		_browser.LoadingStateChanged += (_, args) =>
+		_browser.AddressChanged += (_, args) =>
 		{
-			if (!args.IsLoading)
-			{
 				_browser.SetZoomLevel(ScaleZoomLevel(_zoom));
 				InjectUserCss(_customCss);
-			}
 		};
 
 		BrowserSettings browserSettings = new() {WindowlessFrameRate = _framerate};
@@ -103,10 +100,48 @@ internal class Overlay : IDisposable
 		css = css.Replace("`", @"\'");
 		css = css.Replace("${", @"\${");
 
+		//Css for custom frame overlay
+		var overlayStyle = ":not(" + css + ") { visibility: collapse !important; } "+ css + "{ z-index: 2147483647; height: 100vh;  width: 100vw; left: 64px; top: 36px; position: fixed;}} #picto-overlay{ position: absolute; left: 64px; top: 36px; backface-visibility: hidden; }";
+		overlayStyle = overlayStyle.Replace("`", @"\'");
+		overlayStyle = overlayStyle.Replace("${", @"\${");
+
 		// (()=>{...})() self executable function to prevent scope issues
 		_browser.GetMainFrame().ExecuteJavaScriptAsync(
-			"(()=>{const style = document.getElementById('user-css') ?? document.createElement('style');"
-			+ "style.id = 'user-css'; style.textContent =`" + css + " `;document.head.append(style);})()");
+			"console.log('DOM vollständig geladen und geparst');" +
+				"document.addEventListener('DOMContentLoaded', function() {" +
+					"if(document.querySelector('#picto-overlay') == null){" +
+					"	document.body.style.backgroundColor = 'transparent';" +
+					"	var iframe = document.createElement('iframe');" +
+					"	iframe.id = 'picto-overlay';" +
+					"	iframe.setAttribute('src', '" + _url + "');" +
+					"	iframe.style.width = '1920px';" +
+					"	iframe.style.height = '1080px';" +
+					"   iframe.style.setProperty('visibility', 'visible', 'important');" +
+					"	iframe.setAttribute('frameborder', '0');" +
+					"	document.body.innerHTML = '';" +
+					"	document.body.appendChild(iframe);" +
+					"}" +
+					"iframe.addEventListener('load', function() { " +
+					"	var element = document.querySelector('#picto-overlay');" +
+					"	var iframeDocument = element.contentDocument || element.contentWindow.document;" +
+					"	const stylef = document.createElement('style');" +
+					"   stylef.id = 'picto-overlay-css'; stylef.textContent =`" + overlayStyle + " `;" +
+					"	iframeDocument.head.append(stylef);" +
+					"	var targetElement = iframeDocument.querySelector(`" + css + "`);" +
+					"	var parentElement = targetElement.parentElement;" +
+					"	while (parentElement) {" +
+					"		parentElement.style.setProperty('overflow', 'hidden', 'important');" +
+					"		parentElement.style.setProperty('visibility', 'visible', 'important');" +
+					"		parentElement = parentElement.parentElement;" +
+					"	}" +
+					"});" +
+					"if(document.querySelector('#picto-overlay-css') == null){" +
+					"	const stylep = document.createElement('style');" +
+					"	stylep.id = 'picto-overlay-css'; stylep.textContent =`" + overlayStyle + " `;" +
+					"	document.head.append(stylep);" +
+					"}" +
+				"});"
+			);
 	}
 
 	public void Navigate(string newUrl)
