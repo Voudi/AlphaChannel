@@ -1,19 +1,17 @@
 ﻿{
-    "Name": "Browsingway",
-    "Author": "Styr1x",
-    "Punchline": "Browser overlays rendered in-game.",
-    "Description": "Renders browser overlays in-game to enable playing in fullscreen (and G-SYNC) while having access to ACT overlays.\nUse the settings button below or the '/bw config' command to configure.\nBased on the BrowserHost plugin by ackwell.",
-    "RepoUrl": "https://github.com/Styr1x/Browsingway",
+    "Name": "Pictomatic",
+    "Author": "Voudi",
+    "Punchline": "Ingame TV",
+    "Description": "Forked of Browsingway, this plugin renders a browser inside the texture of a certain pet",
+    "RepoUrl": "https://github.com/Voudi/Pictomatic",
     "Tags": [
-        "framework",
         "browser",
         "inlay",
-        "overlay",
         "chromium",
-        "act",
         "youtube",
         "website",
-        "video"
+        "video",
+        "cinema"
     ],
-    "Changelog": "- Fix local storage not working after Chromium update\n  Note: Due to encryption changes in Chromium, local storage data from previous versions will be lost.\n"
+    "Changelog": "Initial Prototype"
 }

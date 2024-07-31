@@ -19,7 +19,7 @@ namespace Browsingway;
 
 public class Plugin : IDalamudPlugin
 {
-	public readonly WindowSystem WindowSystem = new("Browsingway");
+	public readonly WindowSystem WindowSystem = new("Pictomatic");
 	private MainWindow MainWindow { get; init; }
 
 	private const string _command = "/bw";
@@ -63,7 +63,7 @@ public class Plugin : IDalamudPlugin
 
 	// Required for LivePluginLoader support
 	public string AssemblyLocation { get; } = Assembly.GetExecutingAssembly().Location;
-	public string Name => "Browsingway";
+	public string Name => "Pictomatic";
 
 	public void Dispose()
 	{
@@ -157,7 +157,7 @@ public class Plugin : IDalamudPlugin
 		}
 
 		// Hook up the main BW command
-		Services.CommandManager.AddHandler(_command, new CommandInfo(HandleCommand) { HelpMessage = "Control Browsingway from the chat line! Type '/bw config' or open the settings for more info.", ShowInHelp = true });
+		//Services.CommandManager.AddHandler(_command, new CommandInfo(HandleCommand) { HelpMessage = "Control Browsingway from the chat line! Type '/bw config' or open the settings for more info.", ShowInHelp = true });
 	}
 
 	private (bool, long) OnWndProc(WindowsMessage msg, ulong wParam, long lParam)
