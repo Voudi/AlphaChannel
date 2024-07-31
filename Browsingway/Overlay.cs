@@ -21,9 +21,10 @@ internal class Overlay : IDisposable
 	private Exception? _textureRenderException;
 	private bool _windowFocused;
 	private long _timeLastInCombat;
-
-	public Overlay(RenderProcess renderProcess, InlayConfiguration overlayConfig)
+	private Plugin _plugin;
+	public Overlay(RenderProcess renderProcess, InlayConfiguration overlayConfig, Plugin plugin)
 	{
+		this._plugin = plugin;
 		_renderProcess = renderProcess;
 		// TODO: handle that the correct way
 		_renderProcess.Crashed += (_, _) =>
@@ -113,7 +114,7 @@ internal class Overlay : IDisposable
 			return;
 		}
 
-		ImGui.SetNextWindowSize(new Vector2(640, 480), ImGuiCond.FirstUseEver);
+		ImGui.SetNextWindowSize(new Vector2(2048, 2048), ImGuiCond.FirstUseEver);
 		ImGui.Begin($"{_overlayConfig.Name}###{_overlayConfig.Guid}", GetWindowFlags());
 
 		if (_overlayConfig.Fullscreen)
@@ -197,7 +198,7 @@ internal class Overlay : IDisposable
 		SharedTextureHandler? oldTextureHandler = _textureHandler;
 		try
 		{
-			_textureHandler = new SharedTextureHandler(handle);
+			_textureHandler = new SharedTextureHandler(handle, _plugin, _overlayConfig);
 		}
 		catch (Exception e) { _textureRenderException = e; }
 
@@ -290,8 +291,8 @@ internal class Overlay : IDisposable
 				Guid = RenderGuid.ToByteArray(),
 				Id = _overlayConfig.Name,
 				Url = _overlayConfig.Url,
-				Width = (int)currentSize.X,
-				Height = (int)currentSize.Y,
+				Width = (int)2048,
+				Height = (int)2048,
 				Zoom = _overlayConfig.Zoom,
 				Framerate = _overlayConfig.Framerate,
 				Muted = _overlayConfig.Muted,
@@ -300,7 +301,7 @@ internal class Overlay : IDisposable
 		}
 		else
 		{
-			_ = _renderProcess.Rpc.ResizeOverlay(RenderGuid, (int)currentSize.X, (int)currentSize.Y);
+			_ = _renderProcess.Rpc.ResizeOverlay(RenderGuid, (int)2048, (int)2048);
 		}
 
 		_resizing = true;

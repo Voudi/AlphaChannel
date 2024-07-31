@@ -17,6 +17,15 @@
           "System.Reflection.Emit.Lightweight": "4.7.0"
         }
       },
+      "System.Drawing.Common": {
+        "type": "Direct",
+        "requested": "[8.0.7, )",
+        "resolved": "8.0.7",
+        "contentHash": "DoeBae0gZvxs3mtfoub6F1k28fSkFPzmhFuvblplKMnLYKmTMVy0j4Yxahh96KM532JzHGDxhJn1VpMKSB1pyg==",
+        "dependencies": {
+          "Microsoft.Win32.SystemEvents": "8.0.0"
+        }
+      },
       "FlatSharp.Runtime": {
         "type": "Transitive",
         "resolved": "7.5.1",
@@ -24,6 +33,11 @@
         "dependencies": {
           "System.Memory": "4.5.5"
         }
+      },
+      "Microsoft.Win32.SystemEvents": {
+        "type": "Transitive",
+        "resolved": "8.0.0",
+        "contentHash": "9opKRyOKMCi2xJ7Bj7kxtZ1r9vbzosMvRrdEhVhDz8j8MoBGgB+WmC94yH839NPH+BclAjtQ/pyagvi/8gDLkw=="
       },
       "System.Memory": {
         "type": "Transitive",

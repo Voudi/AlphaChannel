@@ -101,7 +101,7 @@ internal class Overlay : IDisposable
 		css = css.Replace("${", @"\${");
 
 		//Css for custom frame overlay
-		var overlayStyle = ":not(" + css + ") { visibility: collapse !important; } "+ css + "{ z-index: 2147483647; height: 100vh;  width: 100vw; left: 64px; top: 36px; position: fixed;}} #picto-overlay{ position: absolute; left: 64px; top: 36px; backface-visibility: hidden; }";
+		var overlayStyle = ":not(" + css + ") { visibility: collapse !important; } "+ css + "{ z-index: 2147483647; height: 1080px !important;  width: 1920px !important; left: 64px; top: 36px; position: fixed;} #picto-overlay{ position: fixed; width: -webkit-fill-available !important; height: -webkit-fill-available !important; backface-visibility: hidden; }";
 		overlayStyle = overlayStyle.Replace("`", @"\'");
 		overlayStyle = overlayStyle.Replace("${", @"\${");
 
@@ -114,8 +114,6 @@ internal class Overlay : IDisposable
 					"	var iframe = document.createElement('iframe');" +
 					"	iframe.id = 'picto-overlay';" +
 					"	iframe.setAttribute('src', '" + _url + "');" +
-					"	iframe.style.width = '1920px';" +
-					"	iframe.style.height = '1080px';" +
 					"   iframe.style.setProperty('visibility', 'visible', 'important');" +
 					"	iframe.setAttribute('frameborder', '0');" +
 					"	document.body.innerHTML = '';" +

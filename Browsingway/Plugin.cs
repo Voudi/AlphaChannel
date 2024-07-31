@@ -4,15 +4,24 @@ using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
 using ImGuiNET;
 using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
+using FFXIVClientStructs.Interop.Generated;
+using static FFXIVClientStructs.FFXIV.Client.UI.Misc.GroupPoseModule;
+using System.IO;
+using ImGuiScene;
+using System.Drawing;
 
 namespace Browsingway;
 
 public class Plugin : IDalamudPlugin
 {
+	public readonly WindowSystem WindowSystem = new("Browsingway");
+	private MainWindow MainWindow { get; init; }
+
 	private const string _command = "/bw";
 
 	private readonly DependencyManager _dependencyManager;
@@ -25,7 +34,7 @@ public class Plugin : IDalamudPlugin
 	private Settings? _settings;
 	private Services _services;
 
-	public Plugin(IDalamudPluginInterface pluginInterface)
+	public unsafe Plugin(IDalamudPluginInterface pluginInterface)
 	{
 		// init services
 		_services = pluginInterface.Create<Services>()!;
@@ -46,6 +55,10 @@ public class Plugin : IDalamudPlugin
 
 		// Hook up render hook
 		pluginInterface.UiBuilder.Draw += Render;
+
+		MainWindow = new MainWindow(this);
+		WindowSystem.AddWindow(MainWindow);
+		pluginInterface.UiBuilder.OpenMainUi += ToggleMainUI;
 	}
 
 	// Required for LivePluginLoader support
@@ -54,6 +67,8 @@ public class Plugin : IDalamudPlugin
 
 	public void Dispose()
 	{
+		WindowSystem.RemoveAllWindows();
+
 		foreach (Overlay overlay in _overlays.Values) { overlay.Dispose(); }
 
 		_overlays.Clear();
@@ -61,6 +76,8 @@ public class Plugin : IDalamudPlugin
 		_renderProcess?.Dispose();
 
 		_settings?.Dispose();
+
+		MainWindow.Dispose();
 
 		Services.CommandManager.RemoveHandler(_command);
 
@@ -163,7 +180,7 @@ public class Plugin : IDalamudPlugin
 			return;
 		}
 
-		Overlay overlay = new(_renderProcess, overlayConfig);
+		Overlay overlay = new(_renderProcess, overlayConfig, this);
 		_overlays.TryAdd(overlayConfig.Guid, overlay);
 	}
 
@@ -217,6 +234,9 @@ public class Plugin : IDalamudPlugin
 
 		foreach (Overlay overlay in _overlays.Values) { overlay.Render(); }
 
+		this.MainWindow.RefreshTV();
+		DrawUI();
+
 		ImGui.PopStyleVar();
 	}
 
@@ -251,5 +271,19 @@ public class Plugin : IDalamudPlugin
 					$"Unknown subcommand '{args[0]}'. Valid subcommands are: config,overlay,inlay.");
 				break;
 		}
+	}
+
+	private void DrawUI() => WindowSystem.Draw();
+	public void ToggleMainUI() => MainWindow.Toggle();
+
+	public void UpdateSharedDXTexture(SharpDX.Direct3D11.Texture2D _textureSource, InlayConfiguration config) => MainWindow.UpdateSharedDXTexture(_textureSource, config);
+	public InlayConfiguration InitiazlizePictomaticWindow(String URL, String CSS)
+	{
+		return _settings?.CreateOrOpenPictomaticWindow(URL, CSS);
+	}
+
+	internal void RemovePictomaticWindow(InlayConfiguration overlayConfig)
+	{
+		_settings?.RemovePictomaticWindow(overlayConfig);
 	}
 }

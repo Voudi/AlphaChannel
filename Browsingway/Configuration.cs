@@ -11,7 +11,7 @@ internal class Configuration : IPluginConfiguration
 }
 
 [Serializable]
-internal class InlayConfiguration
+public class InlayConfiguration
 {
 	public bool ClickThrough;
 	public int Framerate = 60;

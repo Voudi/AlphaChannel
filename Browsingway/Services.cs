@@ -34,4 +34,7 @@ public class Services
 	[PluginService]
 	// ReSharper disable once AutoPropertyCanBeMadeGetOnly.Local
 	public static IClientState ClientState { get; set; } = null!;
+
+	[PluginService] 
+	public static IObjectTable ObjectTable { get; private set; } = null!;
 }

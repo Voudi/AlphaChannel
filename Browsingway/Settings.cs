@@ -29,11 +29,59 @@ internal class Settings : IDisposable
 
 	public Settings()
 	{
-		Services.PluginInterface.UiBuilder.OpenConfigUi += () => _open = true;
+		//Deactivate Plugin Settings
+		//Services.PluginInterface.UiBuilder.OpenConfigUi += () => _open = true;
 		Config = Services.PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
+
+		foreach (InlayConfiguration? overlayConfig in Config?.Inlays!)
+		{
+			if (overlayConfig.Name == "pictomatic")
+			{
+				RemoveOverlay(overlayConfig);
+				break;
+			}
+		}
 	}
 
 	public void Dispose() { }
+
+	public InlayConfiguration CreateOrOpenPictomaticWindow(String URL, String CSS)
+	{
+		foreach (InlayConfiguration? overlayConfig in Config?.Inlays!)
+		{
+			if(overlayConfig.Name == "pictomatic")
+			{
+				RemoveOverlay(overlayConfig);
+				break;
+			}
+		}
+
+		InlayConfiguration? pictomaticConfig = AddNewPictomaticOverlay();
+
+		pictomaticConfig.CustomCss = CSS;
+		UpdateUserCss(pictomaticConfig);
+
+		pictomaticConfig.Url = URL;
+		NavigateOverlay(pictomaticConfig);
+
+		SaveSettings();
+
+		return pictomaticConfig;
+	}
+	private InlayConfiguration? AddNewPictomaticOverlay()
+	{
+		InlayConfiguration? overlayConfig = new() { Guid = Guid.NewGuid(), Name = "pictomatic", Url = "about:blank", Locked = true, ClickThrough = true, TypeThrough = true};
+		Config.Inlays.Add(overlayConfig);
+		OverlayAdded?.Invoke(this, overlayConfig);
+		SaveSettings();
+
+		return overlayConfig;
+	}
+
+	public void RemovePictomaticWindow(InlayConfiguration config)
+	{
+		RemoveOverlay(config);
+	}
 
 	public void OnActAvailabilityChanged(bool available)
 	{
@@ -180,7 +228,7 @@ internal class Settings : IDisposable
 		OverlayZoomed?.Invoke(this, overlayConfig);
 	}
 
-	private void UpdateMuteOverlay(InlayConfiguration overlayConfig)
+	public void UpdateMuteOverlay(InlayConfiguration overlayConfig)
 	{
 		OverlayMuted?.Invoke(this, overlayConfig);
 	}
