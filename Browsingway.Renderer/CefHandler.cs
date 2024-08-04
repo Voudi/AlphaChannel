@@ -17,7 +17,10 @@ internal static class CefHandler
 			LogSeverity = LogSeverity.Fatal,
 #endif
 		};
-		RootCachePath = settings.RootCachePath;
+		RootCachePath = settings.RootCachePath; 
+		//Disable WebSecurity to disable CORS for visual purposes only
+		settings.CefCommandLineArgs["disable-web-security"] = "1";
+		settings.CefCommandLineArgs["allow-insecure-localhost"] = "1";
 		settings.CefCommandLineArgs["autoplay-policy"] = "no-user-gesture-required";
 		settings.EnableAudio();
 		settings.SetOffScreenRenderingBestPerformanceArgs();

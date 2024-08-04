@@ -100,7 +100,7 @@ public class MainWindow : Window, IDisposable
 	private String buttonReload = "Reload";
 	bool TVTurnedOn = false;
 	private String inputURL = "https://w2g.tv/en/room/?room_id=6cf6i1hlqwlv05y83n&w2g_init=1&w2g_nick=Guest";// "about:blank";
-	private String inputCSS = "#w2g-npa-frame";//"#divid";
+	private String inputCSS = "#video_container";//"#divid";
 	float volume = 0.5f;
 	public unsafe override void Draw()
 	{

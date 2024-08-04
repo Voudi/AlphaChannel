@@ -107,37 +107,60 @@ internal class Overlay : IDisposable
 
 		// (()=>{...})() self executable function to prevent scope issues
 		_browser.GetMainFrame().ExecuteJavaScriptAsync(
-			"console.log('DOM vollständig geladen und geparst');" +
 				"document.addEventListener('DOMContentLoaded', function() {" +
-					"if(document.querySelector('#picto-overlay') == null){" +
-					"	document.body.style.backgroundColor = 'transparent';" +
-					"	var iframe = document.createElement('iframe');" +
-					"	iframe.id = 'picto-overlay';" +
-					"	iframe.setAttribute('src', '" + _url + "');" +
-					"   iframe.style.setProperty('visibility', 'visible', 'important');" +
-					"	iframe.setAttribute('frameborder', '0');" +
-					"	document.body.innerHTML = '';" +
-					"	document.body.appendChild(iframe);" +
-					"}" +
-					"iframe.addEventListener('load', function() { " +
-					"	var element = document.querySelector('#picto-overlay');" +
-					"	var iframeDocument = element.contentDocument || element.contentWindow.document;" +
-					"	const stylef = document.createElement('style');" +
-					"   stylef.id = 'picto-overlay-css'; stylef.textContent =`" + overlayStyle + " `;" +
-					"	iframeDocument.head.append(stylef);" +
-					"	var targetElement = iframeDocument.querySelector(`" + css + "`);" +
-					"	var parentElement = targetElement.parentElement;" +
-					"	while (parentElement) {" +
-					"		parentElement.style.setProperty('overflow', 'hidden', 'important');" +
-					"		parentElement.style.setProperty('visibility', 'visible', 'important');" +
-					"		parentElement = parentElement.parentElement;" +
-					"	}" +
-					"});" +
-					"if(document.querySelector('#picto-overlay-css') == null){" +
-					"	const stylep = document.createElement('style');" +
-					"	stylep.id = 'picto-overlay-css'; stylep.textContent =`" + overlayStyle + " `;" +
-					"	document.head.append(stylep);" +
-					"}" +
+				"				if(document.querySelector('#picto-overlay') == null){" +
+				"					document.body.style.backgroundColor = 'transparent';" +
+				"					var iframe = document.createElement('iframe');" +
+				"					iframe.id = 'picto-overlay';" +
+				"					iframe.setAttribute('src', '" + _url + "');" +
+				"				    iframe.style.setProperty('visibility', 'visible', 'important');" +
+				"					iframe.setAttribute('frameborder', '0');" +
+				"					document.body.innerHTML = '';" +
+				"					document.body.appendChild(iframe);" +
+				"				}" +
+				"				var cnt = 0;" +
+				"				iframe.addEventListener('load', function() { " +
+				"				" +
+				"					var cnt = 0;" +
+				"					function findElementInFrame(iframeDocument){" +
+				"						if(!iframeDocument) return false;" +
+				"						cnt++;" +
+				"						if(iframeDocument.querySelector('#picto-overlay-css' + cnt) === null) {" +
+				"							const stylef = document.createElement('style');" +
+				"							stylef.id = 'picto-overlay-css' + cnt; " +
+				"							stylef.textContent =`" + overlayStyle + " `;" +
+				"							iframeDocument.head.append(stylef);" +
+				"						}" +
+				"						" +
+				"						var targetElement = iframeDocument.querySelector(`" + css + "`);" +
+				"						" +
+				"						if(!targetElement){" +
+				"							iframeDocument.querySelectorAll('iframe').forEach(function(nestedIframe, index) {" +
+				"								if(findElementInFrame(nestedIframe.contentDocument)){" +
+				"									targetElement = nestedIframe;" +
+				"								}" +
+				"							});" +
+				"						}" +
+				"						if(targetElement)" +
+				"						{" +
+				"							var parentElement = (iframeDocument.querySelector(`" + css + "`) == targetElement) ? targetElement.parentElement : targetElement;" +
+				"							while (parentElement) {" +
+				"								parentElement.style.setProperty('overflow', 'hidden', 'important');" +
+				"								parentElement.style.setProperty('visibility', 'visible', 'important');" +
+				"								parentElement = parentElement.parentElement;" +
+				"							}" +
+				"							return true;" +
+				"						}" +
+				"						return false;" +
+				"					}" +
+				"					" +
+				"					var intervalId = setInterval(function(){" +
+				"						cnt = 0;" +
+				"						if(findElementInFrame(window.top.document))" +
+				"							clearInterval(intervalId);" +
+				"					}, 1000);" +
+				"					" +
+				"				});" +
 				"});"
 			);
 	}
