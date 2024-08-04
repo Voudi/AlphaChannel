@@ -1,0 +1,24 @@
+﻿{
+    "Author": "Voudi",
+    "Name": "Pictomatic",
+    "InternalName": "Pictomatic",
+    "Punchline": "Ingame TV",
+    "Description": "Forked of Browsingway, this plugin renders a browser as the texture of a pet in the game. NOTE: For now, this plugin cannot run at the same time as Browsingway.",
+    "ApplicableVersion": "any",
+    "Tags": [
+        "browser",
+        "inlay",
+        "chromium",
+        "youtube",
+        "website",
+        "video",
+        "cinema"
+    ],
+    "Changelog": "Initial Prototype",
+    "DalamudApiLevel": 10,
+    "LoadRequiredState": 0,
+    "LoadSync": false,
+    "CanUnloadAsync": false,
+    "LoadPriority": 0,
+    "AcceptsFeedback": true
+}
