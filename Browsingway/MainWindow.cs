@@ -18,9 +18,6 @@ public class MainWindow : Window, IDisposable
 	private Plugin _plugin;
 	InlayConfiguration _overlayConfig;
 
-	// We give this window a hidden ID using ##
-	// So that the user will see "My Amazing Window" as window title,
-	// but for ImGui the ID is "My Amazing Window##With a hidden ID"
 	public unsafe MainWindow(Plugin plugin)
         : base("Pictomatic remote", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
@@ -32,18 +29,6 @@ public class MainWindow : Window, IDisposable
 		};
 
 		this._plugin = plugin;
-	}
-
-	public void InitOverlay(InlayConfiguration config)
-	{
-		/*
-		if(config.Name == "pictomatic")
-		{
-			Overlay = config.Guid;
-			inputURL = config.Url;
-			inputCSS = config.CustomCss;
-		}
-		*/
 	}
 
 	public void TurnOnTV()
@@ -208,7 +193,7 @@ public class MainWindow : Window, IDisposable
 		_currentTVs.Where(x => !visitedTvs.Contains(x.Key)).Select(x => x.Key).ToList().ForEach(x=>_currentTVs.Remove(x));
 
 		//No TVs have been visited, turn off pictomatic
-		if (visitedTvs.Count == 0)
+		if (visitedTvs.Count == 0 && TVTurnedOn)
 			TurnOffTV();
 	}
 

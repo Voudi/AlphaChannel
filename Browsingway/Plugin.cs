@@ -23,6 +23,7 @@ public class Plugin : IDalamudPlugin
 	private MainWindow MainWindow { get; init; }
 
 	private const string _command = "/bw";
+	private const string _commandRemote = "/premote";
 
 	private readonly DependencyManager _dependencyManager;
 	private readonly Dictionary<Guid, Overlay> _overlays = new();
@@ -157,7 +158,10 @@ public class Plugin : IDalamudPlugin
 		}
 
 		// Hook up the main BW command
-		Services.CommandManager.AddHandler(_command, new CommandInfo(HandleCommand) { HelpMessage = "Control Browsingway from the chat line! Type '/bw config' or open the settings for more info.", ShowInHelp = true });
+		Services.CommandManager.AddHandler(_command, new CommandInfo(HandleCommand) { HelpMessage = "Control Browsingway from the chat line! Type '/bw config' or open the settings for more info.", ShowInHelp = false });
+
+		// Hook up the remote command
+		Services.CommandManager.AddHandler(_commandRemote, new CommandInfo(HandleCommand) { HelpMessage = "Toggles the Remote Window", ShowInHelp = true });
 	}
 
 	private (bool, long) OnWndProc(WindowsMessage msg, ulong wParam, long lParam)
@@ -242,34 +246,43 @@ public class Plugin : IDalamudPlugin
 
 	private void HandleCommand(string command, string rawArgs)
 	{
-		// Docs complain about perf of multiple splits.
-		// I'm not convinced this is a sufficiently perf-critical path to care.
-		string[] args = rawArgs.Split(null as char[], 2, StringSplitOptions.RemoveEmptyEntries);
-
-		if (args.Length == 0)
+		switch (command)
 		{
-			Services.Chat.PrintError(
-				"No subcommand specified. Valid subcommands are: config,overlay.");
-			return;
-		}
+			case _command:
+				// Docs complain about perf of multiple splits.
+				// I'm not convinced this is a sufficiently perf-critical path to care.
+				string[] args = rawArgs.Split(null as char[], 2, StringSplitOptions.RemoveEmptyEntries);
 
-		string subcommandArgs = args.Length > 1 ? args[1] : "";
+				if (args.Length == 0)
+				{
+					Services.Chat.PrintError(
+						"No subcommand specified. Valid subcommands are: config,overlay.");
+					return;
+				}
 
-		switch (args[0])
-		{
-			case "config":
-				_settings?.HandleConfigCommand(subcommandArgs);
+				string subcommandArgs = args.Length > 1 ? args[1] : "";
+
+				switch (args[0])
+				{
+					case "config":
+						_settings?.HandleConfigCommand(subcommandArgs);
+						break;
+					case "inlay":
+						_settings?.HandleOverlayCommand(subcommandArgs);
+						break;
+					case "overlay":
+						_settings?.HandleOverlayCommand(subcommandArgs);
+						break;
+					default:
+						Services.Chat.PrintError(
+							$"Unknown subcommand '{args[0]}'. Valid subcommands are: config,overlay,inlay.");
+						break;
+				}
 				break;
-			case "inlay":
-				_settings?.HandleOverlayCommand(subcommandArgs);
+			case _commandRemote:
+				MainWindow.Toggle();
 				break;
-			case "overlay":
-				_settings?.HandleOverlayCommand(subcommandArgs);
-				break;
-			default:
-				Services.Chat.PrintError(
-					$"Unknown subcommand '{args[0]}'. Valid subcommands are: config,overlay,inlay.");
-				break;
+			default: break;
 		}
 	}
 
