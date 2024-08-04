@@ -7,6 +7,7 @@ using RequestContext = CefSharp.RequestContext;
 using RequestContextSettings = CefSharp.RequestContextSettings;
 using Size = System.Drawing.Size;
 using WindowInfo = CefSharp.WindowInfo;
+using System.Reflection.Metadata;
 
 namespace Pictomatic.Renderer;
 
@@ -101,14 +102,15 @@ internal class Overlay : IDisposable
 		css = css.Replace("${", @"\${");
 
 		//Css for custom frame overlay
-		var overlayStyle = ":not(" + css + ") { visibility: collapse !important; } "+ css + "{ z-index: 2147483647; height: 1080px !important;  width: 1920px !important; left: 64px; top: 36px; position: fixed;} #picto-overlay{ position: fixed; width: -webkit-fill-available !important; height: -webkit-fill-available !important; backface-visibility: hidden; }";
+		var overlayStyle = ":not(" + css + ") { visibility: collapse !important; } "+ css + "{ z-index: 2147483647; height: 1080px !important;  width: 1920px !important; left: 64px !important; top: 36px !important; position: fixed;} #picto-overlay{ position: fixed; width: -webkit-fill-available !important; height: -webkit-fill-available !important; backface-visibility: hidden; }";
 		overlayStyle = overlayStyle.Replace("`", @"\'");
 		overlayStyle = overlayStyle.Replace("${", @"\${");
 
 		// (()=>{...})() self executable function to prevent scope issues
-		_browser.GetMainFrame().ExecuteJavaScriptAsync(
-				"document.addEventListener('DOMContentLoaded', function() {" +
-				"				if(document.querySelector('#picto-overlay') == null){" +
+		
+		/*
+		_browser.GetMainFrame().ExecuteJavaScriptAsync("(()=>{" +
+							"document.addEventListener('DOMContentLoaded', function() {" +
 				"					document.body.style.backgroundColor = 'transparent';" +
 				"					var iframe = document.createElement('iframe');" +
 				"					iframe.id = 'picto-overlay';" +
@@ -117,52 +119,81 @@ internal class Overlay : IDisposable
 				"					iframe.setAttribute('frameborder', '0');" +
 				"					document.body.innerHTML = '';" +
 				"					document.body.appendChild(iframe);" +
-				"				}" +
-				"				var cnt = 0;" +
-				"				iframe.addEventListener('load', function() { " +
-				"				" +
-				"					var cnt = 0;" +
-				"					function findElementInFrame(iframeDocument){" +
-				"						if(!iframeDocument) return false;" +
-				"						cnt++;" +
-				"						if(iframeDocument.querySelector('#picto-overlay-css' + cnt) === null) {" +
-				"							const stylef = document.createElement('style');" +
-				"							stylef.id = 'picto-overlay-css' + cnt; " +
-				"							stylef.textContent =`" + overlayStyle + " `;" +
-				"							iframeDocument.head.append(stylef);" +
-				"						}" +
-				"						" +
-				"						var targetElement = iframeDocument.querySelector(`" + css + "`);" +
-				"						" +
-				"						if(!targetElement){" +
-				"							iframeDocument.querySelectorAll('iframe').forEach(function(nestedIframe, index) {" +
-				"								if(findElementInFrame(nestedIframe.contentDocument)){" +
-				"									targetElement = nestedIframe;" +
-				"								}" +
-				"							});" +
-				"						}" +
-				"						if(targetElement)" +
-				"						{" +
-				"							var parentElement = (iframeDocument.querySelector(`" + css + "`) == targetElement) ? targetElement.parentElement : targetElement;" +
-				"							while (parentElement) {" +
-				"								parentElement.style.setProperty('overflow', 'hidden', 'important');" +
-				"								parentElement.style.setProperty('visibility', 'visible', 'important');" +
-				"								parentElement = parentElement.parentElement;" +
-				"							}" +
-				"							return true;" +
-				"						}" +
-				"						return false;" +
-				"					}" +
-				"					" +
-				"					var intervalId = setInterval(function(){" +
-				"						cnt = 0;" +
-				"						if(findElementInFrame(window.top.document))" +
-				"							clearInterval(intervalId);" +
-				"					}, 1000);" +
-				"					" +
-				"				});" +
-				"});"
+				"				console.log('smart'); });" +
+			"})()");
+		*/
+		
+		_browser.GetMainFrame().ExecuteJavaScriptAsync(
+			"(()=>{" +
+			"				document.addEventListener('DOMContentLoaded', function() { " +
+			"					" +
+			"					const iframeObserver = new MutationObserver((mutationsList) => {" +
+			"						for (let mutation of mutationsList) {" +
+			"							if (mutation.type === 'attributes' && mutation.attributeName === 'src') {" +
+			"								const target = mutation.target;" +
+			"								if (target.tagName.toLowerCase() === 'iframe') {" +
+			"									target.removeEventListener('load', onIframeLoad);" +
+			"									target.addEventListener('load', onIframeLoad);" +
+			"								}" +
+			"							}" +
+			"						}" +
+			"					});" +
+			"					function onIframeLoad(iframe, event){" +
+			"						cnt = iframe.currentTarget.getAttribute('data-pictolayer');" +
+			"						if(!iframe.currentTarget.ownerDocument) return;" +
+			"						findElementInFrame(iframe.currentTarget.ownerDocument, cnt);" +
+			"					}" +
+			"					var cnt = 0;" +
+			"					function findElementInFrame(iframeDocument, count){" +
+			"						if(iframeDocument.querySelector('#picto-overlay-css' + count) === null) {" +
+			"							const stylef = document.createElement('style');" +
+			"							stylef.id = 'picto-overlay-css' + count; " +
+			"							stylef.textContent =`" + overlayStyle + " `;" +
+			"							iframeDocument.head.append(stylef);" +
+			"						}" +
+			"						" +
+			"						var targetElement = iframeDocument.querySelector(`" + css + "`);" +
+			"						" +
+			"						if(!targetElement){" +
+			"							iframeDocument.querySelectorAll('iframe').forEach(function(nestedIframe, index) {" +
+			"								if(!nestedIframe.contentDocument) return;" +
+			"								if(findElementInFrame(nestedIframe.contentDocument, ++cnt)){" +
+			"									nestedIframe.setAttribute('data-pictolayer', count);" +
+			"									iframeObserver.observe(nestedIframe, { attributes: true });" +
+			"									targetElement = nestedIframe;" +
+			"								}" +
+			"							});" +
+			"						}" +
+			"						else{if(targetElement.tagName.toLowerCase() === 'iframe'){targetElement.setAttribute('data-pictolayer', count); iframeObserver.observe(targetElement, { attributes: true });}}" +
+			"						if(targetElement)" +
+			"						{" +
+			"							var parentElement = (iframeDocument.querySelector(`" + css + "`) == targetElement) ? targetElement.parentElement : targetElement;" +
+			"							while (parentElement) {" +
+			"								parentElement.style.setProperty('overflow', 'hidden', 'important');" +
+			"								parentElement.style.setProperty('visibility', 'visible', 'important');" +
+			"								parentElement.style.setProperty('z-index', '2147483646', 'important');" +
+			"								parentElement.style.setProperty('height', '1116px', 'important');" +
+			"								parentElement.style.setProperty('width', '1984px', 'important');" +
+			"								parentElement.style.setProperty('left', '0', 'important');" +
+			"								parentElement.style.setProperty('top', '0', 'important');" +
+			"								parentElement.style.setProperty('position', 'fixed', 'important');" +
+			"								parentElement = parentElement.parentElement;" +
+			"							}" +
+			"							return true;" +
+			"						}" +
+			"						return false;" +
+			"					}" +
+			"					" +
+			"					var intervalId = setInterval(function(){" +
+			"						cnt = 0;" +
+			"						if(findElementInFrame(window.top.document, cnt))" +
+			"							clearInterval(intervalId);" +
+			"					}, 1000);" +
+			"					" +
+			"				});" +
+			"})();"
 			);
+		
 	}
 
 	public void Navigate(string newUrl)

@@ -79,6 +79,7 @@ public class MainWindow : Window, IDisposable
 	}
 
 	public void Dispose() {
+
 	}
 
 	private String buttonToggleTV => TVTurnedOn ? ">TURN OFF<" : ">TURN ON<";
@@ -215,6 +216,7 @@ public class MainWindow : Window, IDisposable
 		}
 	}
 
+	private ShaderResourceView _view;
 	private unsafe IntPtr ReassignTextureForTV(IntPtr TVaddr)
 	{
 		var TV = (CharacterBase*)TVaddr;
@@ -224,9 +226,11 @@ public class MainWindow : Window, IDisposable
 			return ResetTV(TVaddr);
 
 		var _textureSource = _currentSharedTexture;
-		
-		ShaderResourceView view = new(DxHandler.Device, _textureSource, new ShaderResourceViewDescription { Format = _textureSource.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = _textureSource.Description.MipLevels } });
-
+		ShaderResourceView view;
+		if (_view is null)
+			view = new(DxHandler.Device, _textureSource, new ShaderResourceViewDescription { Format = _textureSource.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = _textureSource.Description.MipLevels } });
+		else
+			view = _view;
 		// Obtain the native pointers
 		void* D3D11Texture2D = (void*)_textureSource.NativePointer;
 		TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->D3D11Texture2D = D3D11Texture2D;
