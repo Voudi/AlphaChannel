@@ -19,7 +19,7 @@ internal class Settings : IDisposable
 	private bool _actAvailable = false;
 
 #if DEBUG
-	private bool _open = false;
+	private bool _open = true;
 #else
 	private bool _open;
 #endif

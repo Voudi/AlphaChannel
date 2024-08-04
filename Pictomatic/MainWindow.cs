@@ -177,7 +177,6 @@ public class MainWindow : Window, IDisposable
 					if (character->DrawObject->GetObjectType() == ObjectType.CharacterBase)
 					{
 						var tvDraw = (CharacterBase*)character->DrawObject;
-						if (tvDraw->Models[0]->Materials is not null)
 						if (tvDraw->Models[0]->Materials[1] is not null)
 							if (tvDraw->Models[0]->Materials[1]->TextureCount >= 4)
 							{
