@@ -1,5 +1,6 @@
 ﻿using Dalamud.Interface;
 using ImGuiNET;
+using System;
 using System.Numerics;
 using System.Text.RegularExpressions;
 
@@ -45,32 +46,47 @@ internal class Settings : IDisposable
 
 	public void Dispose() { }
 
-	public InlayConfiguration? CreateOrOpenPictomaticWindow(String URL, String CSS)
+
+	public void NavigatePictomaticWindow(string owner, string url, string css)
 	{
 		foreach (InlayConfiguration? overlayConfig in Config?.Inlays!)
 		{
-			if(overlayConfig.Name == "pictomatic")
+			if (overlayConfig.Name == owner)
 			{
-				RemoveOverlay(overlayConfig);
-				break;
+				overlayConfig.CustomCss = css;
+				UpdateUserCss(overlayConfig);
+
+				if(overlayConfig.Url == url)
+				{
+					ReloadOverlay(overlayConfig);
+				}
+				else
+				{
+					overlayConfig.Url = url;
+					NavigateOverlay(overlayConfig);
+				}
+				SaveSettings();
 			}
 		}
-
-		InlayConfiguration? pictomaticConfig = AddNewPictomaticOverlay();
-		if(pictomaticConfig is not null)
-		{
-			pictomaticConfig.CustomCss = CSS;
-			UpdateUserCss(pictomaticConfig);
-
-			pictomaticConfig.Url = URL;
-			NavigateOverlay(pictomaticConfig);
-			SaveSettings();
-		}
-		return pictomaticConfig;
 	}
-	private InlayConfiguration? AddNewPictomaticOverlay()
+
+
+	public void ClearPictomaticWindows()
 	{
-		InlayConfiguration? overlayConfig = new() { Guid = Guid.NewGuid(), Name = "pictomatic", Url = "about:blank", Locked = true, ClickThrough = true, TypeThrough = true};
+		Config?.Inlays!.ToList().ForEach(cfg => { if (cfg.Name.StartsWith("pictomatic")) RemoveOverlay(cfg); });
+	}
+
+	public InlayConfiguration? AddPictomaticWindow(uint ownerId)
+	{
+		var ownerName = "pictomatic" + ownerId;
+		RemovePictomaticWindow(ownerId);
+
+		return AddNewPictomaticOverlay(ownerName);
+	}
+
+	private InlayConfiguration? AddNewPictomaticOverlay(string ownerName = "pictomatic")
+	{
+		InlayConfiguration? overlayConfig = new() { Guid = Guid.NewGuid(), Name = ownerName, Url = "about:blank", Locked = true, ClickThrough = true, TypeThrough = true};
 		Config.Inlays.Add(overlayConfig);
 		OverlayAdded?.Invoke(this, overlayConfig);
 		SaveSettings();
@@ -78,9 +94,17 @@ internal class Settings : IDisposable
 		return overlayConfig;
 	}
 
-	public void RemovePictomaticWindow(InlayConfiguration? config)
+	public void RemovePictomaticWindow(uint ownerid)
 	{
-		RemoveOverlay(config);
+		var ownerName = "pictomatic" + ownerid;
+		foreach (InlayConfiguration? overlayConfig in Config?.Inlays!)
+		{
+			if (overlayConfig.Name == ownerName)
+			{
+				RemoveOverlay(overlayConfig);
+				break;
+			}
+		}
 	}
 
 	public void OnActAvailabilityChanged(bool available)

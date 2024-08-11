@@ -14,6 +14,7 @@ using static FFXIVClientStructs.FFXIV.Client.UI.Misc.GroupPoseModule;
 using System.IO;
 using ImGuiScene;
 using System.Drawing;
+using Honorific;
 
 namespace Pictomatic;
 
@@ -59,6 +60,8 @@ public class Plugin : IDalamudPlugin
 
 		MainWindow = new MainWindow(this);
 		WindowSystem.AddWindow(MainWindow);
+		IpcProvider.Init(this);
+
 		pluginInterface.UiBuilder.OpenMainUi += ToggleMainUI;
 	}
 
@@ -68,6 +71,8 @@ public class Plugin : IDalamudPlugin
 
 	public void Dispose()
 	{
+		IpcProvider.DeInit();
+
 		WindowSystem.RemoveAllWindows();
 
 		foreach (Overlay overlay in _overlays.Values) { overlay.Dispose(); }
@@ -238,7 +243,7 @@ public class Plugin : IDalamudPlugin
 
 		foreach (Overlay overlay in _overlays.Values) { overlay.Render(); }
 
-		this.MainWindow.RefreshTV();
+		this.MainWindow.RefreshTVs();
 		DrawUI();
 
 		ImGui.PopStyleVar();
@@ -290,13 +295,29 @@ public class Plugin : IDalamudPlugin
 	public void ToggleMainUI() => MainWindow.Toggle();
 
 	public void UpdateSharedDXTexture(SharpDX.Direct3D11.Texture2D _textureSource, InlayConfiguration config) => MainWindow.UpdateSharedDXTexture(_textureSource, config);
-	public InlayConfiguration? InitiazlizePictomaticWindow(String URL, String CSS)
+
+	public InlayConfiguration? AddPictomaticWindow(uint ownerid)
 	{
-		return _settings?.CreateOrOpenPictomaticWindow(URL, CSS);
+		return _settings?.AddPictomaticWindow(ownerid);
 	}
 
-	internal void RemovePictomaticWindow(InlayConfiguration? overlayConfig)
+	public void NavigatePictomaticWindow(string name, string url, string css)
 	{
-		_settings?.RemovePictomaticWindow(overlayConfig);
+		_settings?.NavigatePictomaticWindow(name, url, css);
+	}
+
+	public void ClearPictomaticWindows()
+	{
+		_settings?.ClearPictomaticWindows();
+	}
+
+	internal void RemovePictomaticWindow(uint ownerid)
+	{
+		_settings?.RemovePictomaticWindow(ownerid);
+	}
+
+	internal void UpdateTitle(uint entityId, TitleData titleData)
+	{
+		this.MainWindow.UpdateTitle(entityId, titleData.Title);
 	}
 }

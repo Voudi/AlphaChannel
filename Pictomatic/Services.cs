@@ -7,6 +7,12 @@ namespace Pictomatic;
 
 public class Services
 {
+	[PluginService] 
+	public static IObjectTable Objects { get; private set; } = null!;
+
+	[PluginService] 
+	public static IPluginLog Log { get; private set; } = null!;
+
 	[PluginService]
 	// ReSharper disable once AutoPropertyCanBeMadeGetOnly.Local
 	public static ICommandManager CommandManager { get; private set; } = null!;

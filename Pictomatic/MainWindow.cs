@@ -1,4 +1,7 @@
 using System.Numerics;
+using System;
+using System.Net.Http;
+using System.Threading.Tasks;
 using Pictomatic;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Interface.Windowing;
@@ -8,15 +11,43 @@ using ImGuiNET;
 using SharpDX.Direct3D11;
 using SharpDX.Direct3D;
 using static FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkHistory.Delegates;
+using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Memory;
+using FFXIVClientStructs.FFXIV.Client.System.Framework;
+using FFXIVClientStructs.Interop;
+using System.Collections.Immutable;
+using Honorific;
+using static System.Net.WebRequestMethods;
+using System.Linq;
+using System.Collections.Generic;
+using Dalamud.Interface;
+using System.ComponentModel.DataAnnotations;
 
 public class MainWindow : Window, IDisposable
 {
-	private readonly Dictionary<IntPtr, IntPtr> _currentTVs = [];
-	private bool _flagForRedraw = false;
-	private Texture2D? _currentSharedTexture;
-	private readonly byte[] _blankCanvas = new byte[16777216];
+	private readonly Dictionary<uint, IntPtr> _currentOwners = []; //Playerpointer, CompanionDrawpointer
+	private readonly Dictionary<uint, String> _currentURLs = []; //Playerpointer, URL
+	private readonly Dictionary<string, uint> _currentOverlays = []; //InlayconfigName, Playerpointer
+	private readonly Dictionary<string, Texture2D> _currentSharedTextures = []; //InlayconfigName, SharedTexturePointer
+	private readonly Dictionary<uint, bool> _currentToggle = []; //Playerpointer, Toggle
+
+	private static readonly byte[] _blankCanvas = new byte[16777216];
+
 	private Plugin _plugin;
-	InlayConfiguration? _overlayConfig;
+
+	public delegate void URLShortenerCallback(string result);
+	public delegate void URLShortenerErrorCallback(string result);
+	public delegate void URLFetchCallback(string result);
+
+	//Render Vars
+	private String buttonToggleTV => TVTurnedOn ? ">Turn Off<" : ">Turn On<";
+	bool TVTurnedOn = false;
+	private String inputURL = "https://w2g.tv/en/room/?w2g_init=1&w2g_nick=Guest&room_id=6cf6i1hlqwlv05y83n";
+	private String shortenedInputURL = "";
+	private String lastInputURL = "";
+	private String lastInputCSS = "";
+	private String inputCSS = "#video_container";//"#divid";
+	float volume = 0.5f;
 
 	public unsafe MainWindow(Plugin plugin)
         : base("Pictomatic remote", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
@@ -31,77 +62,162 @@ public class MainWindow : Window, IDisposable
 		this._plugin = plugin;
 	}
 
-	public void TurnOnTV()
+	private async void NavigateNewURL(uint ownerId, string title)
 	{
-		InlayConfiguration? config = _plugin.InitiazlizePictomaticWindow(inputURL, inputCSS);
-		if (config is null)
-			return;
-		_overlayConfig = config;
-		ResetAllTVs(true);
-		TVTurnedOn = true;
-	}
-
-	public void TurnOffTV()
-	{
-		ResetAllTVs(false);
-		TVTurnedOn = false;
-
-		_plugin.RemovePictomaticWindow(_overlayConfig);
-	}
-
-	private unsafe void ResetAllTVs(bool turnOn)
-	{
-		fixed (byte* ptr = _blankCanvas)
+		_currentURLs[ownerId] = title;
+		if (ownerId != Services.ClientState.LocalPlayer.EntityId && (!_currentToggle.TryGetValue(ownerId, out var toggle) || !toggle))
 		{
-			foreach (var item in _currentTVs)
+			return;
+		}
+		if (ownerId == Services.ClientState.LocalPlayer.EntityId && !TVTurnedOn)
+		{
+			return;
+		}
+		if (title.Length < 7 || !title.StartsWith("picto:"))
+		{
+			return;
+		}
+		var url = "https://is.gd/" + title.Substring("picto:".Length);
+		await FetchURLData(url, response => {
+			
+			if (response.Contains("picto:"))
 			{
-				if (turnOn && _overlayConfig is not null)
+				var trueUrl = response.Split("picto:")[0];
+				var trueCSS = response.Split("picto:")[1];
+
+				_plugin.NavigatePictomaticWindow("pictomatic"+ownerId, trueUrl, trueCSS);
+			}
+		});
+	}
+
+
+	private unsafe void CheckAllTVs()
+	{
+		CheckTitles();
+		
+		List<uint> visitedTvs = new List<uint>();
+		var npcList = Services.ObjectTable.Where(x => x is IBattleNpc).Cast<IBattleNpc>().OrderBy(x => x.YalmDistanceX);
+		foreach(var item in npcList)
+		{
+			if(item.Name.TextValue == "Carbuncle")
+			{
+				var character = (Character*)item.Address;
+				if (character != null)
 				{
-					ReassignTextureForTV(item.Key);
+					if(character->DrawObject != null)
+					if (character->DrawObject->GetObjectType() == ObjectType.CharacterBase)
+					{
+						try {
+							var tvDraw = (CharacterBase*)character->DrawObject;
+							if (tvDraw->Models[0]->Materials[1] is not null)
+								if (tvDraw->Models[0]->Materials[1]->TextureCount >= 4)
+									if (tvDraw->Models[0]->Materials[1]->Textures[3].Texture is not null)
+										if (tvDraw->Models[0]->Materials[1]->Textures[3].Texture->Texture is not null)
+											{
+												var ownerId = character->CompanionOwnerId;
+												visitedTvs.Add(ownerId);
+												CheckTV(tvDraw, ownerId);
+											}
+						}
+						catch(Exception e){}
+					}
 				}
-				else
+			}
+		}
+
+		//Remove unvisited TVs
+		_currentOwners.Where(owner => !visitedTvs.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
+		{
+			TryRemoveTV(ownerId);
+		});
+	}
+
+	private unsafe void CheckTV(CharacterBase* tvDraw, uint ownerId)
+	{
+		IntPtr ptr = (IntPtr)tvDraw;
+		if (_currentSharedTextures.TryGetValue("pictomatic" + ownerId, out _) && _currentOwners.TryGetValue(ownerId, out _))
+		{
+			AssignTextureToTV(ownerId);
+		}
+		else if(!_currentOwners.TryGetValue(ownerId, out _))
+		{
+			AddOtherPlayerTV(ptr, ownerId);
+		}
+	}
+	private unsafe void AddOtherPlayerTV(IntPtr ptr, uint ownerId)
+	{
+		var TV = (CharacterBase*)ptr;
+		//TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->InitializeContents((void*)Bptr);
+
+		InlayConfiguration? config = _plugin.AddPictomaticWindow(ownerId);
+		_currentOverlays.Add(config.Name, ownerId);
+		_currentToggle[ownerId] = false;
+		_currentOwners.Add(ownerId, ptr);
+		_currentURLs.Add(ownerId, "");
+	}
+
+	private unsafe void ReassignTextureForTV(IntPtr TVaddr, Texture2D textureSource)
+	{
+		var TV = (CharacterBase*)TVaddr;
+
+		ShaderResourceView view = new(DxHandler.Device, textureSource, new ShaderResourceViewDescription { Format = textureSource.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = textureSource.Description.MipLevels } });
+
+		// Obtain the native pointers
+		void* D3D11Texture2D = (void*)textureSource.NativePointer;
+		TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->D3D11Texture2D = D3D11Texture2D;
+		void* D3D11ShaderResourceView = (void*)view.NativePointer;
+		TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->D3D11ShaderResourceView = D3D11ShaderResourceView;
+	}
+
+	public unsafe void UpdateSharedDXTexture(Texture2D _textureSource, InlayConfiguration config)
+	{
+		_currentSharedTextures[config.Name] = _textureSource;
+	}
+
+	private void AssignTextureToTV(uint ownerId)
+	{
+		var fullName = "pictomatic" + ownerId;
+		if (_currentOverlays.TryGetValue(fullName, out var owner))
+		{
+			if (_currentOwners.TryGetValue(owner, out var TVaddr))
+			{
+				//Check if theres a SharedTexture waiting in the Pipeline for this Owner
+				if(_currentSharedTextures.TryGetValue(fullName, out var texture))
 				{
-					var TV = (CharacterBase*)item.Key;
-					TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->InitializeContents((void*)ptr);
+					ReassignTextureForTV(TVaddr, texture);
+					_currentSharedTextures.Remove(fullName);
 				}
 			}
 		}
 	}
 
-	private unsafe IntPtr ResetTV(IntPtr TVaddr)
+	public void Dispose()
 	{
-		fixed (byte* ptr = _blankCanvas)
-		{
-			var TV = (CharacterBase*)TVaddr;
-			TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->InitializeContents((void*)ptr);
-			return (IntPtr) ptr;
-		}
+		//TODO: Kill all Overlays
 	}
 
-	public void Dispose() {
-
-	}
-
-	private String buttonToggleTV => TVTurnedOn ? ">TURN OFF<" : ">TURN ON<";
-	bool TVTurnedOn = false;
-	private String inputURL = "https://w2g.tv/en/room/?room_id=6cf6i1hlqwlv05y83n&w2g_init=1&w2g_nick=Guest";// "about:blank";
-	private String inputCSS = "#video_container";//"#divid";
-	float volume = 0.5f;
 	public unsafe override void Draw()
 	{
 		ImGui.Text("");
-
-		if (ImGui.Button(buttonToggleTV))
+		var ownTVToggled = true;// TODO: only make it available for player pet
+		if(ownTVToggled )
 		{
-			if (!TVTurnedOn)
+			ImGui.Text("Start your TV: ");
+			ImGui.SameLine();
+			if (ImGui.Button(buttonToggleTV))
 			{
-				TurnOnTV();
-			}
-			else
-			{
-				TurnOffTV();
+				if (!TVTurnedOn)
+				{
+					TurnOnOwnTV();
+				}
+				else
+				{
+					TurnOffTV();
+				}
 			}
 		}
+		else ImGui.Text("");
+
 
 		ImGui.Text("");
 		/*
@@ -112,141 +228,293 @@ public class MainWindow : Window, IDisposable
 		ImGui.Text("+");
 		ImGui.Text("");
 		*/
-		ImGui.Text("Connection Settings:");
-		if (TVTurnedOn)
+		if (ownTVToggled)
 		{
-			ImGui.BeginDisabled();
+			ImGui.Text("Connection Settings:");
+			if (TVTurnedOn)
+			{
+				ImGui.BeginDisabled();
+			}
+			ImGui.Text("  URL  ");
+			ImGui.SameLine();
+			ImGui.InputText("##URL", ref inputURL, 1000, ImGuiInputTextFlags.NoHorizontalScroll);
+			ImGui.Text("  CSS  ");
+			ImGui.SameLine();
+			ImGui.InputText("##CSS", ref inputCSS, 1000, ImGuiInputTextFlags.NoHorizontalScroll);
+			if (TVTurnedOn)
+			{
+				ImGui.EndDisabled();
+			}
 		}
-		ImGui.Text("  URL  ");
-		ImGui.SameLine();
-		ImGui.InputText("##URL", ref inputURL, 1000, ImGuiInputTextFlags.NoHorizontalScroll);
-		ImGui.Text("  CSS  ");
-		ImGui.SameLine();
-		ImGui.InputText("##CSS", ref inputCSS, 1000, ImGuiInputTextFlags.NoHorizontalScroll);
-		if (TVTurnedOn)
+		else
 		{
-			ImGui.EndDisabled();
+			ImGui.Text("");
+			ImGui.Text("");
+			ImGui.Text("");
 		}
 
-		/*
 		ImGui.Text("");
-		ImGui.Text("Debug info: ");
-		foreach (var item in _currentTVs)
+		ImGui.Text("");
+		ImGui.Text("Other TVs:");
+		var npcList = Services.ObjectTable.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.YalmDistanceX);
+		foreach (var item in npcList)
 		{
-			ImGui.Text(item.Key.ToString() + " - " + item.Value.ToString());
+			if (item.EntityId != Services.ClientState.LocalPlayer.EntityId && _currentOwners.TryGetValue(item.EntityId, out _))
+			{
+				if (!_currentURLs.TryGetValue(item.EntityId, out var url)) continue;
+				var validUrl = url.StartsWith("picto:");
+				ImGui.Text(item.Name.TextValue + " ");
+				ImGui.SameLine();
+				_currentToggle.TryGetValue(item.EntityId, out var toggle);
+				if (!validUrl) { ImGui.BeginDisabled();  }
+				if (ImGui.Button((validUrl ? (toggle ? ">Turn Off<##" : ">Turn On<##") : "-Turned Off By Host-##") + item.EntityId))
+				{
+					if (!toggle)
+					{
+						if (_currentURLs.TryGetValue(item.EntityId, out _))
+						{
+							_currentToggle[item.EntityId] = true;
+							NavigateNewURL(item.EntityId, url);
+						}
+					}
+					else
+					{
+						_currentToggle[item.EntityId] = false;
+						_plugin.NavigatePictomaticWindow("pictomatic" + item.EntityId, "about:blank", "");
+					}
+				}
+				if (!validUrl) { ImGui.EndDisabled(); }
+
+			}
+		}
+		/*
+		ImGui.Text("Debug info: " );
+		foreach (var item in _currentURLs)
+		{
+			ImGui.Text("URL for " + item.Key + " " + item.Value);
+		}
+
+		foreach (var item in _currentOwners)
+		{
+			ImGui.Text("Owner for " + item.Key + " " + item.Value);
+		}
+
+		foreach (var item in _currentToggle)
+		{
+			ImGui.Text("Toggle for " + item.Key + " " + item.Value);
+		}
+
+		
+		var npcList = Services.ObjectTable.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.YalmDistanceX);
+		foreach (var item in npcList)
+		{
+			ImGui.Text("NPC: " + item.Name);
+			ImGui.Text("ID: " + item.GameObjectId); //Player ID
+		}
+		
+		var carbList = Services.ObjectTable.Where(x => x is IBattleChara).Cast<IBattleChara>().OrderBy(x => x.YalmDistanceX);
+		foreach (var item in carbList)
+		{
+			var character = (Character*)item.Address; 
+			ImGui.Text("ID: " + character->CompanionOwnerId); //Carbuncle Owner ID
+		}
+		
+		
+		unsafe
+		{
+			var ratkm = Framework.Instance()->GetUIModule()->GetRaptureAtkModule();
+			for (var i = 0; i < 100 && i < ratkm->NameplateInfoCount; i++)
+			{
+				var npi = ratkm->NamePlateInfoEntries.GetPointer(i);
+				if (npi->ObjectId.ObjectId == 0) continue;
+				ImGui.Text("Title: for " + npi->ObjectId.ObjectId + " " + MemoryHelper.ReadSeString(&npi->DisplayTitle));
+			}
 		}
 		*/
 	}
 
+	private unsafe void TryRemoveTV(uint ownerId)
+	{
+		if(_currentOwners.TryGetValue(ownerId, out var TV))
+		{
+			_currentToggle.Remove(ownerId);
+			if (_currentOverlays.TryGetValue("pictomatic" + ownerId, out _))
+			{
+				_plugin.RemovePictomaticWindow(ownerId);
+				_currentOverlays.Remove("pictomatic" + ownerId);
+			}
+			_currentOwners.Remove(ownerId);
+			fixed (byte* Bptr = _blankCanvas) //Put a Black Canvas on the TV
+			{
+				var TVdraw = (CharacterBase*)TV;
+				TVdraw->Models[0]->Materials[1]->Textures[3].Texture->Texture->InitializeContents((void*)Bptr);
+			}
+		}
+	}
+
+	internal void UpdateTitle(uint entityId, string title)
+	{
+		var hasValue = _currentURLs.TryGetValue(entityId, out var titleOld);
+		if (hasValue)
+		{
+			if(_currentToggle.TryGetValue(entityId, out var toggle)) //IF TV EXISTS
+			{
+				if(toggle) //IF TV IS ON
+				{
+					if (title != titleOld)
+					{
+						if (title.StartsWith("picto:")) 
+						{
+							NavigateNewURL(entityId, title); //CHANGE URL
+						}
+						else
+						{
+							TryRemoveTV(entityId); //COMPLETELY REMOVE
+						}
+					}
+				}
+				else //IF TV IS OFF
+				{
+					_currentURLs[entityId] = title;
+				}
+			}
+			else //IF TV DOESNT EXIST
+			{
+				_currentURLs[entityId] = title;
+			}
+		} 
+		else
+		{
+			_currentURLs[entityId] = title;
+		}
+	}
+
 	private long _lastMilliSecond = 0;
-	public void RefreshTV()
+	public void RefreshTVs()
 	{
 		//Check for Texture Updates once per sec
 		if (_lastMilliSecond + 500 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 		{
-			CheckAllTVs();
+			if (_lastMilliSecond == 0)
+			{
+				_plugin.ClearPictomaticWindows();
+			}
 			_lastMilliSecond = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+			CheckAllTVs();
 		}
-		
-		
 	}
 
-	private unsafe void CheckAllTVs()
+	private void CheckTitles()
 	{
-		if (_flagForRedraw)
+		unsafe
 		{
-			foreach (var item in _currentTVs)
-			{
-				if (item.Key == item.Value)
-					ReassignTextureForTV(item.Key);
-			}
-			_flagForRedraw = false;
-		}
+			var ratkm = Framework.Instance()->GetUIModule()->GetRaptureAtkModule();
 
-		var pointers = Services.ObjectTable;
-		
-		List<IntPtr> visitedTvs = new List<IntPtr>();
-		var npcList = pointers.Where(x => x is INpc).Cast<INpc>().OrderBy(x => x.YalmDistanceX);
-		foreach(var item in npcList)
-		{
-			if(item.Name.TextValue == "Plush Cushion")
+			for (var i = 0; i < 50 && i < ratkm->NameplateInfoCount; i++)
 			{
-				var character = (Companion*)item.Address;
-				if (character != null)
+				var npi = ratkm->NamePlateInfoEntries.GetPointer(i);
+				if (npi->ObjectId.ObjectId == 0) continue;
+				var cleanTitle = MemoryHelper.ReadSeString(&npi->DisplayTitle).TextValue;
+				if (cleanTitle.Length > 2)
 				{
-					if (character->DrawObject->GetObjectType() == ObjectType.CharacterBase)
+					cleanTitle = cleanTitle.Substring(1, cleanTitle.Length - 2);
+					if (_currentURLs.TryGetValue(npi->ObjectId.ObjectId, out var titleold))
 					{
-						var tvDraw = (CharacterBase*)character->DrawObject;
-						if (tvDraw->Models[0]->Materials[1] is not null)
-							if (tvDraw->Models[0]->Materials[1]->TextureCount >= 4)
-							{
-								visitedTvs.Add((IntPtr)tvDraw);
-								CheckTV(tvDraw);
-							}
+						if (titleold != cleanTitle)
+						{
+							UpdateTitle(npi->ObjectId.ObjectId, cleanTitle);
+						}
+					}
+					else
+					{
+						UpdateTitle(npi->ObjectId.ObjectId, cleanTitle);
 					}
 				}
 			}
 		}
-
-		
-		//Remove unvisited TVs
-		_currentTVs.Where(x => !visitedTvs.Contains(x.Key)).Select(x => x.Key).ToList().ForEach(x=>_currentTVs.Remove(x));
-
-		//No TVs have been visited, turn off pictomatic
-		if (visitedTvs.Count == 0 && TVTurnedOn)
-			TurnOffTV();
 	}
 
-	private unsafe void CheckTV(CharacterBase* tvDraw)
+	public void TurnOffTV()
 	{
-		IntPtr txtPtrNew = (IntPtr)tvDraw->Models[0]->Materials[1]->Textures[3].Texture->Texture->D3D11Texture2D;
-		IntPtr ptr = (IntPtr)tvDraw;
-		IntPtr txtPtrOld;
-		if(_currentTVs.TryGetValue(ptr, out txtPtrOld))
+		var playerId = Services.ClientState.LocalPlayer.EntityId;
+		Services.CommandManager.ProcessCommand("/honorific force clear");
+		TVTurnedOn = false;
+		_currentToggle[playerId] = false;
+		_plugin.NavigatePictomaticWindow("pictomatic" + playerId, "about:blank", "");
+	}
+
+	private async void TurnOnOwnTV()
+	{
+		var playerId = Services.ClientState.LocalPlayer.EntityId;
+		TVTurnedOn = true;
+		if (inputURL == lastInputURL && inputCSS == lastInputCSS)
 		{
-			if(txtPtrOld != txtPtrNew)
+			Services.CommandManager.ProcessCommand("/honorific force set picto:" + shortenedInputURL + "|silent");
+			_currentToggle[playerId] = true;
+			UpdateTitle(Services.ClientState.LocalPlayer.EntityId, "picto:" + shortenedInputURL);
+		}
+		else
+		{
+			await ShortenURL(inputURL, inputCSS, result =>
 			{
-				_currentTVs[ptr] = ReassignTextureForTV(ptr);
+				lastInputURL = inputURL;
+				lastInputCSS = inputCSS;
+				shortenedInputURL = result.Split("/").Last(); Services.CommandManager.ProcessCommand("/honorific force set picto:" + shortenedInputURL + "|silent");
+				_currentToggle[playerId] = true;
+				UpdateTitle(Services.ClientState.LocalPlayer.EntityId, "picto:" + shortenedInputURL);
+			}, error => TVTurnedOn = false);
+		}
+		
+	}
+	public async System.Threading.Tasks.Task ShortenURL(string inputURL, string inputCSS, URLShortenerCallback callback, URLShortenerErrorCallback error)
+	{
+		using (HttpClient client = new HttpClient())
+		{
+			try
+			{
+				HttpResponseMessage response = await client.GetAsync("https://is.gd/create.php?format=simple&url=" + Uri.EscapeDataString(inputURL + "picto:" + inputCSS));
+				response.EnsureSuccessStatusCode();
+				string responseBody = await response.Content.ReadAsStringAsync();
+
+				callback(responseBody);
+			}
+			catch (HttpRequestException e)
+			{
+				error(e.Message);
+				Services.Log.Error(e.Message + e.StackTrace);
 			}
 		}
-		else
-		{
-			_currentTVs.Add(ptr, ReassignTextureForTV(ptr));
-		}
 	}
 
-	private ShaderResourceView _view;
-	private unsafe IntPtr ReassignTextureForTV(IntPtr TVaddr)
+	private async System.Threading.Tasks.Task FetchURLData(string url, URLFetchCallback callback)
 	{
-		var TV = (CharacterBase*)TVaddr;
-
-		//TV is off or theres no shared texture to assign
-		if(!TVTurnedOn || _currentSharedTexture is null)
-			return ResetTV(TVaddr);
-
-		var _textureSource = _currentSharedTexture;
-		ShaderResourceView view;
-		if (_view is null)
-			view = new(DxHandler.Device, _textureSource, new ShaderResourceViewDescription { Format = _textureSource.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = _textureSource.Description.MipLevels } });
-		else
-			view = _view;
-		// Obtain the native pointers
-		void* D3D11Texture2D = (void*)_textureSource.NativePointer;
-		TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->D3D11Texture2D = D3D11Texture2D;
-		void* D3D11ShaderResourceView = (void*)view.NativePointer;
-		TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->D3D11ShaderResourceView = D3D11ShaderResourceView;
-
-		return (IntPtr)D3D11Texture2D;
-	}
-
-	public unsafe void UpdateSharedDXTexture(Texture2D _textureSource, InlayConfiguration config)
-	{
-		if(config.Name != "pictomatic")
+		using (HttpClientHandler handler = new HttpClientHandler())
 		{
-			return;
+			handler.AllowAutoRedirect = false;
+
+			using (HttpClient client = new HttpClient(handler))
+			{
+				try
+				{
+					HttpResponseMessage response = await client.GetAsync(url);
+
+					if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400)
+					{
+						// Get the Location header value
+						if (response.Headers.Location != null)
+						{
+							callback(response.Headers.Location.ToString());
+							return;
+						}
+					}
+					Services.Log.Debug("Request exception: Shortlink returned 200");
+				}
+				catch (HttpRequestException e)
+				{
+					Services.Log.Debug("Request exception: " + e.Message + e.StackTrace);
+				}
+			}
 		}
-		_currentSharedTexture = _textureSource;
-		_flagForRedraw = true;
 	}
 }
 
