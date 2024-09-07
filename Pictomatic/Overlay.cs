@@ -114,7 +114,8 @@ internal class Overlay : IDisposable
 			return;
 		}
 
-		ImGui.SetNextWindowSize(new Vector2(2048, 2048), ImGuiCond.FirstUseEver);
+		ImGui.SetNextWindowSize(new Vector2(0, 0), ImGuiCond.FirstUseEver);
+		ImGui.SetWindowPos(new Vector2(-3048, -3048), ImGuiCond.FirstUseEver);
 		ImGui.Begin($"{_overlayConfig.Name}###{_overlayConfig.Guid}", GetWindowFlags());
 
 		if (_overlayConfig.Fullscreen)

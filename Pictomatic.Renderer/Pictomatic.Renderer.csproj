@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
@@ -49,6 +49,7 @@
 			<IncludeAssets>runtime; compile; build; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
 		<PackageReference Include="SharedMemory" Version="2.3.2" />
+		<PackageReference Include="System.Management" Version="8.0.0" />
 	</ItemGroup>
 
 	<ItemGroup>

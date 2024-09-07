@@ -8,6 +8,7 @@ using RequestContextSettings = CefSharp.RequestContextSettings;
 using Size = System.Drawing.Size;
 using WindowInfo = CefSharp.WindowInfo;
 using System.Reflection.Metadata;
+using System.Threading;
 
 namespace Pictomatic.Renderer;
 
@@ -45,7 +46,7 @@ internal class Overlay : IDisposable
 		}
 	}
 
-	public void Initialise()
+	public void Initialise(Guid guid)
 	{
 		var requestContextSettings = new RequestContextSettings
 		{

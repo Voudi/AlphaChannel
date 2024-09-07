@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace Pictomatic.Renderer;
 
@@ -15,12 +16,14 @@ internal static class Program
 	private static Thread? _parentWatchThread;
 	private static EventWaitHandle? _waitHandle;
 
-	private static RendererRpc _rpc = null!;
+	public static RendererRpc _rpc = null!;
 
 	private static readonly Dictionary<Guid, Overlay> _overlays = new();
 
 	private static bool _isShuttingDown;
 	private static readonly object _lockIpc = new();
+
+	private static ProcessMonitor _monitor = new ProcessMonitor();
 
 	private static void Main(string[] rawArgs)
 	{
@@ -53,6 +56,14 @@ internal static class Program
 		bool dxRunning = DxHandler.Initialise(args.DxgiAdapterLuid);
 		CefHandler.Initialise(_cefAssemblyDir, args.CefCacheDir, args.ParentPid);
 
+		//Start SubProcessmonitoring Processes
+		_monitor.ProcessStarted += (processId, processName) =>
+		{
+			_ = _rpc.AddSubProcess(processId);
+		};
+
+		_monitor.StartMonitoring();
+
 		InitializeIpc(args.IpcChannelName);
 
 		Console.WriteLine("Notifying on ready state.");
@@ -71,6 +82,7 @@ internal static class Program
 
 		DxHandler.Shutdown();
 		CefHandler.Shutdown();
+		_monitor.StopMonitoring();
 	}
 
 	// TODO: move RPC stuff away
@@ -151,7 +163,7 @@ internal static class Program
 			}
 
 			Overlay overlay = new(msg.Id, msg.Url, msg.Zoom, msg.Muted, msg.Framerate, msg.CustomCss, renderHandler);
-			overlay.Initialise();
+			overlay.Initialise(guid);
 			_overlays.Add(guid, overlay);
 
 			renderHandler.CursorChanged += (o, cursor) =>

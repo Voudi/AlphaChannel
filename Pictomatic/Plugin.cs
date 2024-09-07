@@ -146,6 +146,14 @@ public class Plugin : IDalamudPlugin
 				}
 			});
 		};
+		_renderProcess.Rpc.AddSubProcess += msg =>
+		{
+			Services.Framework.RunOnFrameworkThread(() =>
+			{
+				Guid guid = new(msg.Guid.Span);
+				this.MainWindow.AddSubProcess(guid, msg.ProcessId);
+			});
+		};
 		_renderProcess.Start();
 
 		// Prep settings

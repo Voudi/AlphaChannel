@@ -128,6 +128,8 @@ internal class TextureRenderHandler : IRenderHandler
 			int rowPitch = width * _bytesPerPixel;
 			int depthPitch = rowPitch * height;
 
+			if (targetTexture is null)
+				return;
 			// Build the destination region for the dirty rect that we'll draw to
 			D3D11.Texture2DDescription texDesc = targetTexture.Description;
 			IntPtr sourceRegionPtr = buffer + (dirtyRect.X * _bytesPerPixel) + (dirtyRect.Y * rowPitch);

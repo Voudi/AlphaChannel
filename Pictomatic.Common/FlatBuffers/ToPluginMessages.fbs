@@ -13,6 +13,11 @@ table UpdateTextureMessage (fs_serializer) {
     TextureHandle : ulong;
 }
 
+table AddSubProcessMessage (fs_serializer) {
+    Guid : [ubyte] (required);
+    ProcessId : int;
+}
+
 table SetCursorMessage (fs_serializer) {
     Cursor: Cursor;
     Guid: [ubyte] (required);

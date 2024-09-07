@@ -10,6 +10,7 @@ public class BrowsingwayRpc(string name) : IpcBase(name)
 	public event Action<SetCursorMessage>? SetCursor;
 	public event Action<RendererReadyMessage>? RendererReady;
 	public event Action<UpdateTextureMessage>? UpdateTexture;
+	public event Action<AddSubProcessMessage>? AddSubProcess;
 
 	// calls to the renderer
 	public async Task NewOverlay(NewOverlayMessage msg)
@@ -74,6 +75,9 @@ public class BrowsingwayRpc(string name) : IpcBase(name)
 				break;
 			case { UpdateTexture: not null }:
 				UpdateTexture?.Invoke(call.UpdateTexture);
+				break;
+			case { AddSubProcess: not null }:
+				AddSubProcess?.Invoke(call.AddSubProcess);
 				break;
 		}
 	}

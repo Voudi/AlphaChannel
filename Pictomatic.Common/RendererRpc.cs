@@ -27,6 +27,11 @@ public class RendererRpc(string name) : IpcBase(name)
 		await SendCall(new RpcCall() { UpdateTexture = new UpdateTextureMessage() { Guid = id.ToByteArray(), TextureHandle = (ulong)textureHandle } });
 	}
 
+	public async Task AddSubProcess(int processId)
+	{
+		await SendCall(new RpcCall() { AddSubProcess = new AddSubProcessMessage() { Guid = Guid.NewGuid().ToByteArray(), ProcessId = processId } });
+	}
+
 	public async Task SetCursor(SetCursorMessage msg)
 	{
 		await SendCall(new RpcCall() { SetCursor = msg });

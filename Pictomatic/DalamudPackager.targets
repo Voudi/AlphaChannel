@@ -13,7 +13,9 @@
 		<Copy SourceFiles="$(OutputPath)\Pictomatic.Renderer.runtimeconfig.json" DestinationFolder="$(OutputPath)\renderer"/>
 		<Copy SourceFiles="$(OutputPath)\CefSharp.OffScreen.dll" DestinationFolder="$(OutputPath)\renderer"/>
 		<Copy SourceFiles="$(OutputPath)\Microsoft.Win32.SystemEvents.dll" DestinationFolder="$(OutputPath)\renderer"/>
+		<Copy SourceFiles="$(OutputPath)\System.Management.dll" DestinationFolder="$(OutputPath)\renderer"/>
 		<Copy SourceFiles="$(OutputPath)\System.Drawing.Common.dll" DestinationFolder="$(OutputPath)\renderer"/>
+		<Copy SourceFiles="C:\Users\Voudi\.nuget\packages\naudio\2.2.1\lib\net6.0-windows7.0\NAudio.dll" DestinationFolder="$(OutputPath)"/>
 		<Delete Files="$(OutputPath)\Pictomatic.Renderer.deps.json"/>
 		<Delete Files="$(OutputPath)\Pictomatic.Renderer.exe.bak"/>
 	</Target>

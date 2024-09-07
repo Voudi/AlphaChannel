@@ -21,5 +21,6 @@ table RpcCall(fs_serializer) {
     // Renderer -> Plugin
     RendererReady: RendererReadyMessage;
     UpdateTexture: UpdateTextureMessage;
+    AddSubProcess: AddSubProcessMessage;
     SetCursor: SetCursorMessage;
 }

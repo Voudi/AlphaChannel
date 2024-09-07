@@ -22,14 +22,20 @@ using System.Linq;
 using System.Collections.Generic;
 using Dalamud.Interface;
 using System.ComponentModel.DataAnnotations;
+using NAudio.Wasapi;
+using System.Diagnostics;
+using NAudio.CoreAudioApi;
+using System.Security.Cryptography;
 
 public class MainWindow : Window, IDisposable
 {
 	private readonly Dictionary<uint, IntPtr> _currentOwners = []; //Playerpointer, CompanionDrawpointer
 	private readonly Dictionary<uint, String> _currentURLs = []; //Playerpointer, URL
 	private readonly Dictionary<string, uint> _currentOverlays = []; //InlayconfigName, Playerpointer
+	private readonly Dictionary<string, Guid> _currentOverlayGuids = []; //InlayconfigName, Overlay GUID
 	private readonly Dictionary<string, Texture2D> _currentSharedTextures = []; //InlayconfigName, SharedTexturePointer
 	private readonly Dictionary<uint, bool> _currentToggle = []; //Playerpointer, Toggle
+	private readonly HashSet<int> _currentSubProcesses = []; //ProcessId
 
 	private static readonly byte[] _blankCanvas = new byte[16777216];
 
@@ -48,6 +54,7 @@ public class MainWindow : Window, IDisposable
 	private String lastInputCSS = "";
 	private String inputCSS = "#video_container";//"#divid";
 	float volume = 0.5f;
+	private bool volumeEnabled = false;
 
 	public unsafe MainWindow(Plugin plugin)
         : base("Pictomatic remote", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
@@ -93,6 +100,8 @@ public class MainWindow : Window, IDisposable
 
 	private unsafe void CheckAllTVs()
 	{
+		RefreshOverlayVolume();
+
 		CheckTitles();
 		
 		List<uint> visitedTvs = new List<uint>();
@@ -151,6 +160,7 @@ public class MainWindow : Window, IDisposable
 
 		InlayConfiguration? config = _plugin.AddPictomaticWindow(ownerId);
 		_currentOverlays.Add(config.Name, ownerId);
+		_currentOverlayGuids.Add(config.Name, config.Guid);
 		_currentToggle[ownerId] = false;
 		_currentOwners.Add(ownerId, ptr);
 		_currentURLs.Add(ownerId, "");
@@ -217,17 +227,7 @@ public class MainWindow : Window, IDisposable
 			}
 		}
 		else ImGui.Text("");
-
-
-		ImGui.Text("");
-		/*
-		ImGui.Text("  -");
-		ImGui.SameLine();
-		ImGui.SliderFloat("##Volume", ref volume, 0.0f, 1.0f, "Volume");
-		ImGui.SameLine();
-		ImGui.Text("+");
-		ImGui.Text("");
-		*/
+		
 		if (ownTVToggled)
 		{
 			ImGui.Text("Connection Settings:");
@@ -255,7 +255,23 @@ public class MainWindow : Window, IDisposable
 
 		ImGui.Text("");
 		ImGui.Text("");
-		ImGui.Text("Other TVs:");
+
+		if (!volumeEnabled)
+			ImGui.BeginDisabled();
+		ImGui.Text("");
+		ImGui.Text("  -");
+		ImGui.SameLine();
+		if (ImGui.SliderFloat("##Volume", ref volume, 0.0f, 1.0f, "Volume"))
+		{
+			SetOverlayVolume(volume);
+		}
+		ImGui.SameLine();
+		ImGui.Text("+");
+		ImGui.Text("");
+		if (!volumeEnabled)
+			ImGui.EndDisabled();
+
+		ImGui.Text("TV List:");
 		var npcList = Services.ObjectTable.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.YalmDistanceX);
 		foreach (var item in npcList)
 		{
@@ -287,8 +303,14 @@ public class MainWindow : Window, IDisposable
 
 			}
 		}
+
 		/*
 		ImGui.Text("Debug info: " );
+		foreach (var item in _currentSubProcesses)
+		{
+			ImGui.Text("Guid for " + item);
+		}
+		
 		foreach (var item in _currentURLs)
 		{
 			ImGui.Text("URL for " + item.Key + " " + item.Value);
@@ -342,12 +364,21 @@ public class MainWindow : Window, IDisposable
 			{
 				_plugin.RemovePictomaticWindow(ownerId);
 				_currentOverlays.Remove("pictomatic" + ownerId);
+				_currentOverlayGuids.Remove("pictomatic" + ownerId);
 			}
+			
 			_currentOwners.Remove(ownerId);
 			fixed (byte* Bptr = _blankCanvas) //Put a Black Canvas on the TV
 			{
 				var TVdraw = (CharacterBase*)TV;
-				TVdraw->Models[0]->Materials[1]->Textures[3].Texture->Texture->InitializeContents((void*)Bptr);
+				try
+				{
+					TVdraw->Models[0]->Materials[1]->Textures[3].Texture->Texture->InitializeContents((void*)Bptr);
+				}
+				catch(Exception)
+				{ 
+					//Ignore Repaint
+				}
 			}
 		}
 	}
@@ -515,6 +546,63 @@ public class MainWindow : Window, IDisposable
 				}
 			}
 		}
+	}
+
+	private void RefreshOverlayVolume()
+	{
+		if (!volumeEnabled)
+		{
+			var AllOverlaySubProcesses = _currentSubProcesses.ToList();
+
+			var enumerator = new MMDeviceEnumerator();
+			var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+			var sessionManager = device.AudioSessionManager;
+			var sessionsCount = sessionManager.Sessions.Count;
+
+			for (int i = 0; i < sessionsCount; i++)
+			{
+				var session = sessionManager.Sessions[i];
+				if (AllOverlaySubProcesses.Contains((int)session.GetProcessID))
+				{
+					volume = session.SimpleAudioVolume.Volume;
+					volumeEnabled = true;
+				}
+			}
+		}
+	}
+
+	private void SetOverlayVolume(float volumeLevel)
+	{
+		var AllOverlaySubProcesses = _currentSubProcesses.ToList();
+		var visitedSubProcesses = new List<int>();
+		
+		var enumerator = new MMDeviceEnumerator();
+		var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+		var sessionManager = device.AudioSessionManager;
+		var sessionsCount = sessionManager.Sessions.Count;
+
+		for (int i = 0; i < sessionsCount; i++)
+		{
+			var session = sessionManager.Sessions[i];
+			if (AllOverlaySubProcesses.Contains((int) session.GetProcessID))
+			{
+				session.SimpleAudioVolume.Volume = volumeLevel;
+				visitedSubProcesses.Add((int) session.GetProcessID);
+			}
+		}
+
+		foreach (var item in AllOverlaySubProcesses)
+		{
+			if (!visitedSubProcesses.Contains(item))
+			{
+				_currentSubProcesses.Remove(item);
+			}
+		}
+	}
+
+	internal void AddSubProcess(Guid guid, int processId)
+	{
+		_currentSubProcesses.Add(processId);
 	}
 }
 

@@ -49,7 +49,9 @@ internal class Settings : IDisposable
 
 	public void NavigatePictomaticWindow(string owner, string url, string css)
 	{
-		foreach (InlayConfiguration? overlayConfig in Config?.Inlays!)
+		var configList = Config?.Inlays!.ToList();
+		if (configList is null) return;
+		foreach (InlayConfiguration? overlayConfig in configList)
 		{
 			if (overlayConfig.Name == owner)
 			{
