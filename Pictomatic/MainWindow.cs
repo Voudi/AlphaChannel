@@ -507,6 +507,10 @@ public class MainWindow : Window, IDisposable
 				response.EnsureSuccessStatusCode();
 				string responseBody = await response.Content.ReadAsStringAsync();
 
+				if (responseBody.Contains("Error:"))
+				{
+					error(String.Empty);
+				}
 				callback(responseBody);
 			}
 			catch (HttpRequestException e)
