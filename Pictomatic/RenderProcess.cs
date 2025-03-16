@@ -37,7 +37,6 @@ internal class RenderProcess : IDisposable
 		_parentPid = pid;
 
 		Rpc = new BrowsingwayRpc(_ipcChannelName);
-
 		_process = SetupProcess();
 	}
 
@@ -153,17 +152,17 @@ internal class RenderProcess : IDisposable
 
 	private Process SetupProcess()
 	{
-		string cefAssemblyDir = _dependencyManager.GetDependencyPathFor("cef");
-
+		string cefAssemblyDir = _dependencyManager.GetDependencyPathFor("ublock");
 		RenderParams processArgs = new()
 		{
 			ParentPid = _parentPid,
 			DalamudAssemblyDir = Path.GetDirectoryName(typeof(IPluginLog).Assembly.Location)!,
 			CefAssemblyDir = cefAssemblyDir,
-			CefCacheDir = Path.Combine(_configDir, "cef-cache"),
+			CefCacheDir = Path.Combine(_configDir, "webview-cache"),
 			DxgiAdapterLuid = DxHandler.AdapterLuid,
 			KeepAliveHandleName = _keepAliveHandleName,
-			IpcChannelName = _ipcChannelName
+			IpcChannelName = _ipcChannelName,
+			PluginDir = _pluginDir
 		};
 
 		Process process = new();

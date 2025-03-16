@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<TargetFramework>net8.0-windows</TargetFramework>
+		<TargetPlatformIdentifier>Windows</TargetPlatformIdentifier>
+		<TargetFramework>net9.0-windows7.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<Configurations>Release;Debug</Configurations>
@@ -11,20 +12,21 @@
 		<Version>1.6.2.0</Version>
 		<OutputPath>..\out</OutputPath>
 		<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+		<UseWindowsForms>true</UseWindowsForms>
 	</PropertyGroup>
 
 	<PropertyGroup>
 		<DalamudLibPath>$(appdata)\XIVLauncher\addon\Hooks\dev\</DalamudLibPath>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
-
 	<ItemGroup>
-		<PackageReference Include="DalamudPackager" Version="2.1.13" />
+		<PackageReference Include="DalamudPackager" Version="11.0.0" />
+		<PackageReference Include="Lumina" Version="5.6.1" />
 		<PackageReference Include="NAudio.Core" Version="2.2.1" />
 		<PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
 		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
 		<PackageReference Include="SharedMemory" Version="2.3.2" />
-		<PackageReference Include="System.Drawing.Common" Version="8.0.7" />
+		<PackageReference Include="System.Drawing.Common" Version="9.0.0" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -42,18 +44,6 @@
 		</Reference>
 		<Reference Include="ImGuiScene">
 			<HintPath>$(DalamudLibPath)ImGuiScene.dll</HintPath>
-			<Private>false</Private>
-		</Reference>
-		<Reference Include="SharpDX">
-			<HintPath>$(DalamudLibPath)SharpDX.dll</HintPath>
-			<Private>false</Private>
-		</Reference>
-		<Reference Include="SharpDX.Direct3D11">
-			<HintPath>$(DalamudLibPath)SharpDX.Direct3D11.dll</HintPath>
-			<Private>false</Private>
-		</Reference>
-		<Reference Include="SharpDX.DXGI">
-			<HintPath>$(DalamudLibPath)SharpDX.DXGI.dll</HintPath>
 			<Private>false</Private>
 		</Reference>
 	</ItemGroup>

@@ -7,6 +7,8 @@ internal static class DxHandler
 {
 	public static D3D11.Device? Device { get; private set; }
 
+	public static long AdapterLuid { get; private set; }
+
 	public static bool Initialise(long adapterLuid)
 	{
 		// Find the adapter matching the luid from the parent process
@@ -28,6 +30,7 @@ internal static class DxHandler
 			return false;
 		}
 
+		AdapterLuid = adapterLuid;
 		// Use the adapter to build the device we'll use
 		D3D11.DeviceCreationFlags flags = D3D11.DeviceCreationFlags.BgraSupport;
 #if DEBUG

@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Pictomatic.WebViewApp (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "Pictomatic.WebViewApp (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

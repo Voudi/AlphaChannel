@@ -7,6 +7,7 @@ using System.Net;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace Pictomatic;
 
@@ -17,13 +18,14 @@ internal class Dependency
 	public readonly string Url;
 	public readonly string Version;
 
-	public Dependency(string url, string directory, string version, string checksum)
+	public Dependency(string url, string directory, string version, string? checksum = null)
 	{
 		Directory = directory;
 		Url = url;
 		Version = version;
-		Checksum = checksum;
+		Checksum = checksum ?? String.Empty;
 	}
+
 }
 
 public class DependencyManager : IDisposable
@@ -39,12 +41,7 @@ public class DependencyManager : IDisposable
 	private const short _depComplete = -2;
 	private const short _depFailed = -3;
 
-	private static readonly Dependency[] _dependencies =
-	{
-		new("https://github.com/Styr1x/Browsingway/releases/download/cef-binaries/cefsharp-{VERSION}.zip", "cef",
-			"126.2.7+g300bb05+chromium-126.0.6478.115",
-			"4CEEBB8248EE1DB5660BFAEC2F55C24513A573806F043CD6257BD59B4C2CC09A")
-	};
+	private readonly Dependency[] _dependencies;
 
 	private readonly string _debugCheckDir;
 
@@ -56,6 +53,9 @@ public class DependencyManager : IDisposable
 
 	public DependencyManager(string pluginDir, string pluginConfigDir)
 	{
+		_dependencies = [
+				new Dependency(GetUBlockDownloadURL().Result.Item1, "ublock" + GetUBlockDownloadURL().Result.Item2, "uBlock0.chromium")
+		];
 		_dependencyDir = Path.Join(pluginConfigDir, "dependencies");
 		_debugCheckDir = Path.GetDirectoryName(pluginDir) ?? pluginDir;
 		_texIcon = Services.TextureProvider.GetFromFile(Path.Combine(pluginDir, "icon.png"));
@@ -80,20 +80,36 @@ public class DependencyManager : IDisposable
 		}
 		else
 		{
-			_viewMode = ViewMode.Confirm;
+			_viewMode = ViewMode.Hidden;
+			InstallDependenciesSilent();
 		}
 	}
 
 	private bool DependencyMissing(Dependency dependency)
 	{
-		string versionFilePath = Path.Combine(GetDependencyPath(dependency), "VERSION");
-
-		string versionContents;
-		try { versionContents = File.ReadAllText(versionFilePath); }
-		catch { return true; }
-
-		return !versionContents.Contains(dependency.Version);
+		return !Directory.Exists(Path.Combine(GetDependencyPath(dependency), dependency.Version));
 	}
+
+	private void InstallDependenciesSilent()
+	{
+		if (_missingDependencies is null)
+		{
+			return; // nothing too do
+		}
+
+		Services.PluginLog.Info("Installing dependencies...");
+
+		IEnumerable<Task> installTasks = _missingDependencies.Select(InstallDependency);
+		Task.WhenAll(installTasks).ContinueWith(task =>
+		{
+			bool failed = _installProgress.Any(pair => pair.Value == _depFailed);
+			Services.PluginLog.Info($"Dependency install {_viewMode}. Failed? " + failed);
+
+			try { Directory.Delete(Path.Combine(_dependencyDir, _downloadDir), true); }
+			catch { }
+		});
+	}
+
 
 	private void InstallDependencies()
 	{
@@ -166,7 +182,7 @@ public class DependencyManager : IDisposable
 		}
 
 		// Make sure the checksum matches
-		if (downloadedChecksum != dependency.Checksum)
+		if (downloadedChecksum != dependency.Checksum && dependency.Checksum != String.Empty)
 		{
 			Services.PluginLog.Error(
 				$"Mismatched checksum for {filePath}: Got {downloadedChecksum} but expected {dependency.Checksum}");
@@ -190,7 +206,7 @@ public class DependencyManager : IDisposable
 
 	public string GetDependencyPathFor(string dependencyDir)
 	{
-		Dependency? dependency = _dependencies.First(dependency => dependency.Directory == dependencyDir);
+		Dependency? dependency = _dependencies.First(dependency => dependency.Directory.StartsWith(dependencyDir));
 		if (dependency == null) { throw new Exception($"Unknown dependency {dependencyDir}"); }
 
 		return GetDependencyPath(dependency);
@@ -309,6 +325,38 @@ public class DependencyManager : IDisposable
 				ImGui.ProgressBar(progress.Value / 100, progressSize);
 				ImGui.PopStyleColor();
 			}
+		}
+	}
+
+	private static async Task<Tuple<string, string>> GetUBlockDownloadURL()
+	{
+		string repoOwner = "gorhill";
+		string repoName = "uBlock";
+
+		string latestReleaseUrl = $"https://api.github.com/repos/{repoOwner}/{repoName}/releases/latest";
+
+		try
+		{
+			using (HttpClient client = new HttpClient())
+			{
+				client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0"); // GitHub API requires a User-Agent
+
+				HttpResponseMessage response = await client.GetAsync(latestReleaseUrl);
+				response.EnsureSuccessStatusCode();
+
+				string json = await response.Content.ReadAsStringAsync();
+				using JsonDocument doc = JsonDocument.Parse(json);
+				string? latestTag = doc.RootElement.GetProperty("tag_name").GetString();
+
+				string downloadUrl = $"https://github.com/{repoOwner}/{repoName}/releases/download/{latestTag}/uBlock0_{latestTag}.chromium.zip";
+
+				return Tuple.Create(downloadUrl, latestTag ?? String.Empty);
+			}
+		}
+		catch (Exception ex)
+		{
+			Services.Log.Error("Error fetching latest release: " + ex.Message);
+			return Tuple.Create(String.Empty, String.Empty);
 		}
 	}
 

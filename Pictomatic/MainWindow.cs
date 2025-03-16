@@ -1,7 +1,4 @@
-using System.Numerics;
-using System;
-using System.Net.Http;
-using System.Threading.Tasks;
+﻿using System.Numerics;
 using Pictomatic;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Interface.Windowing;
@@ -10,32 +7,45 @@ using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
 using ImGuiNET;
 using SharpDX.Direct3D11;
 using SharpDX.Direct3D;
-using static FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkHistory.Delegates;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Memory;
 using FFXIVClientStructs.FFXIV.Client.System.Framework;
 using FFXIVClientStructs.Interop;
-using System.Collections.Immutable;
-using Honorific;
-using static System.Net.WebRequestMethods;
-using System.Linq;
-using System.Collections.Generic;
-using Dalamud.Interface;
-using System.ComponentModel.DataAnnotations;
-using NAudio.Wasapi;
-using System.Diagnostics;
 using NAudio.CoreAudioApi;
-using System.Security.Cryptography;
+using Dalamud.Utility;
+using Dalamud.Interface;
+using NAudio.CoreAudioApi.Interfaces;
+using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Client.Graphics.Render;
+using Dalamud.Hooking;
+using static FFXIVClientStructs.FFXIV.Client.Graphics.Render.ModelRenderer;
+using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
+using static FFXIVClientStructs.FFXIV.Client.UI.Misc.GroupPoseModule;
+using System.Runtime.InteropServices;
+using Microsoft.VisualBasic;
+using FFXIVClientStructs.FFXIV.Client.System.File;
+using FFXIVClientStructs.FFXIV.Client.System.Resource.Handle;
+using FFXIVClientStructs.FFXIV.Client.Game.Object;
+using Lumina.Data;
+using Dalamud.Interface.Textures;
+using Dalamud.Interface.Textures.TextureWraps;
+using SharpDX.DXGI;
+using FFXIVClientStructs.FFXIV.Component.GUI;
+using FFXIVClientStructs.FFXIV.Client.Graphics.Vfx;
+using System.Reflection.Metadata;
 
 public class MainWindow : Window, IDisposable
 {
 	private readonly Dictionary<uint, IntPtr> _currentOwners = []; //Playerpointer, CompanionDrawpointer
 	private readonly Dictionary<uint, String> _currentURLs = []; //Playerpointer, URL
-	private readonly Dictionary<string, uint> _currentOverlays = []; //InlayconfigName, Playerpointer
-	private readonly Dictionary<string, Guid> _currentOverlayGuids = []; //InlayconfigName, Overlay GUID
-	private readonly Dictionary<string, Texture2D> _currentSharedTextures = []; //InlayconfigName, SharedTexturePointer
-	private readonly Dictionary<uint, bool> _currentToggle = []; //Playerpointer, Toggle
-	private readonly HashSet<int> _currentSubProcesses = []; //ProcessId
+	private readonly Dictionary<uint, String> _currentTitles = []; //Playerpointer, Title
+	private Texture2D _currentSharedTexture;
+	private uint _currentToggle; //Playerpointer (wether TV toggled or not)
+	private uint _currentActivatedTV = 0; //Playerpointer (wether TV toggled or not)
+	private nint _currentActiveTVTexturePointer = 0; //TexturePointer
+	private uint _currentAudioProcess;
+	private uint _currentSubProcess;
+	private unsafe List<IntPtr> _currentVFXTextures = new List<IntPtr>();
 
 	private static readonly byte[] _blankCanvas = new byte[16777216];
 
@@ -46,13 +56,11 @@ public class MainWindow : Window, IDisposable
 	public delegate void URLFetchCallback(string result);
 
 	//Render Vars
-	private String buttonToggleTV => TVTurnedOn ? ">Turn Off<" : ">Turn On<";
+	private String buttonExpandWindow = " >Expand TV<";
 	bool TVTurnedOn = false;
-	private String inputURL = "https://w2g.tv/en/room/?w2g_init=1&w2g_nick=Guest&room_id=6cf6i1hlqwlv05y83n";
-	private String shortenedInputURL = "";
-	private String lastInputURL = "";
-	private String lastInputCSS = "";
-	private String inputCSS = "#video_container";//"#divid";
+	private String _inputURL = "";
+	private String _shortenedURL = "";
+	private String _lastURL = "";
 	float volume = 0.5f;
 	private bool volumeEnabled = false;
 
@@ -67,42 +75,14 @@ public class MainWindow : Window, IDisposable
 		};
 
 		this._plugin = plugin;
+		initHook();
 	}
-
-	private async void NavigateNewURL(uint ownerId, string title)
-	{
-		_currentURLs[ownerId] = title;
-		if (ownerId != Services.ClientState.LocalPlayer.EntityId && (!_currentToggle.TryGetValue(ownerId, out var toggle) || !toggle))
-		{
-			return;
-		}
-		if (ownerId == Services.ClientState.LocalPlayer.EntityId && !TVTurnedOn)
-		{
-			return;
-		}
-		if (title.Length < 7 || !title.StartsWith("picto:"))
-		{
-			return;
-		}
-		var url = "https://is.gd/" + title.Substring("picto:".Length);
-		await FetchURLData(url, response => {
-			
-			if (response.Contains("picto:"))
-			{
-				var trueUrl = response.Split("picto:")[0];
-				var trueCSS = response.Split("picto:")[1];
-
-				_plugin.NavigatePictomaticWindow("pictomatic"+ownerId, trueUrl, trueCSS);
-			}
-		});
-	}
-
 
 	private unsafe void CheckAllTVs()
 	{
-		RefreshOverlayVolume();
+		RefreshVolume();
 
-		CheckTitles();
+		CheckTitles(); 
 		
 		List<uint> visitedTvs = new List<uint>();
 		var npcList = Services.ObjectTable.Where(x => x is IBattleNpc).Cast<IBattleNpc>().OrderBy(x => x.YalmDistanceX);
@@ -125,7 +105,7 @@ public class MainWindow : Window, IDisposable
 											{
 												var ownerId = character->CompanionOwnerId;
 												visitedTvs.Add(ownerId);
-												CheckTV(tvDraw, ownerId);
+												CheckOutPossibleTV(tvDraw, ownerId);
 											}
 						}
 						catch(Exception e){}
@@ -136,287 +116,383 @@ public class MainWindow : Window, IDisposable
 
 		//Remove unvisited TVs
 		_currentOwners.Where(owner => !visitedTvs.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
-		{
-			TryRemoveTV(ownerId);
+		{;
+			if (_currentToggle == ownerId)
+				TurnOffTV();
+			_currentOwners.Remove(ownerId);
 		});
 	}
 
-	private unsafe void CheckTV(CharacterBase* tvDraw, uint ownerId)
+	private unsafe void CheckOutPossibleTV(CharacterBase* tvDraw, uint ownerId)
 	{
+		
+
 		IntPtr ptr = (IntPtr)tvDraw;
-		if (_currentSharedTextures.TryGetValue("pictomatic" + ownerId, out _) && _currentOwners.TryGetValue(ownerId, out _))
+		var tvAddrFound = _currentOwners.TryGetValue(ownerId, out var tvAddr);
+		if (!tvAddrFound)
 		{
-			AssignTextureToTV(ownerId);
+			_currentOwners.Add(ownerId, ptr);
+			tvAddr = ptr;
 		}
-		else if(!_currentOwners.TryGetValue(ownerId, out _))
+		else if (tvAddrFound && tvAddr != ptr)
 		{
-			AddOtherPlayerTV(ptr, ownerId);
+			//Texturepointer has changed, assume no TV is running for it to get reassigned
+			_currentActivatedTV = 0;
+
+			_currentOwners[ownerId] = ptr;
 		}
-	}
-	private unsafe void AddOtherPlayerTV(IntPtr ptr, uint ownerId)
-	{
-		var TV = (CharacterBase*)ptr;
-		//TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->InitializeContents((void*)Bptr);
-
-		InlayConfiguration? config = _plugin.AddPictomaticWindow(ownerId);
-		_currentOverlays.Add(config.Name, ownerId);
-		_currentOverlayGuids.Add(config.Name, config.Guid);
-		_currentToggle[ownerId] = false;
-		_currentOwners.Add(ownerId, ptr);
-		_currentURLs.Add(ownerId, "");
-	}
-
-	private unsafe void ReassignTextureForTV(IntPtr TVaddr, Texture2D textureSource)
-	{
-		var TV = (CharacterBase*)TVaddr;
-
-		ShaderResourceView view = new(DxHandler.Device, textureSource, new ShaderResourceViewDescription { Format = textureSource.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = textureSource.Description.MipLevels } });
-
-		// Obtain the native pointers
-		void* D3D11Texture2D = (void*)textureSource.NativePointer;
-		TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->D3D11Texture2D = D3D11Texture2D;
-		void* D3D11ShaderResourceView = (void*)view.NativePointer;
-		TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->D3D11ShaderResourceView = D3D11ShaderResourceView;
-	}
-
-	public unsafe void UpdateSharedDXTexture(Texture2D _textureSource, InlayConfiguration config)
-	{
-		_currentSharedTextures[config.Name] = _textureSource;
-	}
-
-	private void AssignTextureToTV(uint ownerId)
-	{
-		var fullName = "pictomatic" + ownerId;
-		if (_currentOverlays.TryGetValue(fullName, out var owner))
+		
+		if (_currentToggle == ownerId) //This TV is supposed to be active...
 		{
-			if (_currentOwners.TryGetValue(owner, out var TVaddr))
+			if (_currentActivatedTV != _currentToggle) //...But it's not active
 			{
-				//Check if theres a SharedTexture waiting in the Pipeline for this Owner
-				if(_currentSharedTextures.TryGetValue(fullName, out var texture))
+				if (ReassignTextureForTV(tvAddr))
 				{
-					ReassignTextureForTV(TVaddr, texture);
-					_currentSharedTextures.Remove(fullName);
+					_currentActivatedTV = ownerId;
 				}
 			}
+		}
+	}
+
+	private unsafe bool ReassignTextureForTV(nint tvAddr)
+	{
+		if (_currentSharedTexture != null)
+		{
+			var TV = (CharacterBase*)tvAddr;
+			var textureSource = _currentSharedTexture;
+			ShaderResourceView view = new(DxHandler.Device, textureSource, new ShaderResourceViewDescription { Format = textureSource.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = textureSource.Description.MipLevels } });
+
+			_currentActiveTVTexturePointer = view.NativePointer;
+
+			// Obtain the native pointers
+			void* D3D11Texture2D = (void*)textureSource.NativePointer;
+			//TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->D3D11Texture2D = D3D11Texture2D;
+			void* D3D11ShaderResourceView = (void*)view.NativePointer;
+			//TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->D3D11ShaderResourceView = D3D11ShaderResourceView;
+
+			foreach(var currentTexturePointer in _currentVFXTextures.ToList())
+			{
+				if(currentTexturePointer == IntPtr.Zero)
+				{
+					_currentVFXTextures.Remove(currentTexturePointer);
+					continue;
+				}
+				var tex = ((Texture*)currentTexturePointer);
+				if(tex != null)
+				{
+					tex->D3D11Texture2D = D3D11Texture2D;
+					tex->D3D11ShaderResourceView = D3D11ShaderResourceView;
+				}
+			}
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	private unsafe void BlankOutTV(nint TV)
+	{
+		fixed (byte* Bptr = _blankCanvas) //Put a Black Canvas on the TV
+		{
+			var TVdraw = (CharacterBase*)TV;
+			try
+			{
+
+				TVdraw->Models[0]->Materials[1]->Textures[3].Texture->Texture->InitializeContents((void*)Bptr);
+			}
+			catch (Exception)
+			{
+				//Ignore Repaint
+			}
+		}
+	}
+
+	public void UpdateSharedDXTexture(IntPtr handle)
+	{
+		Texture2D? textureSource = DxHandler.Device?.OpenSharedResource<Texture2D>(handle);
+		if (textureSource != null)
+		{
+			_currentSharedTexture = textureSource;
+			//Texture has changed, assume no TV is running
+			_currentActivatedTV = 0;
 		}
 	}
 
 	public void Dispose()
 	{
-		//TODO: Kill all Overlays
+		_deviceCreateTexture2DHook.Dispose();
+		Services.CommandManager.ProcessCommand("/honorific force clear");
 	}
 
-	public unsafe override void Draw()
+	private void TurnOnTV(uint entityId)
 	{
-		ImGui.Text("");
-		var ownTVToggled = true;// TODO: only make it available for player pet
-		if(ownTVToggled )
+		var isPlayer = entityId == Services.ClientState?.LocalPlayer?.EntityId;
+		if (isPlayer)
 		{
-			ImGui.Text("Start your TV: ");
-			ImGui.SameLine();
-			if (ImGui.Button(buttonToggleTV))
+			if(ValidateURL(out Uri? url) && url != null)
 			{
-				if (!TVTurnedOn)
+				_currentToggle = entityId;
+				
+				_plugin.NavigatePictomaticWindow(url.ToString());
+				ShareTitle(url.ToString());
+			}
+		}
+		else
+		{
+			if (_currentURLs.TryGetValue(entityId, out var url))
+			{
+				_currentToggle = entityId;
+				_plugin.NavigatePictomaticWindow(url);
+			}
+		}
+	}
+
+	private void TurnOffTV()
+	{
+		if(_currentToggle == Services.ClientState?.LocalPlayer?.EntityId)
+		{
+			Services.CommandManager?.ProcessCommand("/honorific force clear");
+		}
+		_currentSubProcess = 0;
+		_currentAudioProcess = 0;
+		VisitedAudioProcesses.Clear();
+		_currentToggle = 0;
+		_plugin.TerminatePictomaticWindow();
+		volumeEnabled = false;
+		Services.CommandManager?.ProcessCommand("/penumbra redraw carbuncle");
+	}
+
+	private bool ValidateURL(out Uri? url)
+	{
+		var formattedUrl = _inputURL;
+
+		if (!formattedUrl.StartsWith("http://") && !formattedUrl.StartsWith("https://"))
+			formattedUrl = "https://" + formattedUrl;
+
+		return Uri.TryCreate(formattedUrl, UriKind.Absolute, out url)
+			   && (url.Scheme == Uri.UriSchemeHttp || url.Scheme == Uri.UriSchemeHttps) && url.Host.Contains(".") && !url.Host.EndsWith(".") && Uri.CheckHostName(url.Host) == UriHostNameType.Dns; ;
+	}
+
+
+	private bool isFocused = false;
+	private String placeHolderURL = String.Empty;
+	public override void Draw()
+	{
+		if (_currentToggle != 0)
+		{
+			ImGui.Text("");
+
+			if (volumeEnabled)
+			{
+				ImGui.Text("  -");
+				ImGui.SameLine();
+				if (ImGui.SliderFloat("##Volume", ref volume, 0.0f, 1.0f, "Volume"))
 				{
-					TurnOnOwnTV();
+					SetVolume(volume);
+				}
+				ImGui.SameLine();
+				ImGui.Text("+");
+				ImGui.Text("");
+			}
+		}
+		ImGui.Text(" Available TVs:");
+		var npcList = Services.ObjectTable.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.Name.TextValue);
+		foreach (var item in npcList)
+		{
+			var isPlayer = item.EntityId == Services.ClientState?.LocalPlayer?.EntityId;
+			if (_currentOwners.TryGetValue(item.EntityId, out _))
+			{
+				var toggle = _currentToggle == item.EntityId;
+				var url = String.Empty;
+				bool urlExists = false;
+
+				
+				if (isPlayer)
+				{
+					urlExists = ValidateURL(out _);
 				}
 				else
 				{
-					TurnOffTV();
-				}
-			}
-		}
-		else ImGui.Text("");
-		
-		if (ownTVToggled)
-		{
-			ImGui.Text("Connection Settings:");
-			if (TVTurnedOn)
-			{
-				ImGui.BeginDisabled();
-			}
-			ImGui.Text("  URL  ");
-			ImGui.SameLine();
-			ImGui.InputText("##URL", ref inputURL, 1000, ImGuiInputTextFlags.NoHorizontalScroll);
-			ImGui.Text("  CSS  ");
-			ImGui.SameLine();
-			ImGui.InputText("##CSS", ref inputCSS, 1000, ImGuiInputTextFlags.NoHorizontalScroll);
-			if (TVTurnedOn)
-			{
-				ImGui.EndDisabled();
-			}
-		}
-		else
-		{
-			ImGui.Text("");
-			ImGui.Text("");
-			ImGui.Text("");
-		}
-
-		ImGui.Text("");
-		ImGui.Text("");
-
-		if (!volumeEnabled)
-			ImGui.BeginDisabled();
-		ImGui.Text("");
-		ImGui.Text("  -");
-		ImGui.SameLine();
-		if (ImGui.SliderFloat("##Volume", ref volume, 0.0f, 1.0f, "Volume"))
-		{
-			SetOverlayVolume(volume);
-		}
-		ImGui.SameLine();
-		ImGui.Text("+");
-		ImGui.Text("");
-		if (!volumeEnabled)
-			ImGui.EndDisabled();
-
-		ImGui.Text("TV List:");
-		var npcList = Services.ObjectTable.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.YalmDistanceX);
-		foreach (var item in npcList)
-		{
-			if (item.EntityId != Services.ClientState.LocalPlayer.EntityId && _currentOwners.TryGetValue(item.EntityId, out _))
-			{
-				if (!_currentURLs.TryGetValue(item.EntityId, out var url)) continue;
-				var validUrl = url.StartsWith("picto:");
-				ImGui.Text(item.Name.TextValue + " ");
-				ImGui.SameLine();
-				_currentToggle.TryGetValue(item.EntityId, out var toggle);
-				if (!validUrl) { ImGui.BeginDisabled();  }
-				if (ImGui.Button((validUrl ? (toggle ? ">Turn Off<##" : ">Turn On<##") : "-Turned Off By Host-##") + item.EntityId))
-				{
-					if (!toggle)
+					if(urlExists = _currentURLs.TryGetValue(item.EntityId, out var tempUrl))
 					{
-						if (_currentURLs.TryGetValue(item.EntityId, out _))
-						{
-							_currentToggle[item.EntityId] = true;
-							NavigateNewURL(item.EntityId, url);
+						url = tempUrl;
+					}
+				}
+
+				if (toggle)
+				{
+					Vector4 textColor = isPlayer ? new Vector4(1.0f, 0.0f, 0.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f); ;
+					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
+				}
+				else if (!urlExists)
+				{
+					Vector4 textColor = new Vector4(0.5f, 0.5f, 0.5f, 1.0f); ;
+					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
+				}
+
+				ImGui.PushFont(UiBuilder.IconFont);
+				if (ImGui.Button((toggle ? 
+					(!string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists ? FontAwesomeIcon.Repeat.ToIconString() 
+						: FontAwesomeIcon.Stop.ToIconString()
+					)
+					: FontAwesomeIcon.Play.ToIconString()) + "##" + item.EntityId))
+				{
+					if (!toggle || (toggle && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists))
+					{
+						if(!toggle) //If its toggled already, its the Refresh Button, do not turn off TV!
+						{ 
+							TurnOffTV(); //Turn off TV before its turned on, as to reset the Textures of any currently running TVs
 						}
+
+						System.Threading.Tasks.Task.Run(async () =>
+						{
+							await System.Threading.Tasks.Task.Delay(250);
+							TurnOnTV(item.EntityId);
+							if (isPlayer)
+							{
+								placeHolderURL = _inputURL;
+								_inputURL = String.Empty;
+							}
+						});
 					}
 					else
 					{
-						_currentToggle[item.EntityId] = false;
-						_plugin.NavigatePictomaticWindow("pictomatic" + item.EntityId, "about:blank", "");
+						TurnOffTV();
+						if(isPlayer && string.IsNullOrEmpty(_inputURL))
+						{
+							_inputURL = placeHolderURL;
+						}
 					}
 				}
-				if (!validUrl) { ImGui.EndDisabled(); }
+				ImGui.PopFont();
 
-			}
-		}
+				if (toggle || !urlExists) ImGui.PopStyleColor();
 
-		/*
-		ImGui.Text("Debug info: " );
-		foreach (var item in _currentSubProcesses)
-		{
-			ImGui.Text("Guid for " + item);
-		}
-		
-		foreach (var item in _currentURLs)
-		{
-			ImGui.Text("URL for " + item.Key + " " + item.Value);
-		}
+				ImGui.SameLine();
 
-		foreach (var item in _currentOwners)
-		{
-			ImGui.Text("Owner for " + item.Key + " " + item.Value);
-		}
+				ImGui.Text(isPlayer ? "YOU" : " " + item.Name.TextValue);
 
-		foreach (var item in _currentToggle)
-		{
-			ImGui.Text("Toggle for " + item.Key + " " + item.Value);
-		}
+				ImGui.SameLine();
 
-		
-		var npcList = Services.ObjectTable.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.YalmDistanceX);
-		foreach (var item in npcList)
-		{
-			ImGui.Text("NPC: " + item.Name);
-			ImGui.Text("ID: " + item.GameObjectId); //Player ID
-		}
-		
-		var carbList = Services.ObjectTable.Where(x => x is IBattleChara).Cast<IBattleChara>().OrderBy(x => x.YalmDistanceX);
-		foreach (var item in carbList)
-		{
-			var character = (Character*)item.Address; 
-			ImGui.Text("ID: " + character->CompanionOwnerId); //Carbuncle Owner ID
-		}
-		
-		
-		unsafe
-		{
-			var ratkm = Framework.Instance()->GetUIModule()->GetRaptureAtkModule();
-			for (var i = 0; i < 100 && i < ratkm->NameplateInfoCount; i++)
-			{
-				var npi = ratkm->NamePlateInfoEntries.GetPointer(i);
-				if (npi->ObjectId.ObjectId == 0) continue;
-				ImGui.Text("Title: for " + npi->ObjectId.ObjectId + " " + MemoryHelper.ReadSeString(&npi->DisplayTitle));
-			}
-		}
-		*/
-	}
-
-	private unsafe void TryRemoveTV(uint ownerId)
-	{
-		if(_currentOwners.TryGetValue(ownerId, out var TV))
-		{
-			_currentToggle.Remove(ownerId);
-			if (_currentOverlays.TryGetValue("pictomatic" + ownerId, out _))
-			{
-				_plugin.RemovePictomaticWindow(ownerId);
-				_currentOverlays.Remove("pictomatic" + ownerId);
-				_currentOverlayGuids.Remove("pictomatic" + ownerId);
-			}
-			
-			_currentOwners.Remove(ownerId);
-			fixed (byte* Bptr = _blankCanvas) //Put a Black Canvas on the TV
-			{
-				var TVdraw = (CharacterBase*)TV;
-				try
-				{
-					TVdraw->Models[0]->Materials[1]->Textures[3].Texture->Texture->InitializeContents((void*)Bptr);
-				}
-				catch(Exception)
-				{ 
-					//Ignore Repaint
-				}
-			}
-		}
-	}
-
-	internal void UpdateTitle(uint entityId, string title)
-	{
-		var hasValue = _currentURLs.TryGetValue(entityId, out var titleOld);
-		if (hasValue)
-		{
-			if(_currentToggle.TryGetValue(entityId, out var toggle)) //IF TV EXISTS
-			{
-				if(toggle) //IF TV IS ON
-				{
-					if (title != titleOld)
+				if (toggle) {
+					ImGui.PushFont(UiBuilder.IconFont);
+					if (ImGui.Button(FontAwesomeIcon.WindowRestore.ToIconString()))
 					{
-						if (title.StartsWith("picto:")) 
-						{
-							NavigateNewURL(entityId, title); //CHANGE URL
-						}
-						else
-						{
-							TryRemoveTV(entityId); //COMPLETELY REMOVE
-						}
+						_plugin.ToggleExpandPictomaticWindow();
 					}
+					ImGui.PopFont();
 				}
-				else //IF TV IS OFF
+
+				ImGui.SameLine();
+
+				ImGui.PushFont(UiBuilder.IconFont);
+				if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString()))
 				{
-					_currentURLs[entityId] = title;
+					ImGui.SetClipboardText(isPlayer ? (string.IsNullOrEmpty(_inputURL) && toggle ? placeHolderURL : _inputURL) : (url ?? String.Empty));
+				}
+				ImGui.PopFont();
+
+				ImGui.SameLine();
+
+				if (isPlayer)
+				{
+					ImGui.InputText("##URL", ref _inputURL, 1000, ImGuiInputTextFlags.NoHorizontalScroll);
+
+					// Detect if the input is focused
+					if (ImGui.IsItemActive())
+						isFocused = true;
+					else if (ImGui.IsItemDeactivated())
+						isFocused = false;
+
+					// Render placeholder if input is empty and unfocused
+					if (!isFocused && string.IsNullOrEmpty(_inputURL) && toggle)
+					{
+						var pos = ImGui.GetItemRectMin();
+						var max = ImGui.GetItemRectMax();
+
+						float maxWidth = max.X - pos.X;
+
+						string placeholder = placeHolderURL;
+
+						Vector2 textSize = ImGui.CalcTextSize(placeholder);
+
+						while (textSize.X > maxWidth && placeholder.Length > 0)
+						{
+							placeholder = placeholder.Substring(0, placeholder.Length - 1);
+							textSize = ImGui.CalcTextSize(placeholder + "........");
+						}
+
+						if (!placeholder.Equals(placeHolderURL)) placeholder += "...";
+
+						ImGui.GetWindowDrawList().AddText(new Vector2(pos.X + 7, pos.Y), ImGui.GetColorU32(new Vector4(0.3f, 0.8f, 0.3f, 1.0f)), placeholder);
+					}
+
+				}
+				else
+				{
+					if(toggle)
+						ImGui.TextColored(new Vector4(0.3f, 0.8f, 0.3f, 1.0f), url);
+					else
+						ImGui.Text(url);
 				}
 			}
-			else //IF TV DOESNT EXIST
-			{
-				_currentURLs[entityId] = title;
-			}
-		} 
+		}
+	}
+
+	private const string DeviceCreateTexture2DAddress = "E8 ?? ?? ?? ?? 48 89 07 48 8D 7F 20";
+	private unsafe delegate Texture* DeviceCreateTexture2D(FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Device* thisPtr, int* size, byte mipLevel, uint textureFormat, uint flags, uint unk);
+	private Hook<DeviceCreateTexture2D> _deviceCreateTexture2DHook;
+
+
+	private unsafe void initHook()
+	{
+		var hm = new HookManager(Services.InteropProvider);
+		_deviceCreateTexture2DHook = hm.CreateHook<DeviceCreateTexture2D>("Pictomatic.Device.CreateTexture2D", DeviceCreateTexture2DAddress, DeviceCreateTexture2DDetour, true).Result;
+	}
+
+	private unsafe Texture* DeviceCreateTexture2DDetour(FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Device* thisPtr, int* size, byte mipLevel, uint textureFormat, uint flags, uint unk)
+	{
+		if (size[0] == 1920 && size[1] == 1080 && mipLevel == 9)
+		{
+			var currentVFXTexture = _deviceCreateTexture2DHook.Original(thisPtr, size, mipLevel, textureFormat, flags, unk);
+			Services.Log.Debug("Spotted new VFX TV Texture");
+			_currentVFXTextures.Add((IntPtr) currentVFXTexture);
+			return currentVFXTexture;
+		}
 		else
 		{
-			_currentURLs[entityId] = title;
+			return _deviceCreateTexture2DHook.Original(thisPtr, size, mipLevel, textureFormat, flags, unk);
+		}
+	}
+
+	internal async void UpdateTitle(uint entityId, string title)
+	{
+		if (entityId == Services.ClientState?.LocalPlayer?.EntityId) return;
+		if (!_currentTitles.TryGetValue(entityId, out var oldTitle) || oldTitle != title)
+		{
+			_currentTitles[entityId] = title;
+
+			if (title.Length < 7 || !title.StartsWith("picto:"))
+			{
+				if(_currentURLs.TryGetValue(entityId, out _))
+				{
+					_currentURLs.Remove(entityId);
+				}
+					
+				if (_currentToggle == entityId)
+					TurnOffTV();
+			}
+			else
+			{
+				var url = "https://is.gd/" + title.Substring("picto:".Length);
+				await FetchURLData(url, response => {
+					_currentURLs[entityId] = response;
+					if (_currentToggle == entityId)
+						_plugin.NavigatePictomaticWindow(response);
+				});
+			}
 		}
 	}
 
@@ -426,97 +502,73 @@ public class MainWindow : Window, IDisposable
 		//Check for Texture Updates once per sec
 		if (_lastMilliSecond + 500 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 		{
-			if (_lastMilliSecond == 0)
-			{
-				_plugin.ClearPictomaticWindows();
-			}
 			_lastMilliSecond = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 			CheckAllTVs();
 		}
 	}
 
-	private void CheckTitles()
+	private void CheckTitles() //not required anymore, btw causes issues with title/name switching, needs to get checked
 	{
 		unsafe
 		{
 			var ratkm = Framework.Instance()->GetUIModule()->GetRaptureAtkModule();
-
+			
 			for (var i = 0; i < 50 && i < ratkm->NameplateInfoCount; i++)
 			{
 				var npi = ratkm->NamePlateInfoEntries.GetPointer(i);
-				if (npi->ObjectId.ObjectId == 0) continue;
+				if (npi->ObjectId.ObjectId == 0 || npi->ClassJobId == 0) continue;
 				var cleanTitle = MemoryHelper.ReadSeString(&npi->DisplayTitle).TextValue;
 				if (cleanTitle.Length > 2)
 				{
 					cleanTitle = cleanTitle.Substring(1, cleanTitle.Length - 2);
-					if (_currentURLs.TryGetValue(npi->ObjectId.ObjectId, out var titleold))
-					{
-						if (titleold != cleanTitle)
-						{
-							UpdateTitle(npi->ObjectId.ObjectId, cleanTitle);
-						}
-					}
-					else
-					{
-						UpdateTitle(npi->ObjectId.ObjectId, cleanTitle);
-					}
+					UpdateTitle(npi->ObjectId.ObjectId, cleanTitle);
 				}
 			}
 		}
 	}
 
-	public void TurnOffTV()
+	private async void ShareTitle(string url)
 	{
-		var playerId = Services.ClientState.LocalPlayer.EntityId;
-		Services.CommandManager.ProcessCommand("/honorific force clear");
-		TVTurnedOn = false;
-		_currentToggle[playerId] = false;
-		_plugin.NavigatePictomaticWindow("pictomatic" + playerId, "about:blank", "");
-	}
-
-	private async void TurnOnOwnTV()
-	{
-		var playerId = Services.ClientState.LocalPlayer.EntityId;
-		TVTurnedOn = true;
-		if (inputURL == lastInputURL && inputCSS == lastInputCSS)
+		if (url == _lastURL)
 		{
-			Services.CommandManager.ProcessCommand("/honorific force set picto:" + shortenedInputURL + "|silent");
-			_currentToggle[playerId] = true;
-			UpdateTitle(Services.ClientState.LocalPlayer.EntityId, "picto:" + shortenedInputURL);
+			Services.CommandManager.ProcessCommand("/honorific force set picto:" + _shortenedURL + "|silent");
 		}
 		else
 		{
-			await ShortenURL(inputURL, inputCSS, result =>
+			await ShortenURL(url, result =>
 			{
-				lastInputURL = inputURL;
-				lastInputCSS = inputCSS;
-				shortenedInputURL = result.Split("/").Last(); Services.CommandManager.ProcessCommand("/honorific force set picto:" + shortenedInputURL + "|silent");
-				_currentToggle[playerId] = true;
-				UpdateTitle(Services.ClientState.LocalPlayer.EntityId, "picto:" + shortenedInputURL);
-			}, error => TVTurnedOn = false);
+				_lastURL = url;
+				_shortenedURL = result.Split("/").Last();
+				Services.CommandManager.ProcessCommand("/honorific force set picto:" + _shortenedURL + "|silent");
+			}, error => {
+				TurnOffTV(); //TODO: Proper Error Handling!
+			});
 		}
-		
 	}
-	public async System.Threading.Tasks.Task ShortenURL(string inputURL, string inputCSS, URLShortenerCallback callback, URLShortenerErrorCallback error)
+
+	public async System.Threading.Tasks.Task ShortenURL(string inputURL, URLShortenerCallback callback, URLShortenerErrorCallback error)
 	{
 		using (HttpClient client = new HttpClient())
 		{
 			try
 			{
-				HttpResponseMessage response = await client.GetAsync("https://is.gd/create.php?format=simple&url=" + Uri.EscapeDataString(inputURL + "picto:" + inputCSS));
+				HttpResponseMessage response = await client.GetAsync("https://is.gd/create.php?format=simple&url=" + Uri.EscapeDataString(inputURL));
 				response.EnsureSuccessStatusCode();
 				string responseBody = await response.Content.ReadAsStringAsync();
 
-				if (responseBody.Contains("Error:"))
+				if (responseBody.Contains("error") || responseBody.Contains("Error"))
 				{
+					Services.Log.Debug("Request exception: Could not create Shortlink: " + responseBody);
 					error(String.Empty);
 				}
-				callback(responseBody);
+				else
+				{
+					callback(responseBody);
+				}
 			}
 			catch (HttpRequestException e)
 			{
-				error(e.Message);
-				Services.Log.Error(e.Message + e.StackTrace);
+				Services.Log.Debug("Request exception: Could not create Shortlink.");
 			}
 		}
 	}
@@ -552,34 +604,42 @@ public class MainWindow : Window, IDisposable
 		}
 	}
 
-	private void RefreshOverlayVolume()
+	private List<uint> VisitedAudioProcesses = new List<uint>();
+	private void RefreshVolume()
 	{
 		if (!volumeEnabled)
 		{
-			var AllOverlaySubProcesses = _currentSubProcesses.ToList();
-
 			var enumerator = new MMDeviceEnumerator();
 			var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
 			var sessionManager = device.AudioSessionManager;
 			var sessionsCount = sessionManager.Sessions.Count;
 
+			if (sessionManager == null) return;
+
 			for (int i = 0; i < sessionsCount; i++)
 			{
+
 				var session = sessionManager.Sessions[i];
-				if (AllOverlaySubProcesses.Contains((int)session.GetProcessID))
+				var sessionId = session.GetProcessID;
+
+				if (!VisitedAudioProcesses.Contains(sessionId))
 				{
-					volume = session.SimpleAudioVolume.Volume;
-					volumeEnabled = true;
+					VisitedAudioProcesses.Add(sessionId);
+					var parent = CheckProcessParent(sessionId);
+					if (_currentSubProcess == parent && _currentSubProcess != 0 && parent != 0)
+					{
+						_currentAudioProcess = sessionId;
+						volume = session.SimpleAudioVolume.Volume;
+						volumeEnabled = true;
+						return;
+					}
 				}
 			}
 		}
 	}
 
-	private void SetOverlayVolume(float volumeLevel)
+	private void SetVolume(float volumeLevel)
 	{
-		var AllOverlaySubProcesses = _currentSubProcesses.ToList();
-		var visitedSubProcesses = new List<int>();
-		
 		var enumerator = new MMDeviceEnumerator();
 		var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
 		var sessionManager = device.AudioSessionManager;
@@ -588,25 +648,27 @@ public class MainWindow : Window, IDisposable
 		for (int i = 0; i < sessionsCount; i++)
 		{
 			var session = sessionManager.Sessions[i];
-			if (AllOverlaySubProcesses.Contains((int) session.GetProcessID))
+			if (_currentAudioProcess == (int) session.GetProcessID)
 			{
 				session.SimpleAudioVolume.Volume = volumeLevel;
-				visitedSubProcesses.Add((int) session.GetProcessID);
-			}
-		}
-
-		foreach (var item in AllOverlaySubProcesses)
-		{
-			if (!visitedSubProcesses.Contains(item))
-			{
-				_currentSubProcesses.Remove(item);
 			}
 		}
 	}
 
-	internal void AddSubProcess(Guid guid, int processId)
+	public void AddSubProcess(int processId)
 	{
-		_currentSubProcesses.Add(processId);
+		_currentSubProcess = (uint) processId;
+	}
+
+	private static uint CheckProcessParent(uint pid)
+	{
+		var query = $"SELECT ParentProcessId FROM Win32_Process WHERE ProcessId = {pid}";
+		try
+		{
+			var searcher = new System.Management.ManagementObjectSearcher(query);
+			return Convert.ToUInt32(searcher.Get().Cast<System.Management.ManagementObject>().FirstOrDefault()["ParentProcessId"]);
+		}
+		catch
+		{ return 0; }
 	}
 }
-

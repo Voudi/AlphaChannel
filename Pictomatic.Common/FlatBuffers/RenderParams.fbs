@@ -10,4 +10,5 @@ table RenderParams (fs_serializer) {
     IpcChannelName : string (required);
     KeepAliveHandleName : string (required);
     ParentPid : int;
+    PluginDir : string (required);
 }

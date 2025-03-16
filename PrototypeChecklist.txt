@@ -1,0 +1,20 @@
+Prototype checklist:
+
+Restore coordinates on reenter -> solvable with QR-Mare
+DONE - remove time axis on videos
+1111111111 Save URLs in a dropdown
+22222222222Mute volume instead of solely relying on the mixer
+DONE - QR-Mare URL transmission
+Implement a shader to pet to be unaffected by world light
+Make a repository
+implement custom scaling (wirklich?)
+Carbuncle
+DONE - Browsingway compatibility
+Code soll schön sein
+implement checks for other plugins (c+,mare, penumbra,honorific)
+split for host and viewer
+DONE - open remote command
+
+
+Chatbubbles 2.0 (texturdraw)
+w2g sync extension in chromium
