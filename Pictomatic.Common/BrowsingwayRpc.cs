@@ -18,9 +18,9 @@ public class BrowsingwayRpc(string name) : IpcBase(name)
 		await SendCall(new RpcCall() { NewOverlay = msg });
 	}
 
-	public async Task Navigate(Guid id, string url)
+	public async Task Navigate(Guid id, string url, string sharedHandle)
 	{
-		await SendCall(new RpcCall() { Navigate = new NavigateMessage() { Guid = id.ToByteArray(), Url = url } });
+		await SendCall(new RpcCall() { Navigate = new NavigateMessage() { Guid = id.ToByteArray(), Url = url, SharedHandle = sharedHandle } });
 	}
 
 	public async Task ResizeOverlay(Guid id, int width, int height)

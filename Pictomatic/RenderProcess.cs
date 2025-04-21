@@ -18,6 +18,7 @@ internal class RenderProcess : IDisposable
 	private readonly string _keepAliveHandleName;
 	private readonly int _parentPid;
 	private readonly string _pluginDir;
+	private readonly string _textureHandle;
 
 	private Process _process;
 	private bool _running;
@@ -26,7 +27,8 @@ internal class RenderProcess : IDisposable
 		string pluginDir,
 		string configDir,
 		DependencyManager dependencyManager,
-		IPluginLog pluginLog
+		IPluginLog pluginLog,
+		string textureHandle
 	)
 	{
 		_keepAliveHandleName = $"PictomaticRendererKeepAlive{pid}";
@@ -35,6 +37,7 @@ internal class RenderProcess : IDisposable
 		_pluginDir = pluginDir;
 		_configDir = configDir;
 		_parentPid = pid;
+		_textureHandle = textureHandle;
 
 		Rpc = new BrowsingwayRpc(_ipcChannelName);
 		_process = SetupProcess();
@@ -157,12 +160,13 @@ internal class RenderProcess : IDisposable
 		{
 			ParentPid = _parentPid,
 			DalamudAssemblyDir = Path.GetDirectoryName(typeof(IPluginLog).Assembly.Location)!,
-			CefAssemblyDir = cefAssemblyDir,
-			CefCacheDir = Path.Combine(_configDir, "webview-cache"),
+			UblockDir = cefAssemblyDir,
+			WebviewCacheDir = Path.Combine(_configDir, "webview-cache"),
 			DxgiAdapterLuid = DxHandler.AdapterLuid,
 			KeepAliveHandleName = _keepAliveHandleName,
 			IpcChannelName = _ipcChannelName,
-			PluginDir = _pluginDir
+			PluginDir = _pluginDir,
+			Texturehandle = _textureHandle
 		};
 
 		Process process = new();
@@ -180,8 +184,8 @@ internal class RenderProcess : IDisposable
 		process.StartInfo.EnvironmentVariables.Remove("DOTNET_ROOT");
 		process.StartInfo.EnvironmentVariables.Add("DOTNET_ROOT", runtimePath);
 
-		process.OutputDataReceived += (_, args) => Services.PluginLog.Info($"[Render]: {args.Data}");
-		process.ErrorDataReceived += (_, args) => Services.PluginLog.Error($"[Render]: {args.Data}");
+		process.OutputDataReceived += (_, args) => { if (args?.Data?.Trim().Length > 0) Services.PluginLog.Info($"[Render]: {args.Data}"); };
+		process.ErrorDataReceived += (_, args) => { if (args?.Data?.Trim().Length > 0) Services.PluginLog.Error($"[Render]: {args.Data}"); };
 
 		return process;
 	}

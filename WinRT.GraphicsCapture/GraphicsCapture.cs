@@ -7,7 +7,6 @@ using Windows.Graphics.DirectX;
 using Windows.Graphics.DirectX.Direct3D11;
 
 using SharpDX.Direct3D11;
-using SharpDX.DXGI;
 
 using System.Drawing;
 
@@ -21,11 +20,13 @@ namespace WinRT.GraphicsCapture
 		private Texture2D _texture;
 		private IDirect3DDevice _device;
 		private Point _itemSize;
-		private bool _closedCaptureItem = false;
-		public GraphicsCapture()
+		private Texture2D _textureSource;
+
+		public GraphicsCapture(IntPtr sharedHandle)
         {
             IsCapturing = false;
-        }
+			_textureSource = DxHandler.Device?.OpenSharedResource<Texture2D>(sharedHandle);
+		}
 
         public bool IsCapturing { get; private set; }
 
@@ -87,7 +88,7 @@ namespace WinRT.GraphicsCapture
 					_captureSession.StartCapture();
 				}
 			}
-			catch(ArgumentException ex)
+			catch(ArgumentException)
 			{
 				return false;
 			}
@@ -115,31 +116,7 @@ namespace WinRT.GraphicsCapture
 				var pResource = surfaceDxgiInterfaceAccess.GetInterface(new Guid("dc8e63f3-d12b-4952-b47b-5e45026a862d"));
 			
 				using var surfaceTexture = new Texture2D(pResource); // shared resource
-				if(_texture == null)
-				{
-					var texture2dDescription = new Texture2DDescription
-					{
 
-						Width = 1920,
-						Height = 1080,
-						MipLevels = 1,
-						ArraySize = 1,
-						Format = Format.B8G8R8A8_UNorm,
-						BindFlags = BindFlags.ShaderResource,
-						CpuAccessFlags = CpuAccessFlags.None,
-						SampleDescription = new SampleDescription(1, 0),
-						Usage = ResourceUsage.Default,
-						OptionFlags = ResourceOptionFlags.Shared
-
-					};
-					_texture = new Texture2D(DxHandler.Device, texture2dDescription);
-					using SharpDX.DXGI.Resource? resource = _texture.QueryInterface<SharpDX.DXGI.Resource>();
-
-					//TODO: Return SharedHandle via RPC rather than through the Console
-					Console.Out.WriteLine("SharedHandle:" + resource.SharedHandle);
-					Console.Out.WriteLine("CalculatedTextureSize:" + surfaceTexture.Description.Width + ", " + surfaceTexture.Description.Height);
-				}
-            
 				var copyRegion = new ResourceRegion(
 					0,  // X position in source texture
 					0,  // Y position in source texture
@@ -149,7 +126,7 @@ namespace WinRT.GraphicsCapture
 					1   // Depth (for 3D textures)
 				);
 
-				DxHandler.Device.ImmediateContext.CopySubresourceRegion(surfaceTexture, 0, copyRegion, _texture, 0, 0, 0);
+				DxHandler.Device.ImmediateContext.CopySubresourceRegion(surfaceTexture, 0, copyRegion, _textureSource, 0, 64, 36, 0);
 				return true;
 			}
 			catch (Exception ex)
@@ -184,8 +161,6 @@ namespace WinRT.GraphicsCapture
 
         private void CaptureItemOnClosed(GraphicsCaptureItem sender, object args)
         {
-			_closedCaptureItem = true;
-
 			StopCapture();
         }
     }

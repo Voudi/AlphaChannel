@@ -1,12 +1,9 @@
 ﻿using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Plugin.Ipc;
 using Newtonsoft.Json;
-using Pictomatic;
 using System.Reflection;
-using System.Xml.Linq;
-using static FFXIVClientStructs.FFXIV.Client.UI.Info.InfoProxyCommonList;
 
-namespace Honorific;
+namespace Pictomatic;
 
 public static class IpcProvider
 {

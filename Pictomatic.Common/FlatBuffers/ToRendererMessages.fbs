@@ -19,6 +19,7 @@ table NewOverlayMessage (fs_serializer) {
 table NavigateMessage (fs_serializer) {
     Guid : [ubyte] (required);
     Url : string (required);
+	SharedHandle : string (required);
 }
 
 table ResizeOverlayMessage(fs_serializer) {

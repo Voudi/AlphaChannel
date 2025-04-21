@@ -1,5 +1,4 @@
 ﻿using Dalamud.Game;
-using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
@@ -41,9 +40,6 @@ public class Services
 	[PluginService]
 	// ReSharper disable once AutoPropertyCanBeMadeGetOnly.Local
 	public static IClientState ClientState { get; set; } = null!;
-
-	[PluginService] 
-	public static IObjectTable ObjectTable { get; private set; } = null!;
 
 	[PluginService]
 	public static IGameInteropProvider InteropProvider { get; private set; } = null!;

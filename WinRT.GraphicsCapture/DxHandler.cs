@@ -5,15 +5,17 @@ using D3D11 = SharpDX.Direct3D11;
 
 internal static class DxHandler
 {
-	public static D3D11.Device? Device { get; private set; }
+	public static D3D11.Device Device { get; private set; }
 
 	public static bool Initialise(long adapterLuid)
 	{
 		// Find the adapter matching the luid from the parent process
 		Factory1 factory = new Factory1();
-		Adapter? gameAdapter = null;
-		foreach (Adapter? adapter in factory.Adapters)
+		Adapter gameAdapter = null;
+		foreach (Adapter adapter in factory.Adapters)
 		{
+			if (adapter == null)
+				continue;
 			if (adapter.Description.Luid == adapterLuid)
 			{
 				gameAdapter = adapter;
@@ -30,9 +32,6 @@ internal static class DxHandler
 
 		// Use the adapter to build the device we'll use
 		D3D11.DeviceCreationFlags flags = D3D11.DeviceCreationFlags.BgraSupport;
-#if DEBUG
-		flags |= D3D11.DeviceCreationFlags.Debug;
-#endif
 
 		Device = new D3D11.Device(gameAdapter, flags);
 

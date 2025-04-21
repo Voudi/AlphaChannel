@@ -8,31 +8,10 @@ using ImGuiNET;
 using SharpDX.Direct3D11;
 using SharpDX.Direct3D;
 using Dalamud.Game.ClientState.Objects.Types;
-using Dalamud.Memory;
-using FFXIVClientStructs.FFXIV.Client.System.Framework;
-using FFXIVClientStructs.Interop;
 using NAudio.CoreAudioApi;
-using Dalamud.Utility;
 using Dalamud.Interface;
-using NAudio.CoreAudioApi.Interfaces;
-using FFXIVClientStructs.FFXIV.Client.Game;
-using FFXIVClientStructs.FFXIV.Client.Graphics.Render;
-using Dalamud.Hooking;
-using static FFXIVClientStructs.FFXIV.Client.Graphics.Render.ModelRenderer;
-using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
-using static FFXIVClientStructs.FFXIV.Client.UI.Misc.GroupPoseModule;
 using System.Runtime.InteropServices;
-using Microsoft.VisualBasic;
-using FFXIVClientStructs.FFXIV.Client.System.File;
-using FFXIVClientStructs.FFXIV.Client.System.Resource.Handle;
-using FFXIVClientStructs.FFXIV.Client.Game.Object;
-using Lumina.Data;
-using Dalamud.Interface.Textures;
-using Dalamud.Interface.Textures.TextureWraps;
 using SharpDX.DXGI;
-using FFXIVClientStructs.FFXIV.Component.GUI;
-using FFXIVClientStructs.FFXIV.Client.Graphics.Vfx;
-using System.Reflection.Metadata;
 
 public class MainWindow : Window, IDisposable
 {
@@ -40,12 +19,15 @@ public class MainWindow : Window, IDisposable
 	private readonly Dictionary<uint, String> _currentURLs = []; //Playerpointer, URL
 	private readonly Dictionary<uint, String> _currentTitles = []; //Playerpointer, Title
 	private Texture2D _currentSharedTexture;
-	private uint _currentToggle; //Playerpointer (wether TV toggled or not)
-	private uint _currentActivatedTV = 0; //Playerpointer (wether TV toggled or not)
-	private nint _currentActiveTVTexturePointer = 0; //TexturePointer
+	public string currentSharedTextureResourceHandle;
+	private IntPtr _oldSharedTexture = IntPtr.Zero;
+	private uint _currentToggle; //Playerpointer (whether TV toggled or not)
+	private uint _currentActivatedTV = 0; //Playerpointer (whether TV toggled or not)
 	private uint _currentAudioProcess;
 	private uint _currentSubProcess;
-	private unsafe List<IntPtr> _currentVFXTextures = new List<IntPtr>();
+	private Dictionary<IntPtr, bool> _currentVFXTextures = new Dictionary<IntPtr, bool>(); //Texturepointer, Flag (whether overridden once)
+	private bool _signalShareTitle = false;
+	private bool _firstTimeTVOn = true;
 
 	private static readonly byte[] _blankCanvas = new byte[16777216];
 
@@ -64,7 +46,7 @@ public class MainWindow : Window, IDisposable
 	float volume = 0.5f;
 	private bool volumeEnabled = false;
 
-	public unsafe MainWindow(Plugin plugin)
+	public MainWindow(Plugin plugin)
         : base("Pictomatic remote", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
 
@@ -75,40 +57,67 @@ public class MainWindow : Window, IDisposable
 		};
 
 		this._plugin = plugin;
-		initHook();
+
+		//initHook();
+	}
+
+	public void initTexture()
+	{
+		var texture2dDescription = new Texture2DDescription
+		{
+
+			Width = 2048,
+			Height = 2048,
+			MipLevels = 1,
+			ArraySize = 1,
+			Format = Format.B8G8R8A8_UNorm,
+			BindFlags = BindFlags.ShaderResource,
+			CpuAccessFlags = CpuAccessFlags.None,
+			SampleDescription = new SampleDescription(1, 0),
+			Usage = ResourceUsage.Default,
+			OptionFlags = ResourceOptionFlags.Shared
+
+		};
+		_currentSharedTexture = new Texture2D(DxHandler.Device, texture2dDescription);
+		using SharpDX.DXGI.Resource resource = _currentSharedTexture.QueryInterface<SharpDX.DXGI.Resource>();
+		currentSharedTextureResourceHandle = ((ulong)resource.SharedHandle).ToString();
 	}
 
 	private unsafe void CheckAllTVs()
 	{
 		RefreshVolume();
 
-		CheckTitles(); 
+		//CheckTitles(); CAUTION UNSAFE
 		
 		List<uint> visitedTvs = new List<uint>();
-		var npcList = Services.ObjectTable.Where(x => x is IBattleNpc).Cast<IBattleNpc>().OrderBy(x => x.YalmDistanceX);
+		var npcList = Services.Objects.Where(x => x is IBattleNpc).Cast<IBattleNpc>().OrderBy(x => x.YalmDistanceX);
 		foreach(var item in npcList)
 		{
 			if(item.Name.TextValue == "Carbuncle")
 			{
+				if (item.Address == IntPtr.Zero)
+					continue;
 				var character = (Character*)item.Address;
-				if (character != null)
+				if (character != null && character->DrawObject != null)
 				{
-					if(character->DrawObject != null)
 					if (character->DrawObject->GetObjectType() == ObjectType.CharacterBase)
 					{
-						try {
+						try
+						{
 							var tvDraw = (CharacterBase*)character->DrawObject;
-							if (tvDraw->Models[0]->Materials[1] is not null)
-								if (tvDraw->Models[0]->Materials[1]->TextureCount >= 4)
-									if (tvDraw->Models[0]->Materials[1]->Textures[3].Texture is not null)
-										if (tvDraw->Models[0]->Materials[1]->Textures[3].Texture->Texture is not null)
-											{
-												var ownerId = character->CompanionOwnerId;
-												visitedTvs.Add(ownerId);
-												CheckOutPossibleTV(tvDraw, ownerId);
-											}
+							if (tvDraw->Models[0] is not null)
+								if (tvDraw->Models[0]->MaterialCount >= 2)
+									if (tvDraw->Models[0]->Materials[1] is not null)
+										if (tvDraw->Models[0]->Materials[1]->TextureCount >= 4)
+											if (tvDraw->Models[0]->Materials[1]->Textures[3].Texture is not null)
+												if (tvDraw->Models[0]->Materials[1]->Textures[3].Texture->Texture is not null)
+												{
+													var ownerId = character->CompanionOwnerId;
+													visitedTvs.Add(ownerId);
+													CheckOutPossibleTV((IntPtr)tvDraw, ownerId);
+												}
 						}
-						catch(Exception e){}
+						catch (Exception e) { }
 					}
 				}
 			}
@@ -123,11 +132,9 @@ public class MainWindow : Window, IDisposable
 		});
 	}
 
-	private unsafe void CheckOutPossibleTV(CharacterBase* tvDraw, uint ownerId)
+	private void CheckOutPossibleTV(IntPtr tvDraw, uint ownerId)
 	{
-		
-
-		IntPtr ptr = (IntPtr)tvDraw;
+		IntPtr ptr = tvDraw;
 		var tvAddrFound = _currentOwners.TryGetValue(ownerId, out var tvAddr);
 		if (!tvAddrFound)
 		{
@@ -148,69 +155,130 @@ public class MainWindow : Window, IDisposable
 			{
 				if (ReassignTextureForTV(tvAddr))
 				{
+					/*
+					currentVFXActive = true;
+					currentVFXObjAddress = tvGameObj.Address;
+					var playeraddr = Services.ClientState?.LocalPlayer?.Address;
+					currentVFXPlrAddress = playeraddr.HasValue ? playeraddr.Value : currentVFXObjAddress;
+					*/
 					_currentActivatedTV = ownerId;
+					Services.Log.Debug("Turning on new TV...");
 				}
+			}
+			else
+			{
+				/*
+				//This TV is active, refresh its VFX
+				if (currentVFXActive)
+				{
+					RefreshActorVFX();
+				}
+				*/
 			}
 		}
 	}
 
+	[DllImport("kernel32.dll")]
+	static extern bool IsBadReadPtr(IntPtr lp, uint ucb);
+
 	private unsafe bool ReassignTextureForTV(nint tvAddr)
 	{
+		Services.Log.Debug("TV redraw attempt");
+		var TV = (CharacterBase*)tvAddr;
+		var textureSource = _currentSharedTexture;
+		ShaderResourceView view = new(DxHandler.Device, textureSource, new ShaderResourceViewDescription { Format = textureSource.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = textureSource.Description.MipLevels } });
+
+		var tex = TV->Models[0]->Materials[1]->Textures[3].Texture->Texture;
+
+		// Obtain the native pointers
+		tex->D3D11Texture2D = (void*)textureSource.NativePointer;
+		tex->D3D11ShaderResourceView = (void*)view.NativePointer;
+
+		Services.Log.Debug("Successs redraw TV");
+
+		return true;
+		/*
 		if (_currentSharedTexture != null)
 		{
+			Services.Log.Debug("Attempting a redraw of the TV");
 			var TV = (CharacterBase*)tvAddr;
 			var textureSource = _currentSharedTexture;
 			ShaderResourceView view = new(DxHandler.Device, textureSource, new ShaderResourceViewDescription { Format = textureSource.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = textureSource.Description.MipLevels } });
 
-			_currentActiveTVTexturePointer = view.NativePointer;
-
 			// Obtain the native pointers
 			void* D3D11Texture2D = (void*)textureSource.NativePointer;
-			//TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->D3D11Texture2D = D3D11Texture2D;
 			void* D3D11ShaderResourceView = (void*)view.NativePointer;
-			//TV->Models[0]->Materials[1]->Textures[3].Texture->Texture->D3D11ShaderResourceView = D3D11ShaderResourceView;
 
-			foreach(var currentTexturePointer in _currentVFXTextures.ToList())
+			var success = false;
+
+			var changingFlag = _currentSharedTexture.NativePointer != _oldSharedTexture;
+			foreach (var currentTexturePointer in _currentVFXTextures.ToList())
 			{
-				if(currentTexturePointer == IntPtr.Zero)
+				var ptr = currentTexturePointer.Key;
+
+				if (IsBadReadPtr(ptr, (uint) sizeof(Texture))) 
 				{
-					_currentVFXTextures.Remove(currentTexturePointer);
+					_currentVFXTextures.Remove(ptr);
 					continue;
 				}
-				var tex = ((Texture*)currentTexturePointer);
-				if(tex != null)
+				else
 				{
-					tex->D3D11Texture2D = D3D11Texture2D;
-					tex->D3D11ShaderResourceView = D3D11ShaderResourceView;
+					var tex = ((Texture*)ptr);
+					if (IsBadReadPtr((IntPtr) tex->D3D11Texture2D, (uint) sizeof(void*)))
+					{
+						_currentVFXTextures.Remove(ptr);
+						continue;
+					}
+					else
+					{
+						if (!currentTexturePointer.Value) 
+						{
+							//Completely new Texture arrived from VFX, cant tell if texture is valid or not, just write pointers
+							tex->D3D11Texture2D = D3D11Texture2D;
+							tex->D3D11ShaderResourceView = D3D11ShaderResourceView;
+
+							_currentVFXTextures[ptr] = true;
+							success = true;
+						}
+						else
+						{
+							if ((IntPtr)tex->D3D11Texture2D == _oldSharedTexture)
+							{
+								//Old texture spotted, refresh texture if necessary, otherwise do nothing to it
+								if (changingFlag)
+								{
+									tex->D3D11Texture2D = D3D11Texture2D;
+									tex->D3D11ShaderResourceView = D3D11ShaderResourceView;
+								}
+								success = true;
+							}
+							else
+							{
+								//Even though texture has been set once, theres a mismatch in pointers, it might have been disposed, so remove it
+								_currentVFXTextures.Remove(ptr);
+							}
+						}
+					}
 				}
 			}
-			return true;
+			if (changingFlag)
+			{
+				_oldSharedTexture = _currentSharedTexture.NativePointer;
+			}
+
+			Services.Log.Debug("TV Redraw Successful");
+			return success;
 		}
 		else
 		{
 			return false;
 		}
-	}
-
-	private unsafe void BlankOutTV(nint TV)
-	{
-		fixed (byte* Bptr = _blankCanvas) //Put a Black Canvas on the TV
-		{
-			var TVdraw = (CharacterBase*)TV;
-			try
-			{
-
-				TVdraw->Models[0]->Materials[1]->Textures[3].Texture->Texture->InitializeContents((void*)Bptr);
-			}
-			catch (Exception)
-			{
-				//Ignore Repaint
-			}
-		}
+		*/
 	}
 
 	public void UpdateSharedDXTexture(IntPtr handle)
 	{
+		Services.Log.Error("THIS SHOULD NOT EXECUTE!");
 		Texture2D? textureSource = DxHandler.Device?.OpenSharedResource<Texture2D>(handle);
 		if (textureSource != null)
 		{
@@ -222,20 +290,23 @@ public class MainWindow : Window, IDisposable
 
 	public void Dispose()
 	{
-		_deviceCreateTexture2DHook.Dispose();
+		//_deviceCreateTexture2DHook?.Dispose();
+		//_textureOnLoadHook.Dispose();
+		//_readSqpackHook.Dispose();
 		Services.CommandManager.ProcessCommand("/honorific force clear");
 	}
 
 	private void TurnOnTV(uint entityId)
 	{
-		var isPlayer = entityId == Services.ClientState?.LocalPlayer?.EntityId;
+		var player = Services.ClientState?.LocalPlayer;
+		var isPlayer = entityId == player?.EntityId;
 		if (isPlayer)
 		{
 			if(ValidateURL(out Uri? url) && url != null)
 			{
 				_currentToggle = entityId;
 				
-				_plugin.NavigatePictomaticWindow(url.ToString());
+				_plugin.NavigatePictomaticWindow(url.ToString(), currentSharedTextureResourceHandle);
 				ShareTitle(url.ToString());
 			}
 		}
@@ -244,9 +315,12 @@ public class MainWindow : Window, IDisposable
 			if (_currentURLs.TryGetValue(entityId, out var url))
 			{
 				_currentToggle = entityId;
-				_plugin.NavigatePictomaticWindow(url);
+				_plugin.NavigatePictomaticWindow(url, currentSharedTextureResourceHandle);
 			}
 		}
+
+		//Assume no TV is running
+		_currentActivatedTV = 0;
 	}
 
 	private void TurnOffTV()
@@ -261,7 +335,7 @@ public class MainWindow : Window, IDisposable
 		_currentToggle = 0;
 		_plugin.TerminatePictomaticWindow();
 		volumeEnabled = false;
-		Services.CommandManager?.ProcessCommand("/penumbra redraw carbuncle");
+		initTexture();
 	}
 
 	private bool ValidateURL(out Uri? url)
@@ -272,33 +346,45 @@ public class MainWindow : Window, IDisposable
 			formattedUrl = "https://" + formattedUrl;
 
 		return Uri.TryCreate(formattedUrl, UriKind.Absolute, out url)
-			   && (url.Scheme == Uri.UriSchemeHttp || url.Scheme == Uri.UriSchemeHttps) && url.Host.Contains(".") && !url.Host.EndsWith(".") && Uri.CheckHostName(url.Host) == UriHostNameType.Dns; ;
+			   && (url.Scheme == Uri.UriSchemeHttp || url.Scheme == Uri.UriSchemeHttps) && url.Host.Contains(".") && !url.Host.EndsWith(".") && Uri.CheckHostName(url.Host) == UriHostNameType.Dns;
 	}
 
 
 	private bool isFocused = false;
 	private String placeHolderURL = String.Empty;
-	public override void Draw()
+	public override async void Draw()
 	{
-		if (_currentToggle != 0)
+		if (_signalShareTitle)
 		{
-			ImGui.Text("");
-
-			if (volumeEnabled)
+			Services.CommandManager.ProcessCommand("/honorific force set picto:" + _shortenedURL + "|silent");
+			_signalShareTitle = false;
+		}
+		/*
+		if (ImGui.Button("CreateActorVFX"))
+		{
+			try
 			{
-				ImGui.Text("  -");
-				ImGui.SameLine();
-				if (ImGui.SliderFloat("##Volume", ref volume, 0.0f, 1.0f, "Volume"))
+				
+				var play= Services.ClientState?.LocalPlayer?.Address;
+				if(play.HasValue)
 				{
-					SetVolume(volume);
+					ActorVfxCreate(VFXPath, currentVFXObjAddress, currentVFXObjAddress, -1, (char)0, 0, (char)0);
+
+					_ = System.Threading.Tasks.Task.Run(async () =>
+					{
+						await System.Threading.Tasks.Task.Delay(150);
+					});
 				}
-				ImGui.SameLine();
-				ImGui.Text("+");
-				ImGui.Text("");
+					
+			}
+			catch (Exception e)
+			{
+				Services.Log.Error(e.ToString());
 			}
 		}
+		*/
 		ImGui.Text(" Available TVs:");
-		var npcList = Services.ObjectTable.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.Name.TextValue);
+		var npcList = Services.Objects.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.Name.TextValue);
 		foreach (var item in npcList)
 		{
 			var isPlayer = item.EntityId == Services.ClientState?.LocalPlayer?.EntityId;
@@ -332,6 +418,7 @@ public class MainWindow : Window, IDisposable
 					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
 				}
 
+
 				ImGui.PushFont(UiBuilder.IconFont);
 				if (ImGui.Button((toggle ? 
 					(!string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists ? FontAwesomeIcon.Repeat.ToIconString() 
@@ -339,31 +426,36 @@ public class MainWindow : Window, IDisposable
 					)
 					: FontAwesomeIcon.Play.ToIconString()) + "##" + item.EntityId))
 				{
-					if (!toggle || (toggle && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists))
+					try
 					{
-						if(!toggle) //If its toggled already, its the Refresh Button, do not turn off TV!
-						{ 
-							TurnOffTV(); //Turn off TV before its turned on, as to reset the Textures of any currently running TVs
-						}
-
-						System.Threading.Tasks.Task.Run(async () =>
+						if (!toggle || (toggle && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists))
 						{
-							await System.Threading.Tasks.Task.Delay(250);
+							/*
+							if (!toggle) //If its toggled already, its the Refresh Button, do not turn off TV!
+							{
+								TurnOffTV(); //Turn off TV before its turned on, as to reset the Textures of any currently running TVs
+								//TODO: CHECK IF YOU CAN SWAP TV INSTEAD OF TURNING OFF AND ON
+							}
+							*/
 							TurnOnTV(item.EntityId);
 							if (isPlayer)
 							{
 								placeHolderURL = _inputURL;
 								_inputURL = String.Empty;
 							}
-						});
-					}
-					else
-					{
-						TurnOffTV();
-						if(isPlayer && string.IsNullOrEmpty(_inputURL))
-						{
-							_inputURL = placeHolderURL;
 						}
+						else
+						{
+							TurnOffTV();
+							if (isPlayer && string.IsNullOrEmpty(_inputURL))
+							{
+								_inputURL = placeHolderURL;
+							}
+						}
+					}
+					catch (Exception ex)
+					{
+						Services.Log.Error("FATAL ERROR: " + ex.ToString());
 					}
 				}
 				ImGui.PopFont();
@@ -440,32 +532,166 @@ public class MainWindow : Window, IDisposable
 			}
 		}
 	}
+	/*
+	private bool currentVFXActive = false;
+	private nint currentVFXObjAddress = 0;
+	private nint currentVFXPlrAddress = 0;
+	//chara/monster/m7002/obj/body/b0001/vfx/eff/vm0001.avfx
+	private string VFXPath = "chara/monster/m7002/obj/body/b0001/vfx/eff/carbuncleemittor.avfx";
 
-	private const string DeviceCreateTexture2DAddress = "E8 ?? ?? ?? ?? 48 89 07 48 8D 7F 20";
-	private unsafe delegate Texture* DeviceCreateTexture2D(FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Device* thisPtr, int* size, byte mipLevel, uint textureFormat, uint flags, uint unk);
-	private Hook<DeviceCreateTexture2D> _deviceCreateTexture2DHook;
+	private void RefreshActorVFX()
+	{
+		if (currentVFXActive)
+		{
+			try
+			{
+				ActorVfxCreate(VFXPath, currentVFXObjAddress, currentVFXObjAddress, -1, (char)0, 0, (char)0);
+			}
+			catch (Exception e)
+			{
+				Services.Log.Error(e.ToString());
+			}
+		}
+	}
 
+	
+	
+	//private const string DeviceCreateTexture2DSig = "E8 ?? ?? ?? ?? 48 89 07 48 8D 7F 20 ?? ?? ?? ??";
+	public const string ActorVfxCreateSig = "40 53 55 56 57 48 81 EC ?? ?? ?? ?? 0F 29 B4 24 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 0F B6 AC 24 ?? ?? ?? ?? 0F 28 F3 49 8B F8";
+	public const string ReadSqpackSig = "40 56 41 56 48 83 EC ?? 0F BE 02";
+	public const string GetResourceSyncSig = "E8 ?? ?? ?? ?? 48 8B D8 8B C7";
+	public const string GetResourceAsyncSig = "E8 ?? ?? ?? 00 48 8B D8 EB ?? F0 FF 83 ?? ?? 00 00";
 
+	//private Hook<Device.Delegates.CreateTexture2D> _deviceCreateTexture2DHook;
+
+	public delegate IntPtr ActorVfxCreateDelegate(string path, IntPtr a2, IntPtr a3, float a4, char a5, ushort a6, char a7);
+	public ActorVfxCreateDelegate ActorVfxCreate;
+
+	[StructLayout(LayoutKind.Explicit)]
+	public unsafe struct SeFileDescriptor
+	{
+		[FieldOffset(0x00)]
+		public FileMode FileMode;
+
+		[FieldOffset(0x30)]
+		public void* FileDescriptor;
+
+		[FieldOffset(0x50)]
+		public ResourceHandle* ResourceHandle;
+
+		[FieldOffset(0x70)]
+		public char Utf16FileName;
+	}
+
+	public unsafe delegate byte ReadSqpackPrototype(IntPtr fileHandler, SeFileDescriptor* fileDesc, int priority, bool isSync);
+
+	public unsafe delegate void* GetResourceSyncPrototype(IntPtr resourceManager, uint* categoryId, uint* resourceType,
+		int* resourceHash, byte* path, void* resParams);
+
+	public unsafe delegate void* GetResourceAsyncPrototype(IntPtr resourceManager, uint* categoryId, uint* resourceType,
+		int* resourceHash, byte* path, void* resParams, bool isUnknown);
+
+	private Hook<ReadSqpackPrototype> _readSqpackHook;
+	private Hook<GetResourceSyncPrototype> _getResourceSyncHook;
+	private Hook<GetResourceAsyncPrototype> _getResourceAsyncHook;
+	private Hook<Texture.Delegates.InitializeContents> _textureOnLoadHook;
 	private unsafe void initHook()
 	{
-		var hm = new HookManager(Services.InteropProvider);
-		_deviceCreateTexture2DHook = hm.CreateHook<DeviceCreateTexture2D>("Pictomatic.Device.CreateTexture2D", DeviceCreateTexture2DAddress, DeviceCreateTexture2DDetour, true).Result;
+		//var deviceCreateTexture2DAddress = Services.SigScanner.ScanText(DeviceCreateTexture2DSig);
+		//_deviceCreateTexture2DHook = Services.InteropProvider.HookFromAddress<Device.Delegates.CreateTexture2D>(deviceCreateTexture2DAddress, DeviceCreateTexture2DDetour);
+		//_deviceCreateTexture2DHook.Enable();
+
+		Services.Log.Debug("Init Hooks");
+		_readSqpackHook = Services.InteropProvider.HookFromSignature<ReadSqpackPrototype>(ReadSqpackSig, ReadSqpackDetour);
+		_readSqpackHook.Enable();
+		//_getResourceSyncHook = Services.InteropProvider.HookFromSignature<GetResourceSyncPrototype>(GetResourceSyncSig, GetResourceSyncDetour);
+		//_getResourceAsyncHook = Services.InteropProvider.HookFromSignature<GetResourceAsyncPrototype>(GetResourceAsyncSig, GetResourceAsyncDetour);
+		_textureOnLoadHook = Services.InteropProvider.HookFromAddress<Texture.Delegates.InitializeContents>(Texture.Addresses.InitializeContents.Value, TexOnLoadDetour);
+
+		var actorVfxCreateAddress = Services.SigScanner.ScanText(ActorVfxCreateSig);
+		ActorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
+		Services.Log.Debug("Init Hooks success");
 	}
 
-	private unsafe Texture* DeviceCreateTexture2DDetour(FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Device* thisPtr, int* size, byte mipLevel, uint textureFormat, uint flags, uint unk)
+	private unsafe bool TexOnLoadDetour(Texture* thisPtr, void* contents)
 	{
-		if (size[0] == 1920 && size[1] == 1080 && mipLevel == 9)
+		try
 		{
-			var currentVFXTexture = _deviceCreateTexture2DHook.Original(thisPtr, size, mipLevel, textureFormat, flags, unk);
-			Services.Log.Debug("Spotted new VFX TV Texture");
-			_currentVFXTextures.Add((IntPtr) currentVFXTexture);
-			return currentVFXTexture;
+			if (thisPtr != null && (IntPtr) thisPtr != IntPtr.Zero)
+			{
+				if (thisPtr->ActualWidth == 4096 && thisPtr->ActualHeight == 4096)
+				{
+					Services.Log.Debug("Adding new Texture for TV, mip-level:" + thisPtr->MipLevel);
+					var tex = _textureOnLoadHook.Original(thisPtr, contents);
+
+					Task.Run(() =>
+					{
+						Thread.Sleep(500);
+						if (_currentSharedTexture.IsDisposed)
+						{
+							Services.Log.Debug("Current Shared Texture has been disposed!!");
+							return System.Threading.Tasks.Task.CompletedTask;
+						}
+						var textureSource = _currentSharedTexture;
+						ShaderResourceView view = new(DxHandler.Device, textureSource, new ShaderResourceViewDescription { Format = textureSource.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = textureSource.Description.MipLevels } });
+
+						// Obtain the native pointers
+						void* D3D11Texture2D = (void*)textureSource.NativePointer;
+						void* D3D11ShaderResourceView = (void*)view.NativePointer;
+
+						thisPtr->D3D11Texture2D = D3D11Texture2D;
+						thisPtr->D3D11ShaderResourceView = D3D11ShaderResourceView;
+
+						Services.Log.Debug("Added new Texture for TV, mip-level:" + thisPtr->MipLevel);
+						return System.Threading.Tasks.Task.CompletedTask;
+					});
+
+					//_currentVFXTextures.TryAdd((IntPtr)thisPtr, false);
+				}
+			}
+
 		}
-		else
-		{
-			return _deviceCreateTexture2DHook.Original(thisPtr, size, mipLevel, textureFormat, flags, unk);
-		}
+		catch (Exception ex) { Services.Log.Error(ex.ToString()); }
+
+		return _textureOnLoadHook.Original(thisPtr, contents);
 	}
+	private unsafe byte ReadSqpackDetour(IntPtr fileHandler, SeFileDescriptor* fileDesc, int priority, bool isSync)
+	{
+		if( fileDesc->ResourceHandle == null ) return _readSqpackHook.Original( fileHandler, fileDesc, priority, isSync );
+		if (fileDesc->ResourceHandle->FileName.ToString().Contains("/carbunclefinalp12/chara/monster/m7002/obj/body/b0001/vfx/eff/carbuncleemittor.avfx"))
+		{
+			_textureOnLoadHook.Enable();
+			var original = _readSqpackHook.Original(fileHandler, fileDesc, priority, isSync);
+			_textureOnLoadHook.Disable();
+			return original;
+		}
+		return _readSqpackHook.Original(fileHandler, fileDesc, priority, isSync);
+	}
+
+	private unsafe Texture* DeviceCreateTexture2DDetour(Device* thisPtr, int* size, byte mipLevel, TextureFormat textureFormat, TextureFlags flags, uint unk)
+	{
+		var currentVFXTexture = _deviceCreateTexture2DHook.Original(thisPtr, size, mipLevel, textureFormat, flags, unk);
+		try
+		{
+			if (mipLevel == 11)
+			{
+				if(size[0] == 1920)
+				{
+					if (size[1] == 1080)
+					{
+						Services.Log.Debug("Spotted new VFX TV Texture" + (IntPtr)currentVFXTexture);
+						_currentVFXTextures.TryAdd((IntPtr)currentVFXTexture, false);
+					}
+				}
+			}
+		}
+		catch(Exception ex)
+		{
+			Services.Log.Error(ex.ToString());
+		}
+		return currentVFXTexture;
+	}
+	*/
 
 	internal async void UpdateTitle(uint entityId, string title)
 	{
@@ -490,23 +716,24 @@ public class MainWindow : Window, IDisposable
 				await FetchURLData(url, response => {
 					_currentURLs[entityId] = response;
 					if (_currentToggle == entityId)
-						_plugin.NavigatePictomaticWindow(response);
+						_plugin.NavigatePictomaticWindow(response, currentSharedTextureResourceHandle);
 				});
 			}
 		}
 	}
 
 	private long _lastMilliSecond = 0;
-	public void RefreshTVs()
+	public void Refresh()
 	{
 		//Check for Texture Updates once per sec
-		if (_lastMilliSecond + 500 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+		if (_lastMilliSecond + 1000 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 		{
 			_lastMilliSecond = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 			CheckAllTVs();
 		}
 	}
 
+	/*
 	private void CheckTitles() //not required anymore, btw causes issues with title/name switching, needs to get checked
 	{
 		unsafe
@@ -515,23 +742,23 @@ public class MainWindow : Window, IDisposable
 			
 			for (var i = 0; i < 50 && i < ratkm->NameplateInfoCount; i++)
 			{
-				var npi = ratkm->NamePlateInfoEntries.GetPointer(i);
-				if (npi->ObjectId.ObjectId == 0 || npi->ClassJobId == 0) continue;
-				var cleanTitle = MemoryHelper.ReadSeString(&npi->DisplayTitle).TextValue;
+				var npi = ratkm->NamePlateInfoEntries[i];
+				if (npi.ObjectId == 0 || npi.ClassJobId == 0) continue;
+				var cleanTitle = npi.DisplayTitle.ToString();
 				if (cleanTitle.Length > 2)
 				{
 					cleanTitle = cleanTitle.Substring(1, cleanTitle.Length - 2);
-					UpdateTitle(npi->ObjectId.ObjectId, cleanTitle);
+					UpdateTitle(npi.ObjectId.ObjectId, cleanTitle);
 				}
 			}
 		}
 	}
-
+	*/
 	private async void ShareTitle(string url)
 	{
 		if (url == _lastURL)
 		{
-			Services.CommandManager.ProcessCommand("/honorific force set picto:" + _shortenedURL + "|silent");
+			_signalShareTitle = true;
 		}
 		else
 		{
@@ -539,7 +766,8 @@ public class MainWindow : Window, IDisposable
 			{
 				_lastURL = url;
 				_shortenedURL = result.Split("/").Last();
-				Services.CommandManager.ProcessCommand("/honorific force set picto:" + _shortenedURL + "|silent");
+				_signalShareTitle = true; //Shortened URL will be updated on main thread
+				
 			}, error => {
 				TurnOffTV(); //TODO: Proper Error Handling!
 			});
@@ -607,35 +835,38 @@ public class MainWindow : Window, IDisposable
 	private List<uint> VisitedAudioProcesses = new List<uint>();
 	private void RefreshVolume()
 	{
-		if (!volumeEnabled)
-		{
-			var enumerator = new MMDeviceEnumerator();
-			var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-			var sessionManager = device.AudioSessionManager;
-			var sessionsCount = sessionManager.Sessions.Count;
-
-			if (sessionManager == null) return;
-
-			for (int i = 0; i < sessionsCount; i++)
+		try {
+			if (!volumeEnabled)
 			{
+				var enumerator = new MMDeviceEnumerator();
+				var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+				var sessionManager = device.AudioSessionManager;
+				var sessionsCount = sessionManager.Sessions.Count;
 
-				var session = sessionManager.Sessions[i];
-				var sessionId = session.GetProcessID;
+				if (sessionManager == null) return;
 
-				if (!VisitedAudioProcesses.Contains(sessionId))
+				for (int i = 0; i < sessionsCount; i++)
 				{
-					VisitedAudioProcesses.Add(sessionId);
-					var parent = CheckProcessParent(sessionId);
-					if (_currentSubProcess == parent && _currentSubProcess != 0 && parent != 0)
+
+					var session = sessionManager.Sessions[i];
+					var sessionId = session.GetProcessID;
+
+					if (!VisitedAudioProcesses.Contains(sessionId))
 					{
-						_currentAudioProcess = sessionId;
-						volume = session.SimpleAudioVolume.Volume;
-						volumeEnabled = true;
-						return;
+						VisitedAudioProcesses.Add(sessionId);
+						var parent = CheckProcessParent(sessionId);
+						if (_currentSubProcess == parent && _currentSubProcess != 0 && parent != 0)
+						{
+							_currentAudioProcess = sessionId;
+							volume = session.SimpleAudioVolume.Volume;
+							volumeEnabled = true;
+							return;
+						}
 					}
 				}
 			}
 		}
+		catch {  }
 	}
 
 	private void SetVolume(float volumeLevel)

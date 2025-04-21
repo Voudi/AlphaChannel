@@ -9,7 +9,6 @@
 		<Copy SourceFiles="$(OutputPath)\Pictomatic.Common.pdb" DestinationFolder="$(OutputPath)\renderer"/>
 		<Copy SourceFiles="$(OutputPath)\SharedMemory.dll" DestinationFolder="$(OutputPath)\renderer"/>
 		<Copy SourceFiles="$(OutputPath)\FlatSharp.Runtime.dll" DestinationFolder="$(OutputPath)\renderer"/>
-		<Copy SourceFiles="$(OutputPath)\images\icon.png" DestinationFolder="$(OutputPath)"/>
 		<Copy SourceFiles="$(OutputPath)\Pictomatic.Renderer.dll" DestinationFolder="$(OutputPath)\renderer"/>
 		<Copy SourceFiles="$(OutputPath)\Pictomatic.Renderer.exe" DestinationFolder="$(OutputPath)\renderer"/>
 		<Copy SourceFiles="$(OutputPath)\Pictomatic.Renderer.pdb" DestinationFolder="$(OutputPath)\renderer"/>
@@ -19,9 +18,9 @@
 		<Copy SourceFiles="C:\Users\Voudi\.nuget\packages\naudio.wasapi\2.2.1\lib\netstandard2.0\NAudio.Wasapi.dll" DestinationFolder="$(OutputPath)"/>
 		<Delete Files="$(OutputPath)\Pictomatic.Renderer.deps.json"/>
 		<Delete Files="$(OutputPath)\Pictomatic.Renderer.exe.bak"/>
-		<Move SourceFiles="$(OutputPath)\SharpDX.Direct3D11.dll" DestinationFolder="$(OutputPath)\renderer"/>
-		<Move SourceFiles="$(OutputPath)\SharpDX.dll" DestinationFolder="$(OutputPath)\renderer"/>
-		<Move SourceFiles="$(OutputPath)\SharpDX.DXGI.dll" DestinationFolder="$(OutputPath)\renderer"/>
+		<Copy SourceFiles="$(appdata)\XIVLauncher\addon\Hooks\dev\SharpDX.Direct3D11.dll" DestinationFolder="$(OutputPath)\renderer"/>
+		<Copy SourceFiles="$(appdata)\XIVLauncher\addon\Hooks\dev\SharpDX.dll" DestinationFolder="$(OutputPath)\renderer"/>
+		<Copy SourceFiles="$(appdata)\XIVLauncher\addon\Hooks\dev\SharpDX.DXGI.dll" DestinationFolder="$(OutputPath)\renderer"/>
 	</Target>
 	<Target Name="PackagePlugin" AfterTargets="PrepareOutput" Condition="'$(Configuration)' == 'Release'">
 		<DalamudPackager

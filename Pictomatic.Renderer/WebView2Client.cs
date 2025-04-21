@@ -130,8 +130,6 @@ public partial class WebView2Client : Form
 	{
 		_webView.Invoke(async () =>
 		{
-
-			
 			try {
 				await _webView.CoreWebView2.Profile.AddBrowserExtensionAsync(_adBlockDir + "\\uBlock0.chromium");
 			}

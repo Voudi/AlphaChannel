@@ -1,12 +1,4 @@
-﻿using System.Linq;
-using System;
-using System.Numerics;
-using Dalamud.Game.ClientState.Objects.SubKinds;
-using Dalamud.Game.Text.SeStringHandling;
-using FFXIVClientStructs.FFXIV.Client.Game.Character;
-using FFXIVClientStructs.FFXIV.Client.UI.Misc;
-using Dalamud.Game.Text.SeStringHandling.Payloads;
-using Pictomatic;
+﻿using System.Numerics;
 using System.Text.Json.Serialization;
 using System.ComponentModel;
 

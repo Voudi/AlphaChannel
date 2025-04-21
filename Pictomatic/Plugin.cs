@@ -1,23 +1,10 @@
-﻿using Pictomatic.Common;
-using Dalamud.Game.Command;
+﻿using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
-using Dalamud.IoC;
 using Dalamud.Plugin;
-using Dalamud.Plugin.Services;
-using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
 using ImGuiNET;
 using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
-using SharpDX.Direct3D11;
-using FFXIVClientStructs.Interop.Generated;
-using static FFXIVClientStructs.FFXIV.Client.UI.Misc.GroupPoseModule;
-using System.IO;
-using ImGuiScene;
-using System.Drawing;
-using Honorific;
-using System.Reflection.Metadata;
-using System.Security.Policy;
 
 namespace Pictomatic;
 
@@ -40,6 +27,8 @@ public class Plugin : IDalamudPlugin
 		// init services
 		_services = pluginInterface.Create<Services>()!;
 
+		MainWindow = new MainWindow(this);
+
 		_pluginDir = pluginInterface.AssemblyLocation.DirectoryName ?? "";
 		if (String.IsNullOrEmpty(_pluginDir))
 		{
@@ -54,8 +43,7 @@ public class Plugin : IDalamudPlugin
 
 		// Hook up render hook
 		pluginInterface.UiBuilder.Draw += Render;
-
-		MainWindow = new MainWindow(this);
+		
 		WindowSystem.AddWindow(MainWindow);
 		IpcProvider.Init(this);
 
@@ -90,7 +78,9 @@ public class Plugin : IDalamudPlugin
 		// race condition overlays receiving a null reference.
 		int pid = Process.GetCurrentProcess().Id;
 
-		_renderProcess = new RenderProcess(pid, _pluginDir, _pluginConfigDir, _dependencyManager, Services.PluginLog);
+		MainWindow.initTexture();
+
+		_renderProcess = new RenderProcess(pid, _pluginDir, _pluginConfigDir, _dependencyManager, Services.PluginLog, MainWindow.currentSharedTextureResourceHandle);
 		_renderProcess.Rpc.RendererReady += msg =>
 		{
 			if (!msg.HasDxSharedTexturesSupport)
@@ -129,7 +119,7 @@ public class Plugin : IDalamudPlugin
 
 		_renderProcess?.EnsureRenderProcessIsAlive();
 
-		this.MainWindow?.RefreshTVs();
+		this.MainWindow?.Refresh();
 		DrawUI();
 
 		ImGui.PopStyleVar();
@@ -147,17 +137,17 @@ public class Plugin : IDalamudPlugin
 
 	public void TerminatePictomaticWindow()
 	{
-		_renderProcess.Rpc.Navigate(Guid.Empty, "kill");
+		_renderProcess?.Rpc.Navigate(Guid.Empty, "kill", "kill");
 	}
 
-	public void NavigatePictomaticWindow(string url)
+	public void NavigatePictomaticWindow(string url, string sharedHandle)
 	{
-		_renderProcess.Rpc.Navigate(Guid.Empty, url);
+		_renderProcess?.Rpc.Navigate(Guid.Empty, url, sharedHandle);
 	}
 
 	public void ToggleExpandPictomaticWindow()
 	{
-		_renderProcess.Rpc.Zoom(Guid.Empty, 0);
+		_renderProcess?.Rpc.Zoom(Guid.Empty, 0);
 	}
 
 	internal void UpdateTitle(uint entityId, TitleData titleData)

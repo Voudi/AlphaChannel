@@ -8,8 +8,6 @@ internal class CaptureProcess : IDisposable
 {
 	public event EventHandler? Crashed;
 
-
-
 	private readonly string _keepAliveHandleName;
 	private readonly int _parentPid;
 	private readonly string _pluginDir;
@@ -17,15 +15,17 @@ internal class CaptureProcess : IDisposable
 	private Process _process;
 	private bool _running;
 	private IntPtr _wHandle;
+	private string _sharedHandle;
 
 	public CaptureProcess(int pid,
-		string pluginDir, IntPtr wHandle
+		string pluginDir, IntPtr wHandle, string sharedHandle
 	)
 	{
 		_wHandle = wHandle;
 		_keepAliveHandleName = $"PictomaticCaptureKeepAlive{pid}";
 		_pluginDir = pluginDir;
 		_parentPid = pid;
+		_sharedHandle = sharedHandle;
 
 		_process = SetupProcess();
 	}
@@ -142,7 +142,7 @@ internal class CaptureProcess : IDisposable
 
 	private Process SetupProcess()
 	{
-		string processArgs = DxHandler.AdapterLuid + " " + _wHandle + " " + Process.GetCurrentProcess().Id + " " + _keepAliveHandleName;
+		string processArgs = DxHandler.AdapterLuid.ToString("X") + " " + _wHandle.ToString("X") + " " + Process.GetCurrentProcess().Id + " " + _keepAliveHandleName + " " + _sharedHandle;
 
 		Process process = new()
 		{

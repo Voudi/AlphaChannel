@@ -18,7 +18,6 @@ internal static class Program
 	public static WebView2Client? _webView2Client;
 	public static CaptureProcess? _capture;
 
-	public static string? _currentSharedHandle;
 	public static string? _pluginDir, _assemblyDir, _cacheDir;
 
 	public static bool _webViewInitialized = false;
@@ -31,8 +30,8 @@ internal static class Program
 
 		var args = RenderParamsSerializer.Deserialize(rawArgs[0]);
 		_pluginDir = args.PluginDir;
-		_assemblyDir = args.CefAssemblyDir;
-		_cacheDir = args.CefCacheDir;
+		_assemblyDir = args.UblockDir;
+		_cacheDir = args.WebviewCacheDir;
 
 		Run(args);
 	}
@@ -64,19 +63,20 @@ internal static class Program
 		Application.Exit();
 	}
 
-	private static void InitializeWebView(string url)
+	private static void InitializeWebView(string url, string handle)
 	{
 		if (_webViewInitialized) {
 			_webView2Client?.Navigate(url);
 			return;
 		}
 		_webViewInitialized = true;
+		
 		Thread capturestaThread = new Thread(() =>
 		{
 			int pid = Process.GetCurrentProcess().Id;
 			try
 			{
-				_capture = new CaptureProcess(pid, _pluginDir, _webView2Client.handle);
+				_capture = new CaptureProcess(pid, _pluginDir, _webView2Client.handle, handle);
 				_capture.Start();
 			}
 			catch { }
@@ -130,7 +130,7 @@ internal static class Program
 			}
 			else
 			{
-				InitializeWebView(msg.Url);
+				InitializeWebView(msg.Url, msg.SharedHandle);
 			}
 		}
 	}
