@@ -165,16 +165,11 @@ public class MainWindow : Window, IDisposable
 		
 		if (_currentToggle == ownerId) //This TV is supposed to be active...
 		{
+			var playeraddr = Services.ClientState?.LocalPlayer?.Address;
 			if (_currentActivatedTV != _currentToggle) //...But it's not active
 			{
 				if (ReassignTextureForTV(tvAddr))
 				{
-					
-					currentVFXActive = true;
-					currentVFXObjAddress = address;
-					var playeraddr = Services.ClientState?.LocalPlayer?.Address;
-					currentVFXPlrAddress = playeraddr.HasValue ? playeraddr.Value : currentVFXObjAddress;
-					
 					_currentActivatedTV = ownerId;
 					Services.Log.Debug("Turning on new TV...");
 				}
@@ -182,10 +177,7 @@ public class MainWindow : Window, IDisposable
 			else
 			{
 				//This TV is active, refresh its VFX
-				if (currentVFXActive)
-				{
-					RefreshActorVFX();
-				}
+				RefreshActorVFX(playeraddr.HasValue ? playeraddr.Value : address, address);
 			}
 		}
 	}
@@ -193,7 +185,7 @@ public class MainWindow : Window, IDisposable
 	[DllImport("kernel32.dll")]
 	static extern bool IsBadReadPtr(IntPtr lp, uint ucb);
 
-	private unsafe bool ReassignTextureForTV(nint tvAddr)
+	private bool ReassignTextureForTV(nint tvAddr)
 	{
 		/*
 		Services.Log.Debug("TV Tex redraw attempt");
@@ -526,23 +518,16 @@ public class MainWindow : Window, IDisposable
 	}
 
 	private string VFXPath = "chara/monster/m7002/obj/body/b0001/vfx/eff/carbuncleemittor.avfx";
-	
-	private bool currentVFXActive = false;
-	private nint currentVFXObjAddress = 0;
-	private nint currentVFXPlrAddress = 0;
 
-	private void RefreshActorVFX()
+	private void RefreshActorVFX(nint addrCaster, nint addrTarget)
 	{
-		if (currentVFXActive)
+		try
 		{
-			try
-			{
-				ActorVfxCreate(VFXPath, currentVFXPlrAddress, currentVFXObjAddress, -1, (char)0, 0, (char)0);
-			}
-			catch (Exception e)
-			{
-				Services.Log.Error(e.ToString());
-			}
+			ActorVfxCreate(VFXPath, addrCaster, addrTarget, -1, (char)0, 0, (char)0);
+		}
+		catch (Exception e)
+		{
+			Services.Log.Error(e.ToString());
 		}
 	}
 
@@ -635,18 +620,18 @@ public class MainWindow : Window, IDisposable
 				{
 					Services.Log.Debug("TV VFX redraw attempt");
 					var tex = _textureOnLoadHook.Original(thisPtr, contents);
-
-					if(thisPtr->D3D11Texture2D != (void*)_currentSharedTexture.NativePointer)
-					{
-						ShaderResourceView view = new(DxHandler.Device, _currentSharedTexture, new ShaderResourceViewDescription { Format = _currentSharedTexture.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = _currentSharedTexture.Description.MipLevels } });
-						thisPtr->D3D11Texture2D = (void*)_currentSharedTexture.NativePointer;
-						thisPtr->D3D11ShaderResourceView = (void*)view.NativePointer;
-						Services.Log.Debug("Successs redraw TV VFX");
-					}
-					else
-					{
-						Services.Log.Debug("TV VFX already redrawn");
-					}
+					if(tex)
+						if((nint)thisPtr->D3D11Texture2D != _currentSharedTexture.NativePointer)
+						{
+							ShaderResourceView view = new(DxHandler.Device, _currentSharedTexture, new ShaderResourceViewDescription { Format = _currentSharedTexture.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = _currentSharedTexture.Description.MipLevels } });
+							thisPtr->D3D11Texture2D = (void*)_currentSharedTexture.NativePointer;
+							thisPtr->D3D11ShaderResourceView = (void*)view.NativePointer;
+							Services.Log.Debug("Successs redraw TV VFX");
+						}
+						else
+						{
+							Services.Log.Debug("TV VFX already redrawn");
+						}
 
 					return tex;
 				}
