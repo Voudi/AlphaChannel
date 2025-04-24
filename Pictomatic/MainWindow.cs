@@ -12,6 +12,12 @@ using NAudio.CoreAudioApi;
 using Dalamud.Interface;
 using System.Runtime.InteropServices;
 using SharpDX.DXGI;
+using Dalamud.Hooking;
+using FFXIVClientStructs.FFXIV.Client.System.Resource;
+using InteropGenerator.Runtime;
+using FFXIVClientStructs.FFXIV.Client.System.Resource.Handle;
+using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
+using SharpDX.Mathematics.Interop;
 
 public class MainWindow : Window, IDisposable
 {
@@ -58,20 +64,19 @@ public class MainWindow : Window, IDisposable
 
 		this._plugin = plugin;
 
-		//initHook();
+		initHook();
 	}
 
 	public void initTexture()
 	{
 		var texture2dDescription = new Texture2DDescription
 		{
-
-			Width = 2048,
-			Height = 2048,
+			Width = 1920,
+			Height = 1080,
 			MipLevels = 1,
 			ArraySize = 1,
 			Format = Format.B8G8R8A8_UNorm,
-			BindFlags = BindFlags.ShaderResource,
+			BindFlags = BindFlags.ShaderResource | BindFlags.RenderTarget,
 			CpuAccessFlags = CpuAccessFlags.None,
 			SampleDescription = new SampleDescription(1, 0),
 			Usage = ResourceUsage.Default,
@@ -79,8 +84,17 @@ public class MainWindow : Window, IDisposable
 
 		};
 		_currentSharedTexture = new Texture2D(DxHandler.Device, texture2dDescription);
+		var rtv = new RenderTargetView(DxHandler.Device, _currentSharedTexture);
+		var clearColor = new RawColor4(0, 0, 0, 1);
+		DxHandler.Device?.ImmediateContext.ClearRenderTargetView(rtv, clearColor);
 		using SharpDX.DXGI.Resource resource = _currentSharedTexture.QueryInterface<SharpDX.DXGI.Resource>();
 		currentSharedTextureResourceHandle = ((ulong)resource.SharedHandle).ToString();
+	}
+	public void clearTexture()
+	{
+		var rtv = new RenderTargetView(DxHandler.Device, _currentSharedTexture);
+		var clearColor = new RawColor4(0, 0, 0, 1);
+		DxHandler.Device?.ImmediateContext.ClearRenderTargetView(rtv, clearColor);
 	}
 
 	private unsafe void CheckAllTVs()
@@ -114,7 +128,7 @@ public class MainWindow : Window, IDisposable
 												{
 													var ownerId = character->CompanionOwnerId;
 													visitedTvs.Add(ownerId);
-													CheckOutPossibleTV((IntPtr)tvDraw, ownerId);
+													CheckOutPossibleTV((IntPtr)tvDraw, ownerId, item.Address);
 												}
 						}
 						catch (Exception e) { }
@@ -132,7 +146,7 @@ public class MainWindow : Window, IDisposable
 		});
 	}
 
-	private void CheckOutPossibleTV(IntPtr tvDraw, uint ownerId)
+	private void CheckOutPossibleTV(IntPtr tvDraw, uint ownerId, nint address)
 	{
 		IntPtr ptr = tvDraw;
 		var tvAddrFound = _currentOwners.TryGetValue(ownerId, out var tvAddr);
@@ -155,25 +169,23 @@ public class MainWindow : Window, IDisposable
 			{
 				if (ReassignTextureForTV(tvAddr))
 				{
-					/*
+					
 					currentVFXActive = true;
-					currentVFXObjAddress = tvGameObj.Address;
+					currentVFXObjAddress = address;
 					var playeraddr = Services.ClientState?.LocalPlayer?.Address;
 					currentVFXPlrAddress = playeraddr.HasValue ? playeraddr.Value : currentVFXObjAddress;
-					*/
+					
 					_currentActivatedTV = ownerId;
 					Services.Log.Debug("Turning on new TV...");
 				}
 			}
 			else
 			{
-				/*
 				//This TV is active, refresh its VFX
 				if (currentVFXActive)
 				{
 					RefreshActorVFX();
 				}
-				*/
 			}
 		}
 	}
@@ -183,7 +195,8 @@ public class MainWindow : Window, IDisposable
 
 	private unsafe bool ReassignTextureForTV(nint tvAddr)
 	{
-		Services.Log.Debug("TV redraw attempt");
+		/*
+		Services.Log.Debug("TV Tex redraw attempt");
 		var TV = (CharacterBase*)tvAddr;
 		var textureSource = _currentSharedTexture;
 		ShaderResourceView view = new(DxHandler.Device, textureSource, new ShaderResourceViewDescription { Format = textureSource.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = textureSource.Description.MipLevels } });
@@ -194,8 +207,8 @@ public class MainWindow : Window, IDisposable
 		tex->D3D11Texture2D = (void*)textureSource.NativePointer;
 		tex->D3D11ShaderResourceView = (void*)view.NativePointer;
 
-		Services.Log.Debug("Successs redraw TV");
-
+		Services.Log.Debug("Successs redraw TV Tex");
+		*/
 		return true;
 		/*
 		if (_currentSharedTexture != null)
@@ -293,6 +306,8 @@ public class MainWindow : Window, IDisposable
 		//_deviceCreateTexture2DHook?.Dispose();
 		//_textureOnLoadHook.Dispose();
 		//_readSqpackHook.Dispose();
+		_getResourceSyncHook.Dispose();
+		_textureOnLoadHook.Dispose();
 		Services.CommandManager.ProcessCommand("/honorific force clear");
 	}
 
@@ -335,7 +350,7 @@ public class MainWindow : Window, IDisposable
 		_currentToggle = 0;
 		_plugin.TerminatePictomaticWindow();
 		volumeEnabled = false;
-		initTexture();
+		clearTexture();
 	}
 
 	private bool ValidateURL(out Uri? url)
@@ -359,30 +374,7 @@ public class MainWindow : Window, IDisposable
 			Services.CommandManager.ProcessCommand("/honorific force set picto:" + _shortenedURL + "|silent");
 			_signalShareTitle = false;
 		}
-		/*
-		if (ImGui.Button("CreateActorVFX"))
-		{
-			try
-			{
-				
-				var play= Services.ClientState?.LocalPlayer?.Address;
-				if(play.HasValue)
-				{
-					ActorVfxCreate(VFXPath, currentVFXObjAddress, currentVFXObjAddress, -1, (char)0, 0, (char)0);
-
-					_ = System.Threading.Tasks.Task.Run(async () =>
-					{
-						await System.Threading.Tasks.Task.Delay(150);
-					});
-				}
-					
-			}
-			catch (Exception e)
-			{
-				Services.Log.Error(e.ToString());
-			}
-		}
-		*/
+		
 		ImGui.Text(" Available TVs:");
 		var npcList = Services.Objects.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.Name.TextValue);
 		foreach (var item in npcList)
@@ -532,12 +524,12 @@ public class MainWindow : Window, IDisposable
 			}
 		}
 	}
-	/*
+
+	private string VFXPath = "chara/monster/m7002/obj/body/b0001/vfx/eff/carbuncleemittor.avfx";
+	
 	private bool currentVFXActive = false;
 	private nint currentVFXObjAddress = 0;
 	private nint currentVFXPlrAddress = 0;
-	//chara/monster/m7002/obj/body/b0001/vfx/eff/vm0001.avfx
-	private string VFXPath = "chara/monster/m7002/obj/body/b0001/vfx/eff/carbuncleemittor.avfx";
 
 	private void RefreshActorVFX()
 	{
@@ -545,7 +537,7 @@ public class MainWindow : Window, IDisposable
 		{
 			try
 			{
-				ActorVfxCreate(VFXPath, currentVFXObjAddress, currentVFXObjAddress, -1, (char)0, 0, (char)0);
+				ActorVfxCreate(VFXPath, currentVFXPlrAddress, currentVFXObjAddress, -1, (char)0, 0, (char)0);
 			}
 			catch (Exception e)
 			{
@@ -557,15 +549,18 @@ public class MainWindow : Window, IDisposable
 	
 	
 	//private const string DeviceCreateTexture2DSig = "E8 ?? ?? ?? ?? 48 89 07 48 8D 7F 20 ?? ?? ?? ??";
+	//public const string ReadSqpackSig = "40 56 41 56 48 83 EC ?? 0F BE 02";
+	
 	public const string ActorVfxCreateSig = "40 53 55 56 57 48 81 EC ?? ?? ?? ?? 0F 29 B4 24 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 0F B6 AC 24 ?? ?? ?? ?? 0F 28 F3 49 8B F8";
-	public const string ReadSqpackSig = "40 56 41 56 48 83 EC ?? 0F BE 02";
+
 	public const string GetResourceSyncSig = "E8 ?? ?? ?? ?? 48 8B D8 8B C7";
 	public const string GetResourceAsyncSig = "E8 ?? ?? ?? 00 48 8B D8 EB ?? F0 FF 83 ?? ?? 00 00";
 
-	//private Hook<Device.Delegates.CreateTexture2D> _deviceCreateTexture2DHook;
-
 	public delegate IntPtr ActorVfxCreateDelegate(string path, IntPtr a2, IntPtr a3, float a4, char a5, ushort a6, char a7);
 	public ActorVfxCreateDelegate ActorVfxCreate;
+
+	/*
+	//private Hook<Device.Delegates.CreateTexture2D> _deviceCreateTexture2DHook;
 
 	[StructLayout(LayoutKind.Explicit)]
 	public unsafe struct SeFileDescriptor
@@ -592,9 +587,10 @@ public class MainWindow : Window, IDisposable
 		int* resourceHash, byte* path, void* resParams, bool isUnknown);
 
 	private Hook<ReadSqpackPrototype> _readSqpackHook;
-	private Hook<GetResourceSyncPrototype> _getResourceSyncHook;
-	private Hook<GetResourceAsyncPrototype> _getResourceAsyncHook;
+	*/
+	private Hook<ResourceManager.Delegates.GetResourceSync> _getResourceSyncHook;
 	private Hook<Texture.Delegates.InitializeContents> _textureOnLoadHook;
+
 	private unsafe void initHook()
 	{
 		//var deviceCreateTexture2DAddress = Services.SigScanner.ScanText(DeviceCreateTexture2DSig);
@@ -602,15 +598,31 @@ public class MainWindow : Window, IDisposable
 		//_deviceCreateTexture2DHook.Enable();
 
 		Services.Log.Debug("Init Hooks");
-		_readSqpackHook = Services.InteropProvider.HookFromSignature<ReadSqpackPrototype>(ReadSqpackSig, ReadSqpackDetour);
-		_readSqpackHook.Enable();
-		//_getResourceSyncHook = Services.InteropProvider.HookFromSignature<GetResourceSyncPrototype>(GetResourceSyncSig, GetResourceSyncDetour);
-		//_getResourceAsyncHook = Services.InteropProvider.HookFromSignature<GetResourceAsyncPrototype>(GetResourceAsyncSig, GetResourceAsyncDetour);
-		_textureOnLoadHook = Services.InteropProvider.HookFromAddress<Texture.Delegates.InitializeContents>(Texture.Addresses.InitializeContents.Value, TexOnLoadDetour);
+		//_readSqpackHook = Services.InteropProvider.HookFromSignature<ReadSqpackPrototype>(ReadSqpackSig, ReadSqpackDetour);
+		//_readSqpackHook.Enable();
 
+		_getResourceSyncHook = Services.InteropProvider.HookFromSignature<ResourceManager.Delegates.GetResourceSync>(GetResourceSyncSig, GetResourceSyncDetour);
+		_getResourceSyncHook.Enable();
+		_textureOnLoadHook = Services.InteropProvider.HookFromAddress<Texture.Delegates.InitializeContents>(Texture.Addresses.InitializeContents.Value, TexOnLoadDetour);
 		var actorVfxCreateAddress = Services.SigScanner.ScanText(ActorVfxCreateSig);
 		ActorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
 		Services.Log.Debug("Init Hooks success");
+	}
+
+	private unsafe ResourceHandle* GetResourceSyncDetour(ResourceManager* thisPtr, ResourceCategory* category, uint* type, uint* hash, CStringPointer path, void* unknown)
+	{
+		if(path.ToString().Contains("chara/monster/m7002/obj/body/b0001/vfx/texture/screentex.atex"))
+		{
+			_textureOnLoadHook.Enable();
+			var ret = _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown);
+			_textureOnLoadHook.Disable();
+			
+			return ret;
+		}
+		else
+		{
+			return _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown);
+		}
 	}
 
 	private unsafe bool TexOnLoadDetour(Texture* thisPtr, void* contents)
@@ -621,32 +633,22 @@ public class MainWindow : Window, IDisposable
 			{
 				if (thisPtr->ActualWidth == 4096 && thisPtr->ActualHeight == 4096)
 				{
-					Services.Log.Debug("Adding new Texture for TV, mip-level:" + thisPtr->MipLevel);
+					Services.Log.Debug("TV VFX redraw attempt");
 					var tex = _textureOnLoadHook.Original(thisPtr, contents);
 
-					Task.Run(() =>
+					if(thisPtr->D3D11Texture2D != (void*)_currentSharedTexture.NativePointer)
 					{
-						Thread.Sleep(500);
-						if (_currentSharedTexture.IsDisposed)
-						{
-							Services.Log.Debug("Current Shared Texture has been disposed!!");
-							return System.Threading.Tasks.Task.CompletedTask;
-						}
-						var textureSource = _currentSharedTexture;
-						ShaderResourceView view = new(DxHandler.Device, textureSource, new ShaderResourceViewDescription { Format = textureSource.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = textureSource.Description.MipLevels } });
+						ShaderResourceView view = new(DxHandler.Device, _currentSharedTexture, new ShaderResourceViewDescription { Format = _currentSharedTexture.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = _currentSharedTexture.Description.MipLevels } });
+						thisPtr->D3D11Texture2D = (void*)_currentSharedTexture.NativePointer;
+						thisPtr->D3D11ShaderResourceView = (void*)view.NativePointer;
+						Services.Log.Debug("Successs redraw TV VFX");
+					}
+					else
+					{
+						Services.Log.Debug("TV VFX already redrawn");
+					}
 
-						// Obtain the native pointers
-						void* D3D11Texture2D = (void*)textureSource.NativePointer;
-						void* D3D11ShaderResourceView = (void*)view.NativePointer;
-
-						thisPtr->D3D11Texture2D = D3D11Texture2D;
-						thisPtr->D3D11ShaderResourceView = D3D11ShaderResourceView;
-
-						Services.Log.Debug("Added new Texture for TV, mip-level:" + thisPtr->MipLevel);
-						return System.Threading.Tasks.Task.CompletedTask;
-					});
-
-					//_currentVFXTextures.TryAdd((IntPtr)thisPtr, false);
+					return tex;
 				}
 			}
 
@@ -655,6 +657,7 @@ public class MainWindow : Window, IDisposable
 
 		return _textureOnLoadHook.Original(thisPtr, contents);
 	}
+	/*
 	private unsafe byte ReadSqpackDetour(IntPtr fileHandler, SeFileDescriptor* fileDesc, int priority, bool isSync)
 	{
 		if( fileDesc->ResourceHandle == null ) return _readSqpackHook.Original( fileHandler, fileDesc, priority, isSync );

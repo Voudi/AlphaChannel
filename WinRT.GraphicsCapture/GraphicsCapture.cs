@@ -126,7 +126,7 @@ namespace WinRT.GraphicsCapture
 					1   // Depth (for 3D textures)
 				);
 
-				DxHandler.Device.ImmediateContext.CopySubresourceRegion(surfaceTexture, 0, copyRegion, _textureSource, 0, 64, 36, 0);
+				DxHandler.Device.ImmediateContext.CopySubresourceRegion(surfaceTexture, 0, copyRegion, _textureSource, 0, 0, 0, 0);
 				return true;
 			}
 			catch (Exception ex)
