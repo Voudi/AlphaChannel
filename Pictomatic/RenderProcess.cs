@@ -21,7 +21,7 @@ internal class RenderProcess : IDisposable
 	private readonly string _textureHandle;
 
 	private Process _process;
-	private bool _running;
+	public bool running;
 
 	public RenderProcess(int pid,
 		string pluginDir,
@@ -53,7 +53,7 @@ internal class RenderProcess : IDisposable
 
 	public void Start()
 	{
-		if (_running)
+		if (running)
 		{
 			return;
 		}
@@ -62,14 +62,33 @@ internal class RenderProcess : IDisposable
 		_process.BeginOutputReadLine();
 		_process.BeginErrorReadLine();
 
-		_running = true;
+		running = true;
 	}
+
+	public void Restart()
+	{
+		try
+		{
+			_process = SetupProcess();
+			_process.Start();
+			_process.BeginOutputReadLine();
+			_process.BeginErrorReadLine();
+
+			// reset the process exit flag
+			_hasExited = false;
+		}
+		catch (Exception e)
+		{
+			Services.PluginLog.Error(e, "Failed to restart render process");
+		}
+	}
+
 
 	private int _restarting = 0; // This needs to be a numeric type for Interlocked.Exchange
 
 	public void EnsureRenderProcessIsAlive()
 	{
-		if (!_running || !HasProcessExited())
+		if (!running || !HasProcessExited())
 		{
 			return;
 		}
@@ -107,9 +126,9 @@ internal class RenderProcess : IDisposable
 
 	public void Stop()
 	{
-		if (!_running) { return; }
+		if (!running) { return; }
 
-		_running = false;
+		running = false;
 
 		// Grab the handle the process is waiting on and open it up
 		EventWaitHandle handle = new(false, EventResetMode.ManualReset, _keepAliveHandleName);
@@ -117,8 +136,9 @@ internal class RenderProcess : IDisposable
 		handle.Dispose();
 
 		// Give the process a sec to gracefully shut down, then kill it
-		_process.WaitForExit(1000);
-		try { _process.Kill(); }
+		var shutdownProcess = _process;
+		shutdownProcess.WaitForExit(1000);
+		try { shutdownProcess.Kill(); }
 		catch (InvalidOperationException) { }
 	}
 

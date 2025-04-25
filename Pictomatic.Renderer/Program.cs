@@ -127,6 +127,11 @@ internal static class Program
 			{
 				_webViewInitialized = false;
 				_webView2Client?.RemoveWindow();
+
+				_capture?.Dispose();
+				DxHandler.Shutdown();
+
+				Application.Exit();
 			}
 			else
 			{

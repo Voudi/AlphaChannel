@@ -90,14 +90,6 @@ public class Plugin : IDalamudPlugin
 			}
 		};
 
-		_renderProcess.Rpc.UpdateTexture += msg =>
-		{
-			Services.Framework.RunOnFrameworkThread(() =>
-			{
-				MainWindow.UpdateSharedDXTexture((IntPtr) msg.TextureHandle);
-			});
-		};
-
 		_renderProcess.Rpc.AddSubProcess += msg =>
 		{
 			Services.Framework.RunOnFrameworkThread(() =>
@@ -138,10 +130,19 @@ public class Plugin : IDalamudPlugin
 	public void TerminatePictomaticWindow()
 	{
 		_renderProcess?.Rpc.Navigate(Guid.Empty, "kill", "kill");
+		_renderProcess?.Stop();
 	}
 
 	public void NavigatePictomaticWindow(string url, string sharedHandle)
 	{
+		var isRunning = _renderProcess?.running;
+		if (isRunning.HasValue)
+		{
+			if (!isRunning.Value)
+			{
+				_renderProcess?.Restart();
+			}
+		}
 		_renderProcess?.Rpc.Navigate(Guid.Empty, url, sharedHandle);
 	}
 

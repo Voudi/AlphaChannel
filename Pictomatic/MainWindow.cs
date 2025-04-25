@@ -58,7 +58,7 @@ public class MainWindow : Window, IDisposable
 
 		SizeConstraints = new WindowSizeConstraints
 		{
-			MinimumSize = new Vector2(375, 330),
+			MinimumSize = new Vector2(225, 100),
 			MaximumSize = new Vector2(float.MaxValue, float.MaxValue)
 		};
 
@@ -97,14 +97,25 @@ public class MainWindow : Window, IDisposable
 		DxHandler.Device?.ImmediateContext.ClearRenderTargetView(rtv, clearColor);
 	}
 
+	private void CheckTitles()
+	{
+		if (_signalShareTitle)
+		{
+			Services.CommandManager.ProcessCommand("/honorific force set picto:" + _shortenedURL + "|silent");
+			_signalShareTitle = false;
+		}
+	}
+
+	private List<IBattleNpc> npcList;
 	private unsafe void CheckAllTVs()
 	{
 		RefreshVolume();
 
-		//CheckTitles(); CAUTION UNSAFE
+		CheckTitles();
 		
 		List<uint> visitedTvs = new List<uint>();
-		var npcList = Services.Objects.Where(x => x is IBattleNpc).Cast<IBattleNpc>().OrderBy(x => x.YalmDistanceX);
+		playerList = Services.Objects.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.Name.TextValue).ToList();
+		npcList = Services.Objects.Where(x => x is IBattleNpc).Cast<IBattleNpc>().OrderBy(x => x.YalmDistanceX).ToList();
 		foreach(var item in npcList)
 		{
 			if(item.Name.TextValue == "Carbuncle")
@@ -168,11 +179,8 @@ public class MainWindow : Window, IDisposable
 			var playeraddr = Services.ClientState?.LocalPlayer?.Address;
 			if (_currentActivatedTV != _currentToggle) //...But it's not active
 			{
-				if (ReassignTextureForTV(tvAddr))
-				{
-					_currentActivatedTV = ownerId;
-					Services.Log.Debug("Turning on new TV...");
-				}
+				_currentActivatedTV = ownerId;
+				Services.Log.Debug("Turning on new TV...");
 			}
 			else
 			{
@@ -182,122 +190,8 @@ public class MainWindow : Window, IDisposable
 		}
 	}
 
-	[DllImport("kernel32.dll")]
-	static extern bool IsBadReadPtr(IntPtr lp, uint ucb);
-
-	private bool ReassignTextureForTV(nint tvAddr)
-	{
-		/*
-		Services.Log.Debug("TV Tex redraw attempt");
-		var TV = (CharacterBase*)tvAddr;
-		var textureSource = _currentSharedTexture;
-		ShaderResourceView view = new(DxHandler.Device, textureSource, new ShaderResourceViewDescription { Format = textureSource.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = textureSource.Description.MipLevels } });
-
-		var tex = TV->Models[0]->Materials[1]->Textures[3].Texture->Texture;
-
-		// Obtain the native pointers
-		tex->D3D11Texture2D = (void*)textureSource.NativePointer;
-		tex->D3D11ShaderResourceView = (void*)view.NativePointer;
-
-		Services.Log.Debug("Successs redraw TV Tex");
-		*/
-		return true;
-		/*
-		if (_currentSharedTexture != null)
-		{
-			Services.Log.Debug("Attempting a redraw of the TV");
-			var TV = (CharacterBase*)tvAddr;
-			var textureSource = _currentSharedTexture;
-			ShaderResourceView view = new(DxHandler.Device, textureSource, new ShaderResourceViewDescription { Format = textureSource.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = textureSource.Description.MipLevels } });
-
-			// Obtain the native pointers
-			void* D3D11Texture2D = (void*)textureSource.NativePointer;
-			void* D3D11ShaderResourceView = (void*)view.NativePointer;
-
-			var success = false;
-
-			var changingFlag = _currentSharedTexture.NativePointer != _oldSharedTexture;
-			foreach (var currentTexturePointer in _currentVFXTextures.ToList())
-			{
-				var ptr = currentTexturePointer.Key;
-
-				if (IsBadReadPtr(ptr, (uint) sizeof(Texture))) 
-				{
-					_currentVFXTextures.Remove(ptr);
-					continue;
-				}
-				else
-				{
-					var tex = ((Texture*)ptr);
-					if (IsBadReadPtr((IntPtr) tex->D3D11Texture2D, (uint) sizeof(void*)))
-					{
-						_currentVFXTextures.Remove(ptr);
-						continue;
-					}
-					else
-					{
-						if (!currentTexturePointer.Value) 
-						{
-							//Completely new Texture arrived from VFX, cant tell if texture is valid or not, just write pointers
-							tex->D3D11Texture2D = D3D11Texture2D;
-							tex->D3D11ShaderResourceView = D3D11ShaderResourceView;
-
-							_currentVFXTextures[ptr] = true;
-							success = true;
-						}
-						else
-						{
-							if ((IntPtr)tex->D3D11Texture2D == _oldSharedTexture)
-							{
-								//Old texture spotted, refresh texture if necessary, otherwise do nothing to it
-								if (changingFlag)
-								{
-									tex->D3D11Texture2D = D3D11Texture2D;
-									tex->D3D11ShaderResourceView = D3D11ShaderResourceView;
-								}
-								success = true;
-							}
-							else
-							{
-								//Even though texture has been set once, theres a mismatch in pointers, it might have been disposed, so remove it
-								_currentVFXTextures.Remove(ptr);
-							}
-						}
-					}
-				}
-			}
-			if (changingFlag)
-			{
-				_oldSharedTexture = _currentSharedTexture.NativePointer;
-			}
-
-			Services.Log.Debug("TV Redraw Successful");
-			return success;
-		}
-		else
-		{
-			return false;
-		}
-		*/
-	}
-
-	public void UpdateSharedDXTexture(IntPtr handle)
-	{
-		Services.Log.Error("THIS SHOULD NOT EXECUTE!");
-		Texture2D? textureSource = DxHandler.Device?.OpenSharedResource<Texture2D>(handle);
-		if (textureSource != null)
-		{
-			_currentSharedTexture = textureSource;
-			//Texture has changed, assume no TV is running
-			_currentActivatedTV = 0;
-		}
-	}
-
 	public void Dispose()
 	{
-		//_deviceCreateTexture2DHook?.Dispose();
-		//_textureOnLoadHook.Dispose();
-		//_readSqpackHook.Dispose();
 		_getResourceSyncHook.Dispose();
 		_textureOnLoadHook.Dispose();
 		Services.CommandManager.ProcessCommand("/honorific force clear");
@@ -332,17 +226,18 @@ public class MainWindow : Window, IDisposable
 
 	private void TurnOffTV()
 	{
-		if(_currentToggle == Services.ClientState?.LocalPlayer?.EntityId)
+		clearTexture();
+		volumeEnabled = false;
+		VisitedAudioProcesses.Clear();
+		_plugin.TerminatePictomaticWindow();
+		if (_currentToggle == Services.ClientState?.LocalPlayer?.EntityId)
 		{
 			Services.CommandManager?.ProcessCommand("/honorific force clear");
 		}
 		_currentSubProcess = 0;
 		_currentAudioProcess = 0;
-		VisitedAudioProcesses.Clear();
+		_currentActivatedTV = 0;
 		_currentToggle = 0;
-		_plugin.TerminatePictomaticWindow();
-		volumeEnabled = false;
-		clearTexture();
 	}
 
 	private bool ValidateURL(out Uri? url)
@@ -359,17 +254,19 @@ public class MainWindow : Window, IDisposable
 
 	private bool isFocused = false;
 	private String placeHolderURL = String.Empty;
+	private List<IPlayerCharacter> playerList = new List<IPlayerCharacter>();
 	public override async void Draw()
 	{
-		if (_signalShareTitle)
+		if(_currentActivatedTV != 0 && volumeEnabled)
 		{
-			Services.CommandManager.ProcessCommand("/honorific force set picto:" + _shortenedURL + "|silent");
-			_signalShareTitle = false;
+			if(ImGui.SliderFloat("Volume", ref volume, 0.0f, 1.0f))
+			{
+				SetVolume(volume);
+			}
 		}
-		
+
 		ImGui.Text(" Available TVs:");
-		var npcList = Services.Objects.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.Name.TextValue);
-		foreach (var item in npcList)
+		foreach (var item in playerList)
 		{
 			var isPlayer = item.EntityId == Services.ClientState?.LocalPlayer?.EntityId;
 			if (_currentOwners.TryGetValue(item.EntityId, out _))
@@ -414,13 +311,6 @@ public class MainWindow : Window, IDisposable
 					{
 						if (!toggle || (toggle && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists))
 						{
-							/*
-							if (!toggle) //If its toggled already, its the Refresh Button, do not turn off TV!
-							{
-								TurnOffTV(); //Turn off TV before its turned on, as to reset the Textures of any currently running TVs
-								//TODO: CHECK IF YOU CAN SWAP TV INSTEAD OF TURNING OFF AND ON
-							}
-							*/
 							TurnOnTV(item.EntityId);
 							if (isPlayer)
 							{
@@ -517,86 +407,37 @@ public class MainWindow : Window, IDisposable
 		}
 	}
 
-	private string VFXPath = "chara/monster/m7002/obj/body/b0001/vfx/eff/carbuncleemittor.avfx";
+	private const string VFXPath = "chara/monster/m7002/obj/body/b0001/vfx/eff/carbuncleemittor.avfx";
 
 	private void RefreshActorVFX(nint addrCaster, nint addrTarget)
 	{
-		try
-		{
-			ActorVfxCreate(VFXPath, addrCaster, addrTarget, -1, (char)0, 0, (char)0);
-		}
-		catch (Exception e)
-		{
-			Services.Log.Error(e.ToString());
-		}
+		ActorVfxCreate(VFXPath, addrCaster, addrTarget, -1, (char)0, 0, (char)0);
 	}
 
-	
-	
-	//private const string DeviceCreateTexture2DSig = "E8 ?? ?? ?? ?? 48 89 07 48 8D 7F 20 ?? ?? ?? ??";
-	//public const string ReadSqpackSig = "40 56 41 56 48 83 EC ?? 0F BE 02";
-	
+	//https://github.com/0ceal0t/Dalamud-VFXEditor/blob/main/VFXEditor/Interop/Constants.cs
 	public const string ActorVfxCreateSig = "40 53 55 56 57 48 81 EC ?? ?? ?? ?? 0F 29 B4 24 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 0F B6 AC 24 ?? ?? ?? ?? 0F 28 F3 49 8B F8";
-
-	public const string GetResourceSyncSig = "E8 ?? ?? ?? ?? 48 8B D8 8B C7";
-	public const string GetResourceAsyncSig = "E8 ?? ?? ?? 00 48 8B D8 EB ?? F0 FF 83 ?? ?? 00 00";
 
 	public delegate IntPtr ActorVfxCreateDelegate(string path, IntPtr a2, IntPtr a3, float a4, char a5, ushort a6, char a7);
 	public ActorVfxCreateDelegate ActorVfxCreate;
 
-	/*
-	//private Hook<Device.Delegates.CreateTexture2D> _deviceCreateTexture2DHook;
-
-	[StructLayout(LayoutKind.Explicit)]
-	public unsafe struct SeFileDescriptor
-	{
-		[FieldOffset(0x00)]
-		public FileMode FileMode;
-
-		[FieldOffset(0x30)]
-		public void* FileDescriptor;
-
-		[FieldOffset(0x50)]
-		public ResourceHandle* ResourceHandle;
-
-		[FieldOffset(0x70)]
-		public char Utf16FileName;
-	}
-
-	public unsafe delegate byte ReadSqpackPrototype(IntPtr fileHandler, SeFileDescriptor* fileDesc, int priority, bool isSync);
-
-	public unsafe delegate void* GetResourceSyncPrototype(IntPtr resourceManager, uint* categoryId, uint* resourceType,
-		int* resourceHash, byte* path, void* resParams);
-
-	public unsafe delegate void* GetResourceAsyncPrototype(IntPtr resourceManager, uint* categoryId, uint* resourceType,
-		int* resourceHash, byte* path, void* resParams, bool isUnknown);
-
-	private Hook<ReadSqpackPrototype> _readSqpackHook;
-	*/
 	private Hook<ResourceManager.Delegates.GetResourceSync> _getResourceSyncHook;
 	private Hook<Texture.Delegates.InitializeContents> _textureOnLoadHook;
 
 	private unsafe void initHook()
 	{
-		//var deviceCreateTexture2DAddress = Services.SigScanner.ScanText(DeviceCreateTexture2DSig);
-		//_deviceCreateTexture2DHook = Services.InteropProvider.HookFromAddress<Device.Delegates.CreateTexture2D>(deviceCreateTexture2DAddress, DeviceCreateTexture2DDetour);
-		//_deviceCreateTexture2DHook.Enable();
-
-		Services.Log.Debug("Init Hooks");
-		//_readSqpackHook = Services.InteropProvider.HookFromSignature<ReadSqpackPrototype>(ReadSqpackSig, ReadSqpackDetour);
-		//_readSqpackHook.Enable();
-
-		_getResourceSyncHook = Services.InteropProvider.HookFromSignature<ResourceManager.Delegates.GetResourceSync>(GetResourceSyncSig, GetResourceSyncDetour);
+		Services.Log.Debug("Initializing Hooks");
+		_getResourceSyncHook = Services.InteropProvider.HookFromAddress<ResourceManager.Delegates.GetResourceSync>(ResourceManager.Addresses.GetResourceSync.Value, GetResourceSyncDetour);
 		_getResourceSyncHook.Enable();
 		_textureOnLoadHook = Services.InteropProvider.HookFromAddress<Texture.Delegates.InitializeContents>(Texture.Addresses.InitializeContents.Value, TexOnLoadDetour);
 		var actorVfxCreateAddress = Services.SigScanner.ScanText(ActorVfxCreateSig);
 		ActorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
-		Services.Log.Debug("Init Hooks success");
+		Services.Log.Debug("Initializing Hooks successful");
 	}
 
+	private const string TEXPath = "chara/monster/m7002/obj/body/b0001/vfx/texture/screentex.atex";
 	private unsafe ResourceHandle* GetResourceSyncDetour(ResourceManager* thisPtr, ResourceCategory* category, uint* type, uint* hash, CStringPointer path, void* unknown)
 	{
-		if(path.ToString().Contains("chara/monster/m7002/obj/body/b0001/vfx/texture/screentex.atex"))
+		if(path.ToString().Contains(TEXPath))
 		{
 			_textureOnLoadHook.Enable();
 			var ret = _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown);
@@ -621,66 +462,22 @@ public class MainWindow : Window, IDisposable
 					Services.Log.Debug("TV VFX redraw attempt");
 					var tex = _textureOnLoadHook.Original(thisPtr, contents);
 					if(tex)
-						if((nint)thisPtr->D3D11Texture2D != _currentSharedTexture.NativePointer)
-						{
-							ShaderResourceView view = new(DxHandler.Device, _currentSharedTexture, new ShaderResourceViewDescription { Format = _currentSharedTexture.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = _currentSharedTexture.Description.MipLevels } });
-							thisPtr->D3D11Texture2D = (void*)_currentSharedTexture.NativePointer;
-							thisPtr->D3D11ShaderResourceView = (void*)view.NativePointer;
-							Services.Log.Debug("Successs redraw TV VFX");
-						}
-						else
-						{
-							Services.Log.Debug("TV VFX already redrawn");
-						}
+					{
+						ShaderResourceView view = new(DxHandler.Device, _currentSharedTexture, new ShaderResourceViewDescription { Format = _currentSharedTexture.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = _currentSharedTexture.Description.MipLevels } });
+						thisPtr->D3D11Texture2D = (void*)_currentSharedTexture.NativePointer;
+						thisPtr->D3D11ShaderResourceView = (void*)view.NativePointer;
+						Services.Log.Debug("Successfully redrawn TV VFX");
+					}
 
 					return tex;
 				}
 			}
-
 		}
 		catch (Exception ex) { Services.Log.Error(ex.ToString()); }
 
 		return _textureOnLoadHook.Original(thisPtr, contents);
 	}
-	/*
-	private unsafe byte ReadSqpackDetour(IntPtr fileHandler, SeFileDescriptor* fileDesc, int priority, bool isSync)
-	{
-		if( fileDesc->ResourceHandle == null ) return _readSqpackHook.Original( fileHandler, fileDesc, priority, isSync );
-		if (fileDesc->ResourceHandle->FileName.ToString().Contains("/carbunclefinalp12/chara/monster/m7002/obj/body/b0001/vfx/eff/carbuncleemittor.avfx"))
-		{
-			_textureOnLoadHook.Enable();
-			var original = _readSqpackHook.Original(fileHandler, fileDesc, priority, isSync);
-			_textureOnLoadHook.Disable();
-			return original;
-		}
-		return _readSqpackHook.Original(fileHandler, fileDesc, priority, isSync);
-	}
-
-	private unsafe Texture* DeviceCreateTexture2DDetour(Device* thisPtr, int* size, byte mipLevel, TextureFormat textureFormat, TextureFlags flags, uint unk)
-	{
-		var currentVFXTexture = _deviceCreateTexture2DHook.Original(thisPtr, size, mipLevel, textureFormat, flags, unk);
-		try
-		{
-			if (mipLevel == 11)
-			{
-				if(size[0] == 1920)
-				{
-					if (size[1] == 1080)
-					{
-						Services.Log.Debug("Spotted new VFX TV Texture" + (IntPtr)currentVFXTexture);
-						_currentVFXTextures.TryAdd((IntPtr)currentVFXTexture, false);
-					}
-				}
-			}
-		}
-		catch(Exception ex)
-		{
-			Services.Log.Error(ex.ToString());
-		}
-		return currentVFXTexture;
-	}
-	*/
-
+	
 	internal async void UpdateTitle(uint entityId, string title)
 	{
 		if (entityId == Services.ClientState?.LocalPlayer?.EntityId) return;
@@ -713,7 +510,7 @@ public class MainWindow : Window, IDisposable
 	private long _lastMilliSecond = 0;
 	public void Refresh()
 	{
-		//Check for Texture Updates once per sec
+		//Check for Updates once per sec
 		if (_lastMilliSecond + 1000 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 		{
 			_lastMilliSecond = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -721,27 +518,6 @@ public class MainWindow : Window, IDisposable
 		}
 	}
 
-	/*
-	private void CheckTitles() //not required anymore, btw causes issues with title/name switching, needs to get checked
-	{
-		unsafe
-		{
-			var ratkm = Framework.Instance()->GetUIModule()->GetRaptureAtkModule();
-			
-			for (var i = 0; i < 50 && i < ratkm->NameplateInfoCount; i++)
-			{
-				var npi = ratkm->NamePlateInfoEntries[i];
-				if (npi.ObjectId == 0 || npi.ClassJobId == 0) continue;
-				var cleanTitle = npi.DisplayTitle.ToString();
-				if (cleanTitle.Length > 2)
-				{
-					cleanTitle = cleanTitle.Substring(1, cleanTitle.Length - 2);
-					UpdateTitle(npi.ObjectId.ObjectId, cleanTitle);
-				}
-			}
-		}
-	}
-	*/
 	private async void ShareTitle(string url)
 	{
 		if (url == _lastURL)
@@ -762,7 +538,7 @@ public class MainWindow : Window, IDisposable
 		}
 	}
 
-	public async System.Threading.Tasks.Task ShortenURL(string inputURL, URLShortenerCallback callback, URLShortenerErrorCallback error)
+	public async Task ShortenURL(string inputURL, URLShortenerCallback callback, URLShortenerErrorCallback error)
 	{
 		using (HttpClient client = new HttpClient())
 		{
@@ -789,7 +565,7 @@ public class MainWindow : Window, IDisposable
 		}
 	}
 
-	private async System.Threading.Tasks.Task FetchURLData(string url, URLFetchCallback callback)
+	private async Task FetchURLData(string url, URLFetchCallback callback)
 	{
 		using (HttpClientHandler handler = new HttpClientHandler())
 		{
@@ -810,7 +586,7 @@ public class MainWindow : Window, IDisposable
 							return;
 						}
 					}
-					Services.Log.Debug("Request exception: Shortlink returned 200");
+					Services.Log.Debug("Request exception: Shortlink returned 200-OK instead of a 300-redirect, which should happen with Shortlinks");
 				}
 				catch (HttpRequestException e)
 				{
