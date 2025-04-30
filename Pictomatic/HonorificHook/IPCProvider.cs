@@ -21,10 +21,10 @@ public static class IpcProvider
 		
 		try
 		{
-			var ipcCallgateChannelMeta = SetCharacterTitle.GetType().BaseType.GetField("<Channel>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance);
+			var ipcCallgateChannelMeta = SetCharacterTitle?.GetType()?.BaseType?.GetField("<Channel>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance);
 			var ipcCallgateChannelObj = ipcCallgateChannelMeta?.GetValue(SetCharacterTitle);
 			var ipcCallgateChannelActionMeta = ipcCallgateChannelObj?.GetType().GetField("<Action>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance);
-			var ipcCallgateChannelActionMetaObj = (Delegate)ipcCallgateChannelActionMeta?.GetValue(ipcCallgateChannelObj);
+			var ipcCallgateChannelActionMetaObj = (Delegate?)ipcCallgateChannelActionMeta?.GetValue(ipcCallgateChannelObj);
 			if(ipcCallgateChannelActionMetaObj is not null)
 			{
 				OldDelegate = (Action<int, string>)ipcCallgateChannelActionMetaObj;
@@ -51,7 +51,7 @@ public static class IpcProvider
 					// Optionally do something after the original action
 				});
 
-				SetCharacterTitle.RegisterAction(proxyAction);
+				SetCharacterTitle?.RegisterAction(proxyAction);
 			}
 			else
 			{

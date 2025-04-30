@@ -48,7 +48,6 @@ public class DependencyManager : IDisposable
 	private readonly ConcurrentDictionary<string, float> _installProgress = new();
 	private Dependency[]? _missingDependencies;
 	private ViewMode _viewMode = ViewMode.Hidden;
-	private ISharedImmediateTexture? _texIcon;
 
 	public DependencyManager(string pluginDir, string pluginConfigDir)
 	{
@@ -227,8 +226,6 @@ public class DependencyManager : IDisposable
 		ImGui.SetNextWindowSize(new Vector2(1300, 350), ImGuiCond.Always);
 		ImGuiWindowFlags windowFlags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize;
 		ImGui.Begin("Browsingway dependencies", windowFlags);
-		if (_texIcon is not null)
-			ImGui.Image(_texIcon.GetWrapOrEmpty().ImGuiHandle, new Vector2(256, 256));
 
 		ImGui.SameLine();
 
@@ -379,7 +376,8 @@ public class DependencyManager : IDisposable
 				string json = await response.Content.ReadAsStringAsync();
 				using JsonDocument doc = JsonDocument.Parse(json);
 				string? latestTag = doc.RootElement.GetProperty("tag_name").GetString();
-				string downloadUrl = $"https://github.com/{repoOwner}/{repoName}/releases/download/{latestTag}/ghostery-chromium-{latestTag.Substring(1, latestTag.Length - 1)}.zip";
+
+				string downloadUrl = $"https://github.com/{repoOwner}/{repoName}/releases/download/{latestTag}/ghostery-chromium-{latestTag?[1..]}.zip";
 
 				return Tuple.Create(downloadUrl, latestTag ?? String.Empty);
 			}

@@ -17,7 +17,6 @@ namespace WinRT.GraphicsCapture
         private Direct3D11CaptureFramePool _captureFramePool;
         private GraphicsCaptureItem _captureItem;
         private GraphicsCaptureSession _captureSession;
-		private Texture2D _texture;
 		private IDirect3DDevice _device;
 		private Point _itemSize;
 		private Texture2D _textureSource;

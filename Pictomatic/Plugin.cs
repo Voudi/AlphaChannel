@@ -31,8 +31,6 @@ public class Plugin : IDalamudPlugin
 		// init services
 		pluginInterface.Create<Services>();
 
-		MainWindow = new ControlWindow(this);
-
 		_pluginDir = pluginInterface.AssemblyLocation.DirectoryName ?? "";
 		if (String.IsNullOrEmpty(_pluginDir))
 		{
@@ -45,14 +43,22 @@ public class Plugin : IDalamudPlugin
 		_dependencyManager.DependenciesReady += (_, _) => DependenciesReady();
 		_dependencyManager.Initialise();
 
+		// Spin up DX handling from the plugin interface
+		DxHandler.Initialise(Services.PluginInterface);
+
+		// Create Main Window
+		MainWindow = new ControlWindow(this);
+		WindowSystem.AddWindow(MainWindow);
+
 		// Hook up render hook
 		pluginInterface.UiBuilder.Draw += Render;
-		
-		WindowSystem.AddWindow(MainWindow);
+
 		IpcProvider.Init(this);
 
+		pluginInterface.UiBuilder.OpenConfigUi += ToggleMainUI;
 		pluginInterface.UiBuilder.OpenMainUi += ToggleMainUI;
 	}
+
 
 	// Required for LivePluginLoader support
 	public string AssemblyLocation { get; } = Assembly.GetExecutingAssembly().Location;
@@ -75,15 +81,6 @@ public class Plugin : IDalamudPlugin
 
 	private void DependenciesReady()
 	{
-		// Spin up DX handling from the plugin interface
-		DxHandler.Initialise(Services.PluginInterface);
-
-		// Boot the render process. This has to be done before initialising settings to prevent a
-		// race condition overlays receiving a null reference.
-		int pid = Process.GetCurrentProcess().Id;
-
-		MainWindow.initTexture();
-
 		// Hook up the remote command
 		Services.CommandManager.AddHandler(_commandRemote, new CommandInfo(HandleCommand) { HelpMessage = "Toggles the Remote Window", ShowInHelp = true });
 	}
@@ -103,15 +100,19 @@ public class Plugin : IDalamudPlugin
 			int pid = Process.GetCurrentProcess().Id;
 			try
 			{
-				_capture = new CaptureProcess(pid, _pluginDir, _webView2Client.handle, handle);
-				_capture.Start();
+				var webViewHandle = _webView2Client?.handle;
+				if (webViewHandle.HasValue)
+				{
+					_capture = new CaptureProcess(pid, _pluginDir, webViewHandle.Value, handle);
+					_capture.Start();
+				}
 			}
 			catch { }
 		});
 
 		capturestaThread.SetApartmentState(ApartmentState.STA);
 
-		Thread staThread = new Thread(() => {
+		Thread staThread = new(() => {
 			Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
 			_webView2Client = new WebView2Client(-1, MainWindow, _dependencyManager.GetDependencyPathFor("ghostery"), Path.Combine(_pluginConfigDir, "webview-cache"), url);
@@ -167,6 +168,7 @@ public class Plugin : IDalamudPlugin
 
 	internal void UpdateTitle(uint entityId, TitleData titleData)
 	{
-		this.MainWindow.UpdateTitle(entityId, titleData.Title);
+		if (titleData?.Title != null)
+			MainWindow.UpdateTitle(entityId, titleData.Title);
 	}
 }

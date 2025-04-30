@@ -76,7 +76,7 @@ internal class CaptureProcess : IDisposable
 					// reset the process exit flag
 					_hasExited = false;
 				}
-				catch (Exception e)
+				catch (Exception)
 				{
 					Console.WriteLine("ERROR: Failed to restart capture process");
 				}

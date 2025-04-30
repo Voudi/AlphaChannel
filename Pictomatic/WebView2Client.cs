@@ -171,9 +171,10 @@ public partial class WebView2Client : Form
 			}
 
 			if(_webView != null)
+			{
 				_webView.Source = new Uri(_initUrl);
-
-			_webView.CoreWebView2.NavigationCompleted += SimulateUserClick;
+				_webView.CoreWebView2.NavigationCompleted += SimulateUserClick;
+			}
 		});
 		
 		//_webView.CoreWebView2.OpenDevToolsWindow();
@@ -236,10 +237,11 @@ public partial class WebView2Client : Form
 
 	internal void Navigate(string url)
 	{
-		_webView.Invoke(async () =>
+		_webView.Invoke(() =>
 		{
 			_webView.Source = new Uri(url);
 			Console.WriteLine("Navigating to URL " + url);
+			return Task.CompletedTask;
 		});
 	}
 

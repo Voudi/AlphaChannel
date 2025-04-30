@@ -33,9 +33,22 @@ public class ControlWindow : Window, IDisposable
 	private uint _currentSubProcess;
 	private Dictionary<IntPtr, bool> _currentVFXTextures = new Dictionary<IntPtr, bool>(); //Texturepointer, Flag (whether overridden once)
 	private bool _signalShareTitle = false;
-	private bool _firstTimeTVOn = true;
 
 	private static readonly byte[] _blankCanvas = new byte[16777216];
+	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
+	{
+		Width = 1920,
+		Height = 1080,
+		MipLevels = 1,
+		ArraySize = 1,
+		Format = Format.B8G8R8A8_UNorm,
+		BindFlags = BindFlags.ShaderResource | BindFlags.RenderTarget,
+		CpuAccessFlags = CpuAccessFlags.None,
+		SampleDescription = new SampleDescription(1, 0),
+		Usage = ResourceUsage.Default,
+		OptionFlags = ResourceOptionFlags.Shared
+
+	};
 
 	private Plugin _plugin;
 
@@ -44,14 +57,13 @@ public class ControlWindow : Window, IDisposable
 	public delegate void URLFetchCallback(string result);
 
 	//Render Vars
-	bool TVTurnedOn = false;
 	private String _inputURL = "";
 	private String _shortenedURL = "";
 	private String _lastURL = "";
 	float volume = 0.5f;
 	private bool volumeEnabled = false;
 
-	public ControlWindow(Plugin plugin)
+	public unsafe ControlWindow(Plugin plugin)
         : base("Pictomatic remote", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
 
@@ -62,33 +74,21 @@ public class ControlWindow : Window, IDisposable
 		};
 
 		this._plugin = plugin;
-	}
 
-	public void initTexture()
-	{
-		var texture2dDescription = new Texture2DDescription
-		{
-			Width = 1920,
-			Height = 1080,
-			MipLevels = 1,
-			ArraySize = 1,
-			Format = Format.B8G8R8A8_UNorm,
-			BindFlags = BindFlags.ShaderResource | BindFlags.RenderTarget,
-			CpuAccessFlags = CpuAccessFlags.None,
-			SampleDescription = new SampleDescription(1, 0),
-			Usage = ResourceUsage.Default,
-			OptionFlags = ResourceOptionFlags.Shared
-
-		};
-		_currentSharedTexture = new Texture2D(DxHandler.Device, texture2dDescription);
-		var rtv = new RenderTargetView(DxHandler.Device, _currentSharedTexture);
-		var clearColor = new RawColor4(0, 0, 0, 1);
-		DxHandler.Device?.ImmediateContext.ClearRenderTargetView(rtv, clearColor);
+		//INIT TEXTURE
+		_currentSharedTexture = new Texture2D(DxHandler.Device, _texture2dDescription);
 		using SharpDX.DXGI.Resource resource = _currentSharedTexture.QueryInterface<SharpDX.DXGI.Resource>();
 		currentSharedTextureResourceHandle = ((ulong)resource.SharedHandle).ToString();
+		clearTexture();
 
-		initHook();
+		//INIT HOOK
+		_getResourceSyncHook = Services.InteropProvider.HookFromAddress<ResourceManager.Delegates.GetResourceSync>(ResourceManager.Addresses.GetResourceSync.Value, GetResourceSyncDetour);
+		_textureOnLoadHook = Services.InteropProvider.HookFromAddress<Texture.Delegates.InitializeContents>(Texture.Addresses.InitializeContents.Value, TexOnLoadDetour);
+		var actorVfxCreateAddress = Services.SigScanner.ScanText(ActorVfxCreateSig);
+		ActorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
+		_getResourceSyncHook.Enable();
 	}
+
 	public void clearTexture()
 	{
 		if (_currentSharedTexture == null)
@@ -107,7 +107,7 @@ public class ControlWindow : Window, IDisposable
 		}
 	}
 
-	private List<IBattleNpc> npcList;
+	private List<IBattleNpc> _npcList = [];
 	private unsafe void CheckAllTVs()
 	{
 		RefreshVolume();
@@ -115,9 +115,9 @@ public class ControlWindow : Window, IDisposable
 		CheckTitles();
 		
 		List<uint> visitedTvs = new List<uint>();
-		playerList = Services.Objects.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.Name.TextValue).ToList();
-		npcList = Services.Objects.Where(x => x is IBattleNpc).Cast<IBattleNpc>().OrderBy(x => x.YalmDistanceX).ToList();
-		foreach(var item in npcList)
+		_playerList = Services.Objects.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.Name.TextValue).ToList();
+		_npcList = Services.Objects.Where(x => x is IBattleNpc).Cast<IBattleNpc>().OrderBy(x => x.YalmDistanceX).ToList();
+		foreach(var item in _npcList)
 		{
 			if(item.Name.TextValue == "Carbuncle")
 			{
@@ -143,7 +143,7 @@ public class ControlWindow : Window, IDisposable
 													CheckOutPossibleTV((IntPtr)tvDraw, ownerId, item.Address);
 												}
 						}
-						catch (Exception e) { }
+						catch (Exception) { }
 					}
 				}
 			}
@@ -253,10 +253,10 @@ public class ControlWindow : Window, IDisposable
 	}
 
 
-	private bool isFocused = false;
-	private String placeHolderURL = String.Empty;
-	private List<IPlayerCharacter> playerList = new List<IPlayerCharacter>();
-	public override async void Draw()
+	private bool _isFocused = false;
+	private String _placeHolderURL = String.Empty;
+	private List<IPlayerCharacter> _playerList = [];
+	public override void Draw()
 	{
 		if(_currentActivatedTV != 0 && volumeEnabled)
 		{
@@ -267,7 +267,7 @@ public class ControlWindow : Window, IDisposable
 		}
 
 		ImGui.Text(" Available TVs:");
-		foreach (var item in playerList)
+		foreach (var item in _playerList)
 		{
 			var isPlayer = item.EntityId == Services.ClientState?.LocalPlayer?.EntityId;
 			if (_currentOwners.TryGetValue(item.EntityId, out _))
@@ -315,7 +315,7 @@ public class ControlWindow : Window, IDisposable
 							TurnOnTV(item.EntityId);
 							if (isPlayer)
 							{
-								placeHolderURL = _inputURL;
+								_placeHolderURL = _inputURL;
 								_inputURL = String.Empty;
 							}
 						}
@@ -324,7 +324,7 @@ public class ControlWindow : Window, IDisposable
 							TurnOffTV();
 							if (isPlayer && string.IsNullOrEmpty(_inputURL))
 							{
-								_inputURL = placeHolderURL;
+								_inputURL = _placeHolderURL;
 							}
 						}
 					}
@@ -357,7 +357,7 @@ public class ControlWindow : Window, IDisposable
 				ImGui.PushFont(UiBuilder.IconFont);
 				if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString()))
 				{
-					ImGui.SetClipboardText(isPlayer ? (string.IsNullOrEmpty(_inputURL) && toggle ? placeHolderURL : _inputURL) : (url ?? String.Empty));
+					ImGui.SetClipboardText(isPlayer ? (string.IsNullOrEmpty(_inputURL) && toggle ? _placeHolderURL : _inputURL) : (url ?? String.Empty));
 				}
 				ImGui.PopFont();
 
@@ -369,19 +369,19 @@ public class ControlWindow : Window, IDisposable
 
 					// Detect if the input is focused
 					if (ImGui.IsItemActive())
-						isFocused = true;
+						_isFocused = true;
 					else if (ImGui.IsItemDeactivated())
-						isFocused = false;
+						_isFocused = false;
 
 					// Render placeholder if input is empty and unfocused
-					if (!isFocused && string.IsNullOrEmpty(_inputURL) && toggle)
+					if (!_isFocused && string.IsNullOrEmpty(_inputURL) && toggle)
 					{
 						var pos = ImGui.GetItemRectMin();
 						var max = ImGui.GetItemRectMax();
 
 						float maxWidth = max.X - pos.X;
 
-						string placeholder = placeHolderURL;
+						string placeholder = _placeHolderURL;
 
 						Vector2 textSize = ImGui.CalcTextSize(placeholder);
 
@@ -391,7 +391,7 @@ public class ControlWindow : Window, IDisposable
 							textSize = ImGui.CalcTextSize(placeholder + "........");
 						}
 
-						if (!placeholder.Equals(placeHolderURL)) placeholder += "...";
+						if (!placeholder.Equals(_placeHolderURL)) placeholder += "...";
 
 						ImGui.GetWindowDrawList().AddText(new Vector2(pos.X + 7, pos.Y), ImGui.GetColorU32(new Vector4(0.3f, 0.8f, 0.3f, 1.0f)), placeholder);
 					}
@@ -412,7 +412,7 @@ public class ControlWindow : Window, IDisposable
 
 	private void RefreshActorVFX(nint addrCaster, nint addrTarget)
 	{
-		ActorVfxCreate(VFXPath, addrCaster, addrTarget, -1, (char)0, 0, (char)0);
+		ActorVfxCreate?.Invoke(VFXPath, addrCaster, addrTarget, -1, (char)0, 0, (char)0);
 	}
 
 	//https://github.com/0ceal0t/Dalamud-VFXEditor/blob/main/VFXEditor/Interop/Constants.cs
@@ -422,18 +422,6 @@ public class ControlWindow : Window, IDisposable
 
 	private Hook<ResourceManager.Delegates.GetResourceSync> _getResourceSyncHook;
 	private Hook<Texture.Delegates.InitializeContents> _textureOnLoadHook;
-
-	private unsafe void initHook()
-	{
-		Services.Log.Debug("Initializing Hooks");
-		_getResourceSyncHook = Services.InteropProvider.HookFromAddress<ResourceManager.Delegates.GetResourceSync>(ResourceManager.Addresses.GetResourceSync.Value, GetResourceSyncDetour);
-		_textureOnLoadHook = Services.InteropProvider.HookFromAddress<Texture.Delegates.InitializeContents>(Texture.Addresses.InitializeContents.Value, TexOnLoadDetour);
-		var actorVfxCreateAddress = Services.SigScanner.ScanText(ActorVfxCreateSig);
-		ActorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
-		Services.Log.Debug("Initializing Hooks successful");
-
-		_getResourceSyncHook.Enable();
-	}
 
 	private const string TEXPath = "chara/monster/m7002/obj/body/b0001/vfx/texture/screentex.atex";
 	private unsafe ResourceHandle* GetResourceSyncDetour(ResourceManager* thisPtr, ResourceCategory* category, uint* type, uint* hash, CStringPointer path, void* unknown)
@@ -559,7 +547,7 @@ public class ControlWindow : Window, IDisposable
 					callback(responseBody);
 				}
 			}
-			catch (HttpRequestException e)
+			catch (HttpRequestException)
 			{
 				Services.Log.Debug("Request exception: Could not create Shortlink.");
 			}
@@ -662,7 +650,7 @@ public class ControlWindow : Window, IDisposable
 		try
 		{
 			var searcher = new System.Management.ManagementObjectSearcher(query);
-			return Convert.ToUInt32(searcher.Get().Cast<System.Management.ManagementObject>().FirstOrDefault()["ParentProcessId"]);
+			return Convert.ToUInt32(searcher?.Get()?.Cast<System.Management.ManagementObject>()?.FirstOrDefault()?["ParentProcessId"]);
 		}
 		catch
 		{ return 0; }
