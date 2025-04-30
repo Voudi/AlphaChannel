@@ -32,9 +32,7 @@
 	</ItemGroup>
 	
 	<ItemGroup>
-	  <Compile Update="WebView2Client.cs">
-	    <SubType>Form</SubType>
-	  </Compile>
+	  <Compile Update="WebView2Client.cs" />
 	</ItemGroup>
 	
 </Project>

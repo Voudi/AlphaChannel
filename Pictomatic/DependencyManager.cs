@@ -53,7 +53,8 @@ public class DependencyManager : IDisposable
 	public DependencyManager(string pluginDir, string pluginConfigDir)
 	{
 		_dependencies = [
-				new Dependency(GetUBlockDownloadURL().Result.Item1, "ublock" + GetUBlockDownloadURL().Result.Item2, "uBlock0.chromium")
+				new Dependency(GetUBlockDownloadURL().Result.Item1, "ublock" + GetUBlockDownloadURL().Result.Item2, "uBlock0.chromium"),
+				new Dependency(GetGhosteryDownloadURL().Result.Item1, "ghostery" + GetGhosteryDownloadURL().Result.Item2, "pages")
 		];
 		_dependencyDir = Path.Join(pluginConfigDir, "dependencies");
 		_debugCheckDir = Path.GetDirectoryName(pluginDir) ?? pluginDir;
@@ -80,6 +81,7 @@ public class DependencyManager : IDisposable
 		{
 			_viewMode = ViewMode.Hidden;
 			InstallDependenciesSilent();
+			DependenciesReady?.Invoke(this, EventArgs.Empty);
 		}
 	}
 
@@ -88,7 +90,7 @@ public class DependencyManager : IDisposable
 		return !Directory.Exists(Path.Combine(GetDependencyPath(dependency), dependency.Version));
 	}
 
-	private void InstallDependenciesSilent()
+	private async void InstallDependenciesSilent()
 	{
 		if (_missingDependencies is null)
 		{
@@ -98,7 +100,7 @@ public class DependencyManager : IDisposable
 		Services.PluginLog.Info("Installing dependencies...");
 
 		IEnumerable<Task> installTasks = _missingDependencies.Select(InstallDependency);
-		Task.WhenAll(installTasks).ContinueWith(task =>
+		await Task.WhenAll(installTasks).ContinueWith(task =>
 		{
 			bool failed = _installProgress.Any(pair => pair.Value == _depFailed);
 			Services.PluginLog.Info($"Dependency install {_viewMode}. Failed? " + failed);
@@ -347,6 +349,37 @@ public class DependencyManager : IDisposable
 				string? latestTag = doc.RootElement.GetProperty("tag_name").GetString();
 
 				string downloadUrl = $"https://github.com/{repoOwner}/{repoName}/releases/download/{latestTag}/uBlock0_{latestTag}.chromium.zip";
+
+				return Tuple.Create(downloadUrl, latestTag ?? String.Empty);
+			}
+		}
+		catch (Exception ex)
+		{
+			Services.Log.Error("Error fetching latest release: " + ex.Message);
+			return Tuple.Create(String.Empty, String.Empty);
+		}
+	}
+
+	private static async Task<Tuple<string, string>> GetGhosteryDownloadURL()
+	{
+		string repoOwner = "ghostery";
+		string repoName = "ghostery-extension";
+
+		string latestReleaseUrl = $"https://api.github.com/repos/{repoOwner}/{repoName}/releases/latest";
+
+		try
+		{
+			using (HttpClient client = new HttpClient())
+			{
+				client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0"); // GitHub API requires a User-Agent
+
+				HttpResponseMessage response = await client.GetAsync(latestReleaseUrl);
+				response.EnsureSuccessStatusCode();
+
+				string json = await response.Content.ReadAsStringAsync();
+				using JsonDocument doc = JsonDocument.Parse(json);
+				string? latestTag = doc.RootElement.GetProperty("tag_name").GetString();
+				string downloadUrl = $"https://github.com/{repoOwner}/{repoName}/releases/download/{latestTag}/ghostery-chromium-{latestTag.Substring(1, latestTag.Length - 1)}.zip";
 
 				return Tuple.Create(downloadUrl, latestTag ?? String.Empty);
 			}

@@ -114,7 +114,7 @@ public class Plugin : IDalamudPlugin
 		Thread staThread = new Thread(() => {
 			Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
-			_webView2Client = new WebView2Client(-1, MainWindow, _dependencyManager.GetDependencyPathFor("ublock"), Path.Combine(_pluginConfigDir, "webview-cache"), url);
+			_webView2Client = new WebView2Client(-1, MainWindow, _dependencyManager.GetDependencyPathFor("ghostery"), Path.Combine(_pluginConfigDir, "webview-cache"), url);
 			capturestaThread.Start();
 			Application.Run(_webView2Client);
 		});

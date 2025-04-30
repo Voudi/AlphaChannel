@@ -44,7 +44,6 @@ public class ControlWindow : Window, IDisposable
 	public delegate void URLFetchCallback(string result);
 
 	//Render Vars
-	private String buttonExpandWindow = " >Expand TV<";
 	bool TVTurnedOn = false;
 	private String _inputURL = "";
 	private String _shortenedURL = "";
@@ -92,6 +91,8 @@ public class ControlWindow : Window, IDisposable
 	}
 	public void clearTexture()
 	{
+		if (_currentSharedTexture == null)
+			return;
 		var rtv = new RenderTargetView(DxHandler.Device, _currentSharedTexture);
 		var clearColor = new RawColor4(0, 0, 0, 1);
 		DxHandler.Device?.ImmediateContext.ClearRenderTargetView(rtv, clearColor);

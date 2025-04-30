@@ -1,4 +1,3 @@
-using Lumina.Text.ReadOnly;
 using Microsoft.Web.WebView2.Core;
 using System.Runtime.InteropServices;
 using WebView2 = Microsoft.Web.WebView2.WinForms.WebView2;
@@ -15,10 +14,18 @@ public partial class WebView2Client : Form
 	private readonly string _cacheDir;
 	private readonly string _initUrl;
 
-	protected override bool ShowWithoutActivation
-	{
-		get { return true; }
-	}
+	protected override bool ShowWithoutActivation => true;
+
+	[DllImport("user32.dll", SetLastError = true)]
+	public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+	[DllImport("user32.dll", CharSet = CharSet.Auto)]
+	public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string? lpszWindow);
+
+	[DllImport("user32.dll")]
+	public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+	private IntPtr _gameWindow = IntPtr.Zero;
 
 	public WebView2Client(int res, ControlWindow mainWindow, string adBlockDir, string cacheDir, string initUrl)
 	{
@@ -51,7 +58,25 @@ public partial class WebView2Client : Form
 			Dock = DockStyle.Fill
 		};
 
+		_gameWindow = GetGameWindow();
+
 		Init();
+	}
+
+	public static IntPtr GetGameWindow()
+	{
+		var handle = IntPtr.Zero;
+		while (true)
+		{
+			handle = FindWindowEx(IntPtr.Zero, handle, "FFXIVGAME", null);
+			if (handle == IntPtr.Zero)
+				break; //No more windows
+
+			GetWindowThreadProcessId(handle, out var processId);
+			if (processId == Environment.ProcessId) 
+				break; //Found Process Window
+		}
+		return handle;
 	}
 
 	private Point GetRightMostCoord()
@@ -119,9 +144,12 @@ public partial class WebView2Client : Form
 		Controls.Add(_webView);
 
 		_webView.CoreWebView2InitializationCompleted += WebViewCoreWebView2InitializationCompleted;
+		
 		this.handle = Handle;
 		KeepOnTop();
-		StartTopMostEnforcer();
+		//StartTopMostEnforcer();
+		if (_gameWindow != IntPtr.Zero)
+			SetForegroundWindow(_gameWindow);
 		await _webView.EnsureCoreWebView2Async(environment);
 	}
 
@@ -144,6 +172,8 @@ public partial class WebView2Client : Form
 
 			if(_webView != null)
 				_webView.Source = new Uri(_initUrl);
+
+			_webView.CoreWebView2.NavigationCompleted += SimulateUserClick;
 		});
 		
 		//_webView.CoreWebView2.OpenDevToolsWindow();
@@ -235,8 +265,27 @@ public partial class WebView2Client : Form
 
 	private void StartTopMostEnforcer()
 	{
-		_topMostTimer.Interval = 1000;
+		_topMostTimer.Interval = 10000;
 		_topMostTimer.Tick += (s, e) => KeepOnTop();
 		_topMostTimer.Start();
+	}
+
+	private async void SimulateUserClick(object? sender, EventArgs e)
+	{
+		string script = @"
+        (function() {
+            var video = document.querySelector('video');
+            if (video) {
+                video.play();
+				setTimeout(function() {
+						if (video.requestFullscreen) {
+							video.requestFullscreen();
+						}
+					}, 1000)
+            }
+        })();";
+
+		// Execute the JavaScript in the WebView2 control
+		await _webView.CoreWebView2.ExecuteScriptAsync(script);
 	}
 }
