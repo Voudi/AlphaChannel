@@ -6,14 +6,13 @@ using Pictomatic.Renderer;
 using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
-using System.Security.Policy;
 
 namespace Pictomatic;
 
 public class Plugin : IDalamudPlugin
 {
 	public readonly WindowSystem WindowSystem = new("Pictomatic");
-	private MainWindow MainWindow { get; init; }
+	private ControlWindow MainWindow { get; init; }
 
 	private const string _commandRemote = "/premote";
 
@@ -32,7 +31,7 @@ public class Plugin : IDalamudPlugin
 		// init services
 		pluginInterface.Create<Services>();
 
-		MainWindow = new MainWindow(this);
+		MainWindow = new ControlWindow(this);
 
 		_pluginDir = pluginInterface.AssemblyLocation.DirectoryName ?? "";
 		if (String.IsNullOrEmpty(_pluginDir))

@@ -19,7 +19,7 @@ using FFXIVClientStructs.FFXIV.Client.System.Resource.Handle;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
 using SharpDX.Mathematics.Interop;
 
-public class MainWindow : Window, IDisposable
+public class ControlWindow : Window, IDisposable
 {
 	private readonly Dictionary<uint, IntPtr> _currentOwners = []; //Playerpointer, CompanionDrawpointer
 	private readonly Dictionary<uint, String> _currentURLs = []; //Playerpointer, URL
@@ -52,7 +52,7 @@ public class MainWindow : Window, IDisposable
 	float volume = 0.5f;
 	private bool volumeEnabled = false;
 
-	public MainWindow(Plugin plugin)
+	public ControlWindow(Plugin plugin)
         : base("Pictomatic remote", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
 

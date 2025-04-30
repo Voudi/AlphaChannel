@@ -8,7 +8,6 @@ internal class CaptureProcess : IDisposable
 	public event EventHandler? Crashed;
 
 	private readonly string _keepAliveHandleName;
-	private readonly int _parentPid;
 	private readonly string _pluginDir;
 
 	private Process _process;
@@ -23,7 +22,6 @@ internal class CaptureProcess : IDisposable
 		_wHandle = wHandle;
 		_keepAliveHandleName = $"PictomaticCaptureKeepAlive{pid}";
 		_pluginDir = pluginDir;
-		_parentPid = pid;
 		_sharedHandle = sharedHandle;
 
 		_process = SetupProcess();

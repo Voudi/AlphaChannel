@@ -9,7 +9,7 @@ public partial class WebView2Client : Form
 {
 	private readonly WebView2 _webView;
 	public IntPtr handle;
-	public MainWindow _mainWindow;
+	public ControlWindow _mainWindow;
 	private readonly int _classicWidth, _classicHeight, _classicLeft, _classicTop;
 	private readonly string _adBlockDir;
 	private readonly string _cacheDir;
@@ -20,7 +20,7 @@ public partial class WebView2Client : Form
 		get { return true; }
 	}
 
-	public WebView2Client(int res, MainWindow mainWindow, string adBlockDir, string cacheDir, string initUrl)
+	public WebView2Client(int res, ControlWindow mainWindow, string adBlockDir, string cacheDir, string initUrl)
 	{
 		_mainWindow = mainWindow;
 		_initUrl = initUrl;
