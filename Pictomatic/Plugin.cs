@@ -2,9 +2,11 @@
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using ImGuiNET;
+using Pictomatic.Renderer;
 using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
+using System.Security.Policy;
 
 namespace Pictomatic;
 
@@ -19,13 +21,16 @@ public class Plugin : IDalamudPlugin
 	private readonly string _pluginConfigDir;
 	private readonly string _pluginDir;
 
-	private RenderProcess? _renderProcess;
-	private Services _services;
+	private CaptureProcess? _capture;
+	private WebView2Client? _webView2Client;
 
 	public unsafe Plugin(IDalamudPluginInterface pluginInterface)
 	{
+		Application.EnableVisualStyles();
+		Application.SetCompatibleTextRenderingDefault(false);
+
 		// init services
-		_services = pluginInterface.Create<Services>()!;
+		pluginInterface.Create<Services>();
 
 		MainWindow = new MainWindow(this);
 
@@ -56,11 +61,11 @@ public class Plugin : IDalamudPlugin
 
 	public void Dispose()
 	{
+		TerminatePictomaticWindow();
+
 		IpcProvider.DeInit();
 
 		WindowSystem.RemoveAllWindows();
-
-		_renderProcess?.Dispose();
 
 		MainWindow.Dispose();
 
@@ -80,27 +85,43 @@ public class Plugin : IDalamudPlugin
 
 		MainWindow.initTexture();
 
-		_renderProcess = new RenderProcess(pid, _pluginDir, _pluginConfigDir, _dependencyManager, Services.PluginLog, MainWindow.currentSharedTextureResourceHandle);
-		_renderProcess.Rpc.RendererReady += msg =>
-		{
-			if (!msg.HasDxSharedTexturesSupport)
-			{
-				Services.PluginLog.Error("Could not initialize shared textures transport. Browsingway will not work.");
-				return;
-			}
-		};
-
-		_renderProcess.Rpc.AddSubProcess += msg =>
-		{
-			Services.Framework.RunOnFrameworkThread(() =>
-			{
-				this.MainWindow.AddSubProcess(msg.ProcessId);
-			});
-		};
-		_renderProcess.Start();
-
 		// Hook up the remote command
 		Services.CommandManager.AddHandler(_commandRemote, new CommandInfo(HandleCommand) { HelpMessage = "Toggles the Remote Window", ShowInHelp = true });
+	}
+
+	public bool _webViewInitialized = false;
+	private void InitializeWebView(string url, string handle)
+	{
+		if (_webViewInitialized)
+		{
+			_webView2Client?.Navigate(url);
+			return;
+		}
+		_webViewInitialized = true;
+
+		Thread capturestaThread = new Thread(() =>
+		{
+			int pid = Process.GetCurrentProcess().Id;
+			try
+			{
+				_capture = new CaptureProcess(pid, _pluginDir, _webView2Client.handle, handle);
+				_capture.Start();
+			}
+			catch { }
+		});
+
+		capturestaThread.SetApartmentState(ApartmentState.STA);
+
+		Thread staThread = new Thread(() => {
+			Application.EnableVisualStyles();
+			Application.SetCompatibleTextRenderingDefault(false);
+			_webView2Client = new WebView2Client(-1, MainWindow, _dependencyManager.GetDependencyPathFor("ublock"), Path.Combine(_pluginConfigDir, "webview-cache"), url);
+			capturestaThread.Start();
+			Application.Run(_webView2Client);
+		});
+
+		staThread.SetApartmentState(ApartmentState.STA);
+		staThread.Start();
 	}
 
 	private void Render()
@@ -109,7 +130,7 @@ public class Plugin : IDalamudPlugin
 
 		ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(0, 0));
 
-		_renderProcess?.EnsureRenderProcessIsAlive();
+		_capture?.EnsureRenderProcessIsAlive();
 
 		this.MainWindow?.Refresh();
 		DrawUI();
@@ -129,26 +150,20 @@ public class Plugin : IDalamudPlugin
 
 	public void TerminatePictomaticWindow()
 	{
-		_renderProcess?.Rpc.Navigate(Guid.Empty, "kill", "kill");
-		_renderProcess?.Stop();
+		_webViewInitialized = false;
+		_webView2Client?.RemoveWindow();
+
+		_capture?.Dispose();
 	}
 
 	public void NavigatePictomaticWindow(string url, string sharedHandle)
 	{
-		var isRunning = _renderProcess?.running;
-		if (isRunning.HasValue)
-		{
-			if (!isRunning.Value)
-			{
-				_renderProcess?.Restart();
-			}
-		}
-		_renderProcess?.Rpc.Navigate(Guid.Empty, url, sharedHandle);
+		InitializeWebView(url, sharedHandle);
 	}
 
 	public void ToggleExpandPictomaticWindow()
 	{
-		_renderProcess?.Rpc.Zoom(Guid.Empty, 0);
+		_webView2Client?.ToggleResize();
 	}
 
 	internal void UpdateTitle(uint entityId, TitleData titleData)

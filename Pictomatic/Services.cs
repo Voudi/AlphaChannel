@@ -14,31 +14,18 @@ public class Services
 	public static IPluginLog Log { get; private set; } = null!;
 
 	[PluginService]
-	// ReSharper disable once AutoPropertyCanBeMadeGetOnly.Local
 	public static ICommandManager CommandManager { get; private set; } = null!;
 
 	[PluginService]
-	// ReSharper disable once AutoPropertyCanBeMadeGetOnly.Local
-	public static IChatGui Chat { get; private set; } = null!;
-
-	[PluginService]
-	// ReSharper disable once AutoPropertyCanBeMadeGetOnly.Local
 	public static IPluginLog PluginLog { get; private set; } = null!;
 
 	[PluginService]
-	// ReSharper disable once AutoPropertyCanBeMadeGetOnly.Local
-	public static ITextureProvider TextureProvider { get; private set; } = null!;
-
-	[PluginService]
-	// ReSharper disable once AutoPropertyCanBeMadeGetOnly.Local
 	public static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
 
 	[PluginService]
-	// ReSharper disable once AutoPropertyCanBeMadeGetOnly.Local
 	public static IFramework Framework { get; private set; } = null!;
 
 	[PluginService]
-	// ReSharper disable once AutoPropertyCanBeMadeGetOnly.Local
 	public static IClientState ClientState { get; set; } = null!;
 
 	[PluginService]
@@ -46,7 +33,4 @@ public class Services
 
 	[PluginService]
 	public static ISigScanner SigScanner { get; private set; } = null!;
-
-	[PluginService]
-	public static IDataManager DataManager { get; private set; } = null!;
 }

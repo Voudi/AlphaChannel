@@ -1,3 +1,4 @@
+using Lumina.Text.ReadOnly;
 using Microsoft.Web.WebView2.Core;
 using System.Runtime.InteropServices;
 using WebView2 = Microsoft.Web.WebView2.WinForms.WebView2;
@@ -6,29 +7,26 @@ namespace Pictomatic.Renderer;
 
 public partial class WebView2Client : Form
 {
-	private WebView2 _webView;
-	private TableLayoutPanel _tableLayoutPanel;
-	private int _resolution;
-	//private GraphicsCapture _capture;
+	private readonly WebView2 _webView;
 	public IntPtr handle;
-	public uint processId;
-	private Common.RendererRpc _rpc;
-	private int _classicWidth, _classicHeight, _classicLeft, _classicTop;
-	private string _adBlockDir;
-	private string _cacheDir;
-	private string _initUrl;
+	public MainWindow _mainWindow;
+	private readonly int _classicWidth, _classicHeight, _classicLeft, _classicTop;
+	private readonly string _adBlockDir;
+	private readonly string _cacheDir;
+	private readonly string _initUrl;
 
 	protected override bool ShowWithoutActivation
 	{
 		get { return true; }
 	}
 
-	public WebView2Client(int res, Common.RendererRpc rpc, string adBlockDir, string cacheDir, string initUrl)
+	public WebView2Client(int res, MainWindow mainWindow, string adBlockDir, string cacheDir, string initUrl)
 	{
+		_mainWindow = mainWindow;
 		_initUrl = initUrl;
-		_rpc = rpc;
 		_adBlockDir = adBlockDir;
 		_cacheDir = cacheDir;
+
 		Text = "PictomaticWebView2";
 		StartPosition = FormStartPosition.Manual;
 		FormBorderStyle = FormBorderStyle.None;
@@ -44,6 +42,8 @@ public partial class WebView2Client : Form
 		Location = new Point(GetRightMostCoord().X - 1, GetRightMostCoord().Y - 1);
 		_classicLeft = Location.X;
 		_classicTop = Location.Y;
+		_topMostTimer = new System.Windows.Forms.Timer();
+
 		//SystemEvents.DisplaySettingsChanged += SystemEvents_DisplaySettingsChanged;
 
 		_webView = new WebView2()
@@ -117,8 +117,7 @@ public partial class WebView2Client : Form
 		var environment = CoreWebView2Environment.CreateAsync(null, _cacheDir, options).Result;
 		
 		Controls.Add(_webView);
-		//_tableLayoutPanel.Controls.Add(_webView, 0, 0);
-		//Controls.Add(_tableLayoutPanel);
+
 		_webView.CoreWebView2InitializationCompleted += WebViewCoreWebView2InitializationCompleted;
 		this.handle = Handle;
 		KeepOnTop();
@@ -126,7 +125,7 @@ public partial class WebView2Client : Form
 		await _webView.EnsureCoreWebView2Async(environment);
 	}
 
-	private void WebViewCoreWebView2InitializationCompleted(object sender, EventArgs e)
+	private void WebViewCoreWebView2InitializationCompleted(object? sender, EventArgs e)
 	{
 		_webView.Invoke(async () =>
 		{
@@ -137,11 +136,14 @@ public partial class WebView2Client : Form
 				Console.Out.WriteLine(ex.ToString());
 			}
 
-			processId = _webView.CoreWebView2.BrowserProcessId;
+			var processId = _webView?.CoreWebView2.BrowserProcessId;
+			if (processId.HasValue)
+			{
+				_mainWindow?.AddSubProcess(processId.Value);
+			}
 
-			_ = _rpc.AddSubProcess((int)processId);
-
-			_webView.Source = new Uri(_initUrl);
+			if(_webView != null)
+				_webView.Source = new Uri(_initUrl);
 		});
 		
 		//_webView.CoreWebView2.OpenDevToolsWindow();
@@ -149,10 +151,7 @@ public partial class WebView2Client : Form
 
 	internal void ShutDown()
 	{
-		_webView.Invoke(async () =>
-		{
-			_webView.Dispose();
-		});
+		_webView.Dispose();
 	}
 
 	private bool _resized = false;
@@ -190,18 +189,19 @@ public partial class WebView2Client : Form
 		base.WndProc(ref m);
 	}
 
-	private bool CLOSE_FLAG = false;
-	private void ToggleFormClosing(object sender, FormClosingEventArgs e)
+	private bool _close_flag = false;
+	private void ToggleFormClosing(object? sender, FormClosingEventArgs e)
 	{
-		if(!CLOSE_FLAG) 
+		if(!_close_flag) 
 			ToggleResize();
-		e.Cancel = !CLOSE_FLAG;
+		e.Cancel = !_close_flag;
 	}
 
 	public void RemoveWindow()
 	{
-		CLOSE_FLAG = true;
+		_close_flag = true;
 		Close();
+		ShutDown();
 	}
 
 	internal void Navigate(string url)
@@ -231,12 +231,11 @@ public partial class WebView2Client : Form
 			SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
 	}
 
-	private System.Windows.Forms.Timer _topMostTimer;
+	private readonly System.Windows.Forms.Timer _topMostTimer;
 
 	private void StartTopMostEnforcer()
 	{
-		_topMostTimer = new System.Windows.Forms.Timer();
-		_topMostTimer.Interval = 1000; // Check every second
+		_topMostTimer.Interval = 1000;
 		_topMostTimer.Tick += (s, e) => KeepOnTop();
 		_topMostTimer.Start();
 	}

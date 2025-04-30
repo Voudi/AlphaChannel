@@ -63,8 +63,6 @@ public class MainWindow : Window, IDisposable
 		};
 
 		this._plugin = plugin;
-
-		initHook();
 	}
 
 	public void initTexture()
@@ -89,6 +87,8 @@ public class MainWindow : Window, IDisposable
 		DxHandler.Device?.ImmediateContext.ClearRenderTargetView(rtv, clearColor);
 		using SharpDX.DXGI.Resource resource = _currentSharedTexture.QueryInterface<SharpDX.DXGI.Resource>();
 		currentSharedTextureResourceHandle = ((ulong)resource.SharedHandle).ToString();
+
+		initHook();
 	}
 	public void clearTexture()
 	{
@@ -416,7 +416,6 @@ public class MainWindow : Window, IDisposable
 
 	//https://github.com/0ceal0t/Dalamud-VFXEditor/blob/main/VFXEditor/Interop/Constants.cs
 	public const string ActorVfxCreateSig = "40 53 55 56 57 48 81 EC ?? ?? ?? ?? 0F 29 B4 24 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 0F B6 AC 24 ?? ?? ?? ?? 0F 28 F3 49 8B F8";
-
 	public delegate IntPtr ActorVfxCreateDelegate(string path, IntPtr a2, IntPtr a3, float a4, char a5, ushort a6, char a7);
 	public ActorVfxCreateDelegate ActorVfxCreate;
 
@@ -427,11 +426,12 @@ public class MainWindow : Window, IDisposable
 	{
 		Services.Log.Debug("Initializing Hooks");
 		_getResourceSyncHook = Services.InteropProvider.HookFromAddress<ResourceManager.Delegates.GetResourceSync>(ResourceManager.Addresses.GetResourceSync.Value, GetResourceSyncDetour);
-		_getResourceSyncHook.Enable();
 		_textureOnLoadHook = Services.InteropProvider.HookFromAddress<Texture.Delegates.InitializeContents>(Texture.Addresses.InitializeContents.Value, TexOnLoadDetour);
 		var actorVfxCreateAddress = Services.SigScanner.ScanText(ActorVfxCreateSig);
 		ActorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
 		Services.Log.Debug("Initializing Hooks successful");
+
+		_getResourceSyncHook.Enable();
 	}
 
 	private const string TEXPath = "chara/monster/m7002/obj/body/b0001/vfx/texture/screentex.atex";
@@ -650,9 +650,9 @@ public class MainWindow : Window, IDisposable
 		}
 	}
 
-	public void AddSubProcess(int processId)
+	public void AddSubProcess(uint processId)
 	{
-		_currentSubProcess = (uint) processId;
+		_currentSubProcess = processId;
 	}
 
 	private static uint CheckProcessParent(uint pid)

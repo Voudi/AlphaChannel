@@ -1,4 +1,3 @@
-using Pictomatic.Common;
 using System;
 using System.Diagnostics;
 
@@ -159,13 +158,6 @@ internal class CaptureProcess : IDisposable
 		};
 		process.OutputDataReceived += (_, args) =>
 		{
-			if(args.Data != null && args.Data.StartsWith("SharedHandle:")) {
-				var spl = args.Data.Split(":");
-				if (spl.Length > 1)
-				{
-					_ = Program._rpc.UpdateTexture(Guid.Empty, nint.Parse(spl[1]));
-				}
-			}
 			Console.WriteLine($"[Capture]: {args.Data}");
 		};
 		process.ErrorDataReceived += (_, args) => Console.WriteLine($"[CaptureERROR]: {args.Data}");

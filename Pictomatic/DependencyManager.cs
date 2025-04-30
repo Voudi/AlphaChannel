@@ -57,7 +57,6 @@ public class DependencyManager : IDisposable
 		];
 		_dependencyDir = Path.Join(pluginConfigDir, "dependencies");
 		_debugCheckDir = Path.GetDirectoryName(pluginDir) ?? pluginDir;
-		_texIcon = Services.TextureProvider.GetFromFile(Path.Combine(pluginDir, "icon.png"));
 	}
 
 	public void Dispose() { }
