@@ -2,8 +2,6 @@
 <Project>
 	<Target Name="PrepareOutput" AfterTargets="Build">
 		<RemoveDir Directories="$(OutputPath)\locales"/>
-		<Copy SourceFiles="C:\Users\Voudi\.nuget\packages\naudio.core\2.2.1\lib\netstandard2.0\NAudio.Core.dll" DestinationFolder="$(OutputPath)"/>
-		<Copy SourceFiles="C:\Users\Voudi\.nuget\packages\naudio.wasapi\2.2.1\lib\netstandard2.0\NAudio.Wasapi.dll" DestinationFolder="$(OutputPath)"/>
 		<Delete Files="$(OutputPath)\Pictomatic.Renderer.deps.json"/>
 		<Delete Files="$(OutputPath)\Pictomatic.Renderer.exe.bak"/>
 	</Target>
