@@ -181,7 +181,6 @@ public class ControlWindow : Window, IDisposable
 			if (_currentActivatedTV != _currentToggle) //...But it's not active
 			{
 				_currentActivatedTV = ownerId;
-				Services.Log.Debug("Turning on new TV...");
 			}
 			else
 			{
@@ -448,14 +447,12 @@ public class ControlWindow : Window, IDisposable
 			{
 				if (thisPtr->ActualWidth == 4096 && thisPtr->ActualHeight == 4096)
 				{
-					Services.Log.Debug("TV VFX redraw attempt");
 					var tex = _textureOnLoadHook.Original(thisPtr, contents);
 					if(tex)
 					{
 						ShaderResourceView view = new(DxHandler.Device, _currentSharedTexture, new ShaderResourceViewDescription { Format = _currentSharedTexture.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = _currentSharedTexture.Description.MipLevels } });
 						thisPtr->D3D11Texture2D = (void*)_currentSharedTexture.NativePointer;
 						thisPtr->D3D11ShaderResourceView = (void*)view.NativePointer;
-						Services.Log.Debug("Successfully redrawn TV VFX");
 					}
 
 					return tex;

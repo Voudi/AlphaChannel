@@ -1,9 +1,7 @@
 ﻿<Project Sdk="Dalamud.NET.Sdk/12.0.2">
 	<PropertyGroup>
-		<TargetFramework>net9.0-windows</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Configurations>Release</Configurations>
-		<Platforms>x64</Platforms>
 		<ProduceReferenceAssembly>false</ProduceReferenceAssembly>
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 		<OutputPath>..\out</OutputPath>
@@ -16,7 +14,7 @@
 		<PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
 		<PackageReference Include="System.Management" Version="9.0.4" />
 	</ItemGroup>
-	
+
 	<Target Name="RemoveUnnecessaryWebView2References" AfterTargets="ResolvePackageDependenciesForBuild">
 		<ItemGroup>
 			<ReferenceToBeRemoved Include="@(Reference)" Condition="'%(Reference.FileName)' == 'Microsoft.Web.WebView2.WinForms' And '$(UseWindowsForms)' != 'true'"/>

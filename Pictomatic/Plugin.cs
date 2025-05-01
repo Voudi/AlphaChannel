@@ -12,7 +12,7 @@ namespace Pictomatic;
 public class Plugin : IDalamudPlugin
 {
 	public readonly WindowSystem WindowSystem = new("Pictomatic");
-	private ControlWindow MainWindow { get; init; }
+	private ControlWindow _mainWindow;
 
 	private const string _commandRemote = "/premote";
 
@@ -23,7 +23,7 @@ public class Plugin : IDalamudPlugin
 	private CaptureProcess? _capture;
 	private WebView2Client? _webView2Client;
 
-	public unsafe Plugin(IDalamudPluginInterface pluginInterface)
+	public Plugin(IDalamudPluginInterface pluginInterface)
 	{
 		Application.EnableVisualStyles();
 		Application.SetCompatibleTextRenderingDefault(false);
@@ -46,14 +46,14 @@ public class Plugin : IDalamudPlugin
 		// Spin up DX handling from the plugin interface
 		DxHandler.Initialise(Services.PluginInterface);
 
-		// Create Main Window
-		MainWindow = new ControlWindow(this);
-		WindowSystem.AddWindow(MainWindow);
-
 		// Hook up render hook
 		pluginInterface.UiBuilder.Draw += Render;
 
 		IpcProvider.Init(this);
+
+		// Create Main Window
+		_mainWindow = new ControlWindow(this);
+		WindowSystem.AddWindow(_mainWindow);
 
 		pluginInterface.UiBuilder.OpenConfigUi += ToggleMainUI;
 		pluginInterface.UiBuilder.OpenMainUi += ToggleMainUI;
@@ -72,7 +72,7 @@ public class Plugin : IDalamudPlugin
 
 		WindowSystem.RemoveAllWindows();
 
-		MainWindow.Dispose();
+		_mainWindow?.Dispose();
 
 		DxHandler.Shutdown();
 
@@ -81,6 +81,7 @@ public class Plugin : IDalamudPlugin
 
 	private void DependenciesReady()
 	{
+
 		// Hook up the remote command
 		Services.CommandManager.AddHandler(_commandRemote, new CommandInfo(HandleCommand) { HelpMessage = "Toggles the Remote Window", ShowInHelp = true });
 	}
@@ -115,7 +116,7 @@ public class Plugin : IDalamudPlugin
 		Thread staThread = new(() => {
 			Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
-			_webView2Client = new WebView2Client(-1, MainWindow, _dependencyManager.GetDependencyPathFor("ghostery"), Path.Combine(_pluginConfigDir, "webview-cache"), url);
+			_webView2Client = new WebView2Client(-1, _mainWindow, _dependencyManager.GetDependencyPathFor("ghostery"), Path.Combine(_pluginConfigDir, "webview-cache"), url);
 			capturestaThread.Start();
 			Application.Run(_webView2Client);
 		});
@@ -126,13 +127,12 @@ public class Plugin : IDalamudPlugin
 
 	private void Render()
 	{
-		_dependencyManager.Render();
-
-		ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(0, 0));
+		ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(5, 5));
 
 		_capture?.EnsureRenderProcessIsAlive();
 
-		this.MainWindow?.Refresh();
+		_mainWindow?.Refresh();
+
 		DrawUI();
 
 		ImGui.PopStyleVar();
@@ -141,11 +141,11 @@ public class Plugin : IDalamudPlugin
 	private void HandleCommand(string command, string rawArgs)
 	{
 		if (_commandRemote.Equals(command))
-			MainWindow.Toggle();
+			ToggleMainUI();
 	}
 
 	private void DrawUI() => WindowSystem.Draw();
-	public void ToggleMainUI() => MainWindow.Toggle();
+	public void ToggleMainUI() => _mainWindow?.Toggle();
 
 
 	public void TerminatePictomaticWindow()
@@ -169,6 +169,6 @@ public class Plugin : IDalamudPlugin
 	internal void UpdateTitle(uint entityId, TitleData titleData)
 	{
 		if (titleData?.Title != null)
-			MainWindow.UpdateTitle(entityId, titleData.Title);
+			_mainWindow?.UpdateTitle(entityId, titleData.Title);
 	}
 }
