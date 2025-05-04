@@ -146,7 +146,7 @@ internal class CaptureProcess : IDisposable
 			StartInfo = new ProcessStartInfo
 			{
 				WorkingDirectory = Path.Combine(_pluginDir, "capture"),
-				FileName = Path.Combine(_pluginDir, "capture", "WinRT.GraphicsCapture.exe"),
+				FileName = Path.Combine(_pluginDir, "capture", "Pictomatic.GraphicsCapture.exe"),
 				Arguments = processArgs,
 				UseShellExecute = false,
 				CreateNoWindow = true,

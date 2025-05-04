@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
-namespace WinRT.GraphicsCapture
+namespace Pictomatic.GraphicsCapture
 {
 	internal static class NativeMethods
 	{

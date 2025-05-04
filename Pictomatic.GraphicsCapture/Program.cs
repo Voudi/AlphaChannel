@@ -2,7 +2,7 @@
 using System.Diagnostics;
 using System.Threading;
 
-namespace WinRT.GraphicsCapture
+namespace Pictomatic.GraphicsCapture
 {
     public class Program
     {

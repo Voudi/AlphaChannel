@@ -10,7 +10,7 @@ using SharpDX.Direct3D11;
 
 using System.Drawing;
 
-namespace WinRT.GraphicsCapture
+namespace Pictomatic.GraphicsCapture
 {
     public class GraphicsCapture
     {

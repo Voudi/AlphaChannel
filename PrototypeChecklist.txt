@@ -4,6 +4,7 @@ TODO
 implement checks for other plugins (mare,penumbra,honorific required)
 implement checks for penumrba mod & install
 remodel penumbra mod
+implement settings section (dropdowns for adblock)
 implement fullscreen request button
 fix scaling bug for windows ui
 
