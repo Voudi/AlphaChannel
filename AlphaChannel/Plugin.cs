@@ -2,19 +2,19 @@
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using ImGuiNET;
-using Pictomatic.Renderer;
+using AlphaChannel.Renderer;
 using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
 
-namespace Pictomatic;
+namespace AlphaChannel;
 
 public class Plugin : IDalamudPlugin
 {
-	public readonly WindowSystem WindowSystem = new("Pictomatic");
+	public readonly WindowSystem WindowSystem = new("AlphaChannel");
 	private ControlWindow _mainWindow;
 
-	private const string _commandRemote = "/premote";
+	private const string _commandRemote = "/aremote";
 
 	private readonly DependencyManager _dependencyManager;
 	private readonly string _pluginConfigDir;
@@ -62,11 +62,11 @@ public class Plugin : IDalamudPlugin
 
 	// Required for LivePluginLoader support
 	public string AssemblyLocation { get; } = Assembly.GetExecutingAssembly().Location;
-	public string Name => "Pictomatic";
+	public string Name => "AlphaChannel";
 
 	public void Dispose()
 	{
-		TerminatePictomaticWindow();
+		TerminateAlphaWindow();
 
 		IpcProvider.DeInit();
 
@@ -148,7 +148,7 @@ public class Plugin : IDalamudPlugin
 	public void ToggleMainUI() => _mainWindow?.Toggle();
 
 
-	public void TerminatePictomaticWindow()
+	public void TerminateAlphaWindow()
 	{
 		_webViewInitialized = false;
 		_webView2Client?.RemoveWindow();
@@ -156,12 +156,12 @@ public class Plugin : IDalamudPlugin
 		_capture?.Dispose();
 	}
 
-	public void NavigatePictomaticWindow(string url, string sharedHandle)
+	public void NavigateAlphaWindow(string url, string sharedHandle)
 	{
 		InitializeWebView(url, sharedHandle);
 	}
 
-	public void ToggleExpandPictomaticWindow()
+	public void ToggleExpandAlphaWindow()
 	{
 		_webView2Client?.ToggleResize();
 	}

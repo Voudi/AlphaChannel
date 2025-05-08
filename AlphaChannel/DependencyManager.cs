@@ -8,7 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-namespace Pictomatic;
+namespace AlphaChannel;
 
 internal class Dependency
 {

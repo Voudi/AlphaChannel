@@ -3,7 +3,7 @@ using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 
-namespace Pictomatic;
+namespace AlphaChannel;
 
 public class Services
 {

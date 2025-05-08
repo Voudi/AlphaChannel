@@ -6,8 +6,8 @@
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{0654DF3F-FBB5-44CD-B5D8-6715D2A73531}</ProjectGuid>
     <OutputType>WinExe</OutputType>
-    <RootNamespace>Pictomatic.GraphicsCapture</RootNamespace>
-    <AssemblyName>Pictomatic.GraphicsCapture</AssemblyName>
+    <RootNamespace>AlphaChannel.GraphicsCapture</RootNamespace>
+    <AssemblyName>AlphaChannel.GraphicsCapture</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -38,7 +38,7 @@
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup>
-    <StartupObject>Pictomatic.GraphicsCapture.Program</StartupObject>
+    <StartupObject>AlphaChannel.GraphicsCapture.Program</StartupObject>
     <NoWin32Manifest>true</NoWin32Manifest>
   </PropertyGroup>
   <PropertyGroup>

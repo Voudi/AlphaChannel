@@ -10,7 +10,7 @@ using SharpDX.Direct3D11;
 
 using System.Drawing;
 
-namespace Pictomatic.GraphicsCapture
+namespace AlphaChannel.GraphicsCapture
 {
     public class GraphicsCapture
     {

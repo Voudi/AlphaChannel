@@ -1,7 +1,7 @@
 using System;
 using System.Diagnostics;
 
-namespace Pictomatic.Renderer;
+namespace AlphaChannel.Renderer;
 
 internal class CaptureProcess : IDisposable
 {
@@ -20,7 +20,7 @@ internal class CaptureProcess : IDisposable
 	)
 	{
 		_wHandle = wHandle;
-		_keepAliveHandleName = $"PictomaticCaptureKeepAlive{pid}";
+		_keepAliveHandleName = $"AlphaChannelCaptureKeepAlive{pid}";
 		_pluginDir = pluginDir;
 		_sharedHandle = sharedHandle;
 
@@ -146,7 +146,7 @@ internal class CaptureProcess : IDisposable
 			StartInfo = new ProcessStartInfo
 			{
 				WorkingDirectory = Path.Combine(_pluginDir, "capture"),
-				FileName = Path.Combine(_pluginDir, "capture", "Pictomatic.GraphicsCapture.exe"),
+				FileName = Path.Combine(_pluginDir, "capture", "AlphaChannel.GraphicsCapture.exe"),
 				Arguments = processArgs,
 				UseShellExecute = false,
 				CreateNoWindow = true,

@@ -2,7 +2,7 @@ using Microsoft.Web.WebView2.Core;
 using System.Runtime.InteropServices;
 using WebView2 = Microsoft.Web.WebView2.WinForms.WebView2;
 
-namespace Pictomatic.Renderer;
+namespace AlphaChannel.Renderer;
 
 public partial class WebView2Client : Form
 {
@@ -34,7 +34,7 @@ public partial class WebView2Client : Form
 		_adBlockDir = adBlockDir;
 		_cacheDir = cacheDir;
 
-		Text = "PictomaticWebView2";
+		Text = "AlphaChannelWebView2";
 		StartPosition = FormStartPosition.Manual;
 		FormBorderStyle = FormBorderStyle.None;
 		AllowTransparency = false;

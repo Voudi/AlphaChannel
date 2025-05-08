@@ -2,7 +2,7 @@
 using System.Diagnostics;
 using System.Threading;
 
-namespace Pictomatic.GraphicsCapture
+namespace AlphaChannel.GraphicsCapture
 {
     public class Program
     {
@@ -33,7 +33,7 @@ namespace Pictomatic.GraphicsCapture
 			_capture.StartCapture((IntPtr)wHandle);
 
 			_waitHandle = new EventWaitHandle(false, EventResetMode.ManualReset, rawArgs[3]);
-			_frameWaitHandle = new EventWaitHandle(false, EventResetMode.AutoReset, "pictomaticFrameWaitHandle");
+			_frameWaitHandle = new EventWaitHandle(false, EventResetMode.AutoReset, "alphachannelFrameWaitHandle");
 
 			// Boot up a thread to make sure we shut down if parent dies
 			_parentWatchThread = new Thread(WatchParentStatus);

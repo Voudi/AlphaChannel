@@ -3,7 +3,7 @@ using Dalamud.Plugin.Ipc;
 using Newtonsoft.Json;
 using System.Reflection;
 
-namespace Pictomatic;
+namespace AlphaChannel;
 
 public static class IpcProvider
 {

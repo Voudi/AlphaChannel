@@ -1,5 +1,5 @@
 ﻿using System.Numerics;
-using Pictomatic;
+using AlphaChannel;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Interface.Windowing;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
@@ -64,7 +64,7 @@ public class ControlWindow : Window, IDisposable
 	private bool volumeEnabled = false;
 
 	public unsafe ControlWindow(Plugin plugin)
-        : base("Pictomatic remote", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
+        : base("AlphaChannel remote", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
 
 		SizeConstraints = new WindowSizeConstraints
@@ -102,7 +102,7 @@ public class ControlWindow : Window, IDisposable
 	{
 		if (_signalShareTitle)
 		{
-			Services.CommandManager.ProcessCommand("/honorific force set picto:" + _shortenedURL + "|silent");
+			Services.CommandManager.ProcessCommand("/honorific force set alpha:" + _shortenedURL + "|silent");
 			_signalShareTitle = false;
 		}
 	}
@@ -207,7 +207,7 @@ public class ControlWindow : Window, IDisposable
 			{
 				_currentToggle = entityId;
 				
-				_plugin.NavigatePictomaticWindow(url.ToString(), currentSharedTextureResourceHandle);
+				_plugin.NavigateAlphaWindow(url.ToString(), currentSharedTextureResourceHandle);
 				ShareTitle(url.ToString());
 			}
 		}
@@ -216,7 +216,7 @@ public class ControlWindow : Window, IDisposable
 			if (_currentURLs.TryGetValue(entityId, out var url))
 			{
 				_currentToggle = entityId;
-				_plugin.NavigatePictomaticWindow(url, currentSharedTextureResourceHandle);
+				_plugin.NavigateAlphaWindow(url, currentSharedTextureResourceHandle);
 			}
 		}
 
@@ -229,7 +229,7 @@ public class ControlWindow : Window, IDisposable
 		clearTexture();
 		volumeEnabled = false;
 		VisitedAudioProcesses.Clear();
-		_plugin.TerminatePictomaticWindow();
+		_plugin.TerminateAlphaWindow();
 		if (_currentToggle == Services.ClientState?.LocalPlayer?.EntityId)
 		{
 			Services.CommandManager?.ProcessCommand("/honorific force clear");
@@ -346,7 +346,7 @@ public class ControlWindow : Window, IDisposable
 					ImGui.PushFont(UiBuilder.IconFont);
 					if (ImGui.Button(FontAwesomeIcon.WindowRestore.ToIconString()))
 					{
-						_plugin.ToggleExpandPictomaticWindow();
+						_plugin.ToggleExpandAlphaWindow();
 					}
 					ImGui.PopFont();
 				}
@@ -471,7 +471,7 @@ public class ControlWindow : Window, IDisposable
 		{
 			_currentTitles[entityId] = title;
 
-			if (title.Length < 7 || !title.StartsWith("picto:"))
+			if (title.Length < 7 || !title.StartsWith("alpha:"))
 			{
 				if(_currentURLs.TryGetValue(entityId, out _))
 				{
@@ -483,11 +483,11 @@ public class ControlWindow : Window, IDisposable
 			}
 			else
 			{
-				var url = "https://is.gd/" + title.Substring("picto:".Length);
+				var url = "https://is.gd/" + title.Substring("alpha:".Length);
 				await FetchURLData(url, response => {
 					_currentURLs[entityId] = response;
 					if (_currentToggle == entityId)
-						_plugin.NavigatePictomaticWindow(response, currentSharedTextureResourceHandle);
+						_plugin.NavigateAlphaWindow(response, currentSharedTextureResourceHandle);
 				});
 			}
 		}

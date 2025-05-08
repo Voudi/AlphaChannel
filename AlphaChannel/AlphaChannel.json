@@ -1,0 +1,23 @@
+﻿{
+  "Author": "Voudi",
+  "Name": "AlphaChannel",
+  "InternalName": "AlphaChannel",
+  "AssemblyVersion": "1.0.0",
+  "Description": "Cute TV for cute watch parties.",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "browser",
+    "website",
+    "video",
+    "cinema",
+	"watch party"
+  ],
+  "DalamudApiLevel": 12,
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "CanUnloadAsync": false,
+  "LoadPriority": 0,
+  "Punchline": "Ingame TV",
+  "Changelog": "Initial Prototype",
+  "AcceptsFeedback": true
+}

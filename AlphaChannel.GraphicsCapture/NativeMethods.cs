@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
-namespace Pictomatic.GraphicsCapture
+namespace AlphaChannel.GraphicsCapture
 {
 	internal static class NativeMethods
 	{

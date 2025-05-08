@@ -2,7 +2,7 @@
 using System.Text.Json.Serialization;
 using System.ComponentModel;
 
-namespace Pictomatic;
+namespace AlphaChannel;
 
 public class TitleData
 {
