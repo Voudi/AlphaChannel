@@ -18,6 +18,7 @@ using InteropGenerator.Runtime;
 using FFXIVClientStructs.FFXIV.Client.System.Resource.Handle;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
 using SharpDX.Mathematics.Interop;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TextBox;
 
 public class ControlWindow : Window, IDisposable
 {
@@ -595,25 +596,25 @@ public class ControlWindow : Window, IDisposable
 
 				if (sessionManager == null) return;
 
-				for (int i = 0; i < sessionsCount; i++)
-				{
-
+				Dictionary<uint, AudioSessionControl> sessionPIDs = [];
+                for (int i = 0; i < sessionManager.Sessions.Count; i++)
+                {
 					var session = sessionManager.Sessions[i];
-					var sessionId = session.GetProcessID;
-
-					if (!VisitedAudioProcesses.Contains(sessionId))
-					{
-						VisitedAudioProcesses.Add(sessionId);
-						var parent = CheckProcessParent(sessionId);
-						if (_currentSubProcess == parent && _currentSubProcess != 0 && parent != 0)
-						{
-							_currentAudioProcess = sessionId;
-							volume = session.SimpleAudioVolume.Volume;
-							volumeEnabled = true;
-							return;
-						}
-					}
-				}
+                    sessionPIDs.Add(session.GetProcessID, session);
+                }
+				var parents = GetProcessParentMapFiltered(sessionPIDs.Keys);
+				var unvisitedAudioProcesses = sessionPIDs.Where(pid => !VisitedAudioProcesses.Contains(pid.Key));
+                foreach (var pid in unvisitedAudioProcesses)
+                {
+					var parent = parents[pid.Key];
+                    if (_currentSubProcess == parent && _currentSubProcess != 0 && parent != 0)
+                    {
+                        _currentAudioProcess = pid.Key;
+                        volume = pid.Value.SimpleAudioVolume.Volume;
+                        volumeEnabled = true;
+                        return;
+                    }
+                }
 			}
 		}
 		catch {  }
@@ -641,15 +642,37 @@ public class ControlWindow : Window, IDisposable
 		_currentSubProcess = processId;
 	}
 
-	private static uint CheckProcessParent(uint pid)
-	{
-		var query = $"SELECT ParentProcessId FROM Win32_Process WHERE ProcessId = {pid}";
-		try
-		{
-			var searcher = new System.Management.ManagementObjectSearcher(query);
-			return Convert.ToUInt32(searcher?.Get()?.Cast<System.Management.ManagementObject>()?.FirstOrDefault()?["ParentProcessId"]);
-		}
-		catch
-		{ return 0; }
-	}
+    private static Dictionary<uint, uint> GetProcessParentMapFiltered(IEnumerable<uint> pids)
+    {
+        var pidList = pids.ToList();
+        if (pidList.Count == 0)
+            return new Dictionary<uint, uint>();
+
+        // Construct the WHERE clause
+        var filter = string.Join(" OR ", pidList.Select(pid => $"ProcessId = {pid}"));
+        var query = $"SELECT ProcessId, ParentProcessId FROM Win32_Process WHERE {filter}";
+
+        var result = new Dictionary<uint, uint>();
+
+        try
+        {
+            var searcher = new System.Management.ManagementObjectSearcher(query);
+            foreach (var obj in searcher.Get().Cast<System.Management.ManagementObject>())
+            {
+                if (obj["ProcessId"] != null && obj["ParentProcessId"] != null)
+                {
+                    uint pid = Convert.ToUInt32(obj["ProcessId"]);
+                    uint ppid = Convert.ToUInt32(obj["ParentProcessId"]);
+                    result[pid] = ppid;
+                }
+            }
+        }
+        catch
+        {
+            // Handle exceptions as needed
+        }
+
+        return result;
+    }
+
 }
