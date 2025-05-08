@@ -27,15 +27,22 @@ public class ControlWindow : Window, IDisposable
 	private readonly Dictionary<uint, String> _currentTitles = []; //Playerpointer, Title
 	private Texture2D _currentSharedTexture;
 	public string currentSharedTextureResourceHandle;
-	private IntPtr _oldSharedTexture = IntPtr.Zero;
 	private uint _currentToggle; //Playerpointer (whether TV toggled or not)
 	private uint _currentActivatedTV = 0; //Playerpointer (whether TV toggled or not)
 	private uint _currentAudioProcess;
 	private uint _currentSubProcess;
+	private bool _refreshAudio = false;
 	private Dictionary<IntPtr, bool> _currentVFXTextures = new Dictionary<IntPtr, bool>(); //Texturepointer, Flag (whether overridden once)
 	private bool _signalShareTitle = false;
 
-	private static readonly byte[] _blankCanvas = new byte[16777216];
+    //Render Vars
+    private String _inputURL = "";
+    private String _shortenedURL = "";
+    private String _lastURL = "";
+    float volume = 0.5f;
+    private bool volumeEnabled = false;
+
+    private static readonly byte[] _blankCanvas = new byte[16777216];
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
 	{
 		Width = 1920,
@@ -56,13 +63,6 @@ public class ControlWindow : Window, IDisposable
 	public delegate void URLShortenerCallback(string result);
 	public delegate void URLShortenerErrorCallback(string result);
 	public delegate void URLFetchCallback(string result);
-
-	//Render Vars
-	private String _inputURL = "";
-	private String _shortenedURL = "";
-	private String _lastURL = "";
-	float volume = 0.5f;
-	private bool volumeEnabled = false;
 
 	public unsafe ControlWindow(Plugin plugin)
         : base("AlphaChannel remote", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
@@ -587,7 +587,7 @@ public class ControlWindow : Window, IDisposable
 	private void RefreshVolume()
 	{
 		try {
-			if (!volumeEnabled)
+			if (!volumeEnabled && _refreshAudio)
 			{
 				var enumerator = new MMDeviceEnumerator();
 				var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
@@ -612,6 +612,7 @@ public class ControlWindow : Window, IDisposable
                         _currentAudioProcess = pid.Key;
                         volume = pid.Value.SimpleAudioVolume.Volume;
                         volumeEnabled = true;
+						_refreshAudio = false;
                         return;
                     }
                 }
@@ -640,6 +641,7 @@ public class ControlWindow : Window, IDisposable
 	public void AddSubProcess(uint processId)
 	{
 		_currentSubProcess = processId;
+		_refreshAudio = true;
 	}
 
     private static Dictionary<uint, uint> GetProcessParentMapFiltered(IEnumerable<uint> pids)
