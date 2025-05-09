@@ -208,7 +208,7 @@ public class DependencyManager : IDisposable
 		Dependency? dependency = _dependencies.First(dependency => dependency.Directory.StartsWith(dependencyDir));
 		if (dependency == null) { throw new Exception($"Unknown dependency {dependencyDir}"); }
 
-		return GetDependencyPath(dependency);
+		return dependency.Version.Equals("pages") ? GetDependencyPath(dependency) : Path.Combine(GetDependencyPath(dependency), dependency.Version);
 	}
 
 	private string GetDependencyPath(Dependency dependency)

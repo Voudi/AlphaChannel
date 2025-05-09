@@ -116,7 +116,11 @@ public class Plugin : IDalamudPlugin
 		Thread staThread = new(() => {
 			Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
-			_webView2Client = new WebView2Client(-1, _mainWindow, _dependencyManager.GetDependencyPathFor("ghostery"), Path.Combine(_pluginConfigDir, "webview-cache"), url);
+			var adBlocknames = new Dictionary<string, string>
+            {
+                { "uBlock", _dependencyManager.GetDependencyPathFor("ublock") }
+            };
+            _webView2Client = new WebView2Client(-1, _mainWindow, adBlocknames, Path.Combine(_pluginConfigDir, "webview-cache"), url);
 			capturestaThread.Start();
 			Application.Run(_webView2Client);
 		});
@@ -165,6 +169,11 @@ public class Plugin : IDalamudPlugin
 	{
 		_webView2Client?.ToggleResize();
 	}
+
+	public void PlayAndFullscreen()
+	{
+        _webView2Client?.TryEnterFullScreen();
+    }
 
 	internal void UpdateTitle(uint entityId, TitleData titleData)
 	{

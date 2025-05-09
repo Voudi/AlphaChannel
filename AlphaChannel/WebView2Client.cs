@@ -1,4 +1,6 @@
 using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.WinForms;
+using System;
 using System.Runtime.InteropServices;
 using WebView2 = Microsoft.Web.WebView2.WinForms.WebView2;
 
@@ -10,7 +12,7 @@ public partial class WebView2Client : Form
 	public IntPtr handle;
 	public ControlWindow _mainWindow;
 	private readonly int _classicWidth, _classicHeight, _classicLeft, _classicTop;
-	private readonly string _adBlockDir;
+	private readonly Dictionary<string, string> _adBlockDirs;
 	private readonly string _cacheDir;
 	private readonly string _initUrl;
 
@@ -27,11 +29,11 @@ public partial class WebView2Client : Form
 
 	private IntPtr _gameWindow = IntPtr.Zero;
 
-	public WebView2Client(int res, ControlWindow mainWindow, string adBlockDir, string cacheDir, string initUrl)
+	public WebView2Client(int res, ControlWindow mainWindow, Dictionary<string, string> adBlockDirs, string cacheDir, string initUrl)
 	{
 		_mainWindow = mainWindow;
 		_initUrl = initUrl;
-		_adBlockDir = adBlockDir;
+		_adBlockDirs = adBlockDirs;
 		_cacheDir = cacheDir;
 
 		Text = "AlphaChannelWebView2";
@@ -156,14 +158,38 @@ public partial class WebView2Client : Form
 	private void WebViewCoreWebView2InitializationCompleted(object? sender, EventArgs e)
 	{
 		_webView.Invoke(async () =>
-		{
+        {
 			try {
-				await _webView.CoreWebView2.Profile.AddBrowserExtensionAsync(_adBlockDir + "\\uBlock0.chromium");
+				var extensions = await _webView.CoreWebView2.Profile.GetBrowserExtensionsAsync();
+				foreach(var adblock in _adBlockDirs)
+				{
+					var installed = false;
+					foreach (var extension in extensions)
+					{
+
+						if (extension.IsEnabled && extension.Name.Contains(adblock.Key))
+						{
+							installed = true;
+                            Services.Log.Debug("Found browser extension: " + extension.Name + " | " + extension.IsEnabled);
+                        }
+						else if (extension.Name.Contains(adblock.Key))
+						{
+                            installed = true;
+                            await extension.EnableAsync(true);
+                            Services.Log.Debug("Enabling browser extension: " + extension.Name + " | " + extension.IsEnabled);
+                        }
+					}
+					if (!installed)
+					{
+                        Services.Log.Debug("Installing browser extension: " + adblock.Key + " | " + adblock.Value);
+                        await _webView.CoreWebView2.Profile.AddBrowserExtensionAsync(adblock.Value);
+                    }
+				}
 			}
 			catch (Exception ex) {
 				Console.Out.WriteLine(ex.ToString());
 			}
-
+			
 			var processId = _webView?.CoreWebView2.BrowserProcessId;
 			if (processId.HasValue)
 			{
@@ -172,8 +198,8 @@ public partial class WebView2Client : Form
 
 			if(_webView != null)
 			{
+                await Task.Delay(2000); //Wait two seconds for adblock to boot up - no other indicator of booting up exists
 				_webView.Source = new Uri(_initUrl);
-				_webView.CoreWebView2.NavigationCompleted += SimulateUserClick;
 			}
 		});
 		
@@ -272,18 +298,16 @@ public partial class WebView2Client : Form
 		_topMostTimer.Start();
 	}
 
-	private async void SimulateUserClick(object? sender, EventArgs e)
+	public async void TryEnterFullScreen()
 	{
 		string script = @"
         (function() {
             var video = document.querySelector('video');
             if (video) {
                 video.play();
-				setTimeout(function() {
-						if (video.requestFullscreen) {
-							video.requestFullscreen();
-						}
-					}, 1000)
+				if (video.requestFullscreen) {
+					video.requestFullscreen();
+				}
             }
         })();";
 

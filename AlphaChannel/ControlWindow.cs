@@ -337,11 +337,43 @@ public class ControlWindow : Window, IDisposable
 
 				if (toggle || !urlExists) ImGui.PopStyleColor();
 
-				ImGui.SameLine();
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.Text(
+
+                        (toggle ?
+							(!string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists ? "Visit new URL"
+							 : "Stop"
+                        )
+						: "Play")
+					);
+                    ImGui.EndTooltip();
+                }
+
+                ImGui.SameLine();
 
 				ImGui.Text(isPlayer ? "YOU" : " " + item.Name.TextValue);
 
-				ImGui.SameLine();
+                ImGui.SameLine();
+
+                if (toggle)
+                {
+                    ImGui.PushFont(UiBuilder.IconFont);
+                    if (ImGui.Button(FontAwesomeIcon.ExpandArrowsAlt.ToIconString()))
+                    {
+						_plugin.PlayAndFullscreen();
+                    }
+                    ImGui.PopFont();
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text("Fullscreen and play - BETA");
+                        ImGui.EndTooltip();
+                    }
+                }
+
+                ImGui.SameLine();
 
 				if (toggle) {
 					ImGui.PushFont(UiBuilder.IconFont);
@@ -350,18 +382,30 @@ public class ControlWindow : Window, IDisposable
 						_plugin.ToggleExpandAlphaWindow();
 					}
 					ImGui.PopFont();
-				}
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text("Take control of the browser window");
+                        ImGui.EndTooltip();
+                    }
+                }
 
-				ImGui.SameLine();
+                ImGui.SameLine();
 
 				ImGui.PushFont(UiBuilder.IconFont);
-				if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString()))
+				if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##" + item.EntityId))
 				{
 					ImGui.SetClipboardText(isPlayer ? (string.IsNullOrEmpty(_inputURL) && toggle ? _placeHolderURL : _inputURL) : (url ?? String.Empty));
 				}
 				ImGui.PopFont();
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.Text("Copy URL to clipboard");
+                    ImGui.EndTooltip();
+                }
 
-				ImGui.SameLine();
+                ImGui.SameLine();
 
 				if (isPlayer)
 				{
