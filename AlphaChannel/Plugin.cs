@@ -180,4 +180,13 @@ public class Plugin : IDalamudPlugin
 		if (titleData?.Title != null)
 			_mainWindow?.UpdateTitle(entityId, titleData.Title);
 	}
+
+    internal void OpenModfolder()
+    {
+		Process.Start(new ProcessStartInfo
+		{
+			FileName = Path.Combine(_pluginDir, "resources"),
+			UseShellExecute = true
+		});
+    }
 }

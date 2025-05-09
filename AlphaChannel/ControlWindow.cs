@@ -18,6 +18,7 @@ using FFXIVClientStructs.FFXIV.Client.System.Resource.Handle;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
 using System.Numerics;
 using SharpDX.Mathematics.Interop;
+using static FFXIVClientStructs.FFXIV.Component.GUI.AtkUIColorHolder.Delegates;
 
 public class ControlWindow : Window, IDisposable
 {
@@ -32,7 +33,8 @@ public class ControlWindow : Window, IDisposable
 	private uint _currentSubProcess;
 	private bool _refreshAudio = false;
 	private Dictionary<IntPtr, bool> _currentVFXTextures = new Dictionary<IntPtr, bool>(); //Texturepointer, Flag (whether overridden once)
-	private bool _signalShareTitle = false;
+    private bool _signalShareTitle = false;
+    private bool _installWarningMessage = false;
 
     //Render Vars
     private String _inputURL = "";
@@ -93,7 +95,7 @@ public class ControlWindow : Window, IDisposable
 		if (_currentSharedTexture == null)
 			return;
 		var rtv = new RenderTargetView(DxHandler.Device, _currentSharedTexture);
-		var clearColor = new RawColor4(0, 0, 0, 1);
+		var clearColor = new RawColor4(0.3f, 0.3f, 0.3f, 1);
 		DxHandler.Device?.ImmediateContext.ClearRenderTargetView(rtv, clearColor);
     }
 
@@ -116,7 +118,11 @@ public class ControlWindow : Window, IDisposable
 		List<uint> visitedTvs = new List<uint>();
 		_playerList = Services.Objects.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.Name.TextValue).ToList();
 		_npcList = Services.Objects.Where(x => x is IBattleNpc).Cast<IBattleNpc>().OrderBy(x => x.YalmDistanceX).ToList();
-		foreach(var item in _npcList)
+
+		var playerId = Services.ClientState?.LocalPlayer?.EntityId;
+
+		var showWarningMessage = false;
+        foreach (var item in _npcList)
 		{
 			if(item.Name.TextValue == "Carbuncle")
 			{
@@ -130,29 +136,44 @@ public class ControlWindow : Window, IDisposable
 						try
 						{
 							var tvDraw = (CharacterBase*)character->DrawObject;
-							if (tvDraw->Models[0] is not null)
-								if (tvDraw->Models[0]->MaterialCount >= 2)
-									if (tvDraw->Models[0]->Materials[1] is not null)
-										if (tvDraw->Models[0]->Materials[1]->TextureCount >= 4)
-											if (tvDraw->Models[0]->Materials[1]->Textures[3].Texture is not null)
-												if (tvDraw->Models[0]->Materials[1]->Textures[3].Texture->Texture is not null)
+                            var ownerId = character->CompanionOwnerId;
+                            if (tvDraw->Models[0] is not null)
+								if (tvDraw->Models[0]->MaterialCount >= 1)
+									if (tvDraw->Models[0]->Materials[0] is not null)
+										if (tvDraw->Models[0]->Materials[0]->TextureCount >= 4)
+											if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture is not null)
+												if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture is not null)
 												{
-													var ownerId = character->CompanionOwnerId;
-													visitedTvs.Add(ownerId);
-													CheckOutPossibleTV((IntPtr)tvDraw, ownerId, item.Address);
+													if(tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualHeight == 1024
+														&& tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualWidth == 1024)
+													{
+                                                        visitedTvs.Add(ownerId);
+                                                        CheckOutPossibleTV((IntPtr)tvDraw, ownerId, item.Address);
+														continue;
+                                                    }
 												}
-						}
+
+                            if (playerId == ownerId)
+                            {
+                                showWarningMessage = true;
+                            }
+                        }
 						catch (Exception) { }
 					}
 				}
 			}
 		}
 
-		//Remove unvisited TVs
-		_currentOwners.Where(owner => !visitedTvs.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
+        _installWarningMessage = showWarningMessage;
+
+        //Remove unvisited TVs
+        _currentOwners.Where(owner => !visitedTvs.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
 		{;
 			if (_currentToggle == ownerId)
-				TurnOffTV();
+			{
+                TurnOffTV();
+            }
+			Services.Log.Debug("Removing " + ownerId + " player is " + playerId);
 			_currentOwners.Remove(ownerId);
 		});
 	}
@@ -191,8 +212,10 @@ public class ControlWindow : Window, IDisposable
 
 	public void Dispose()
 	{
-		_getResourceSyncHook.Dispose();
-		_textureOnLoadHook.Dispose();
+        _textureOnLoadHook.Disable();
+        _textureOnLoadHook.Dispose();
+        _getResourceSyncHook.Dispose();
+
 		Services.CommandManager.ProcessCommand("/honorific force clear");
 	}
 
@@ -261,10 +284,37 @@ public class ControlWindow : Window, IDisposable
 			if(ImGui.SliderFloat("Volume", ref volume, 0.0f, 1.0f))
 			{
 				SetVolume(volume);
+            }
+        }
+        ImGui.Text(" Available TVs:");
+		if (_installWarningMessage)
+		{
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
+            ImGui.Text("Could not find TV model on your pet! ");
+            ImGui.SameLine();
+            ImGui.Text("Please");
+			ImGui.SameLine();
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
+			if (ImGui.Button("Install"))
+			{
+				_plugin.OpenModfolder();
 			}
-		}
+            ImGui.PopStyleColor();
+            ImGui.SameLine();
+            ImGui.Text("or");
+            ImGui.SameLine();
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
+			if (ImGui.Button("Enable"))
+			{
+                Services.CommandManager.ProcessCommand("/penumbra mod enable Default | AlphaChannelTV");
+                Services.CommandManager.ProcessCommand("/penumbra redraw carbuncle");
+            }
+            ImGui.PopStyleColor();
+            ImGui.SameLine();
+            ImGui.Text("it.");
+            ImGui.PopStyleColor();
 
-		ImGui.Text(" Available TVs:");
+        }
 		foreach (var item in _playerList)
 		{
 			var isPlayer = item.EntityId == Services.ClientState?.LocalPlayer?.EntityId;
@@ -294,8 +344,7 @@ public class ControlWindow : Window, IDisposable
 				}
 				else if (!urlExists)
 				{
-					Vector4 textColor = new Vector4(0.5f, 0.5f, 0.5f, 1.0f); ;
-					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
+					ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1.0f));
 				}
 
 
@@ -488,7 +537,7 @@ public class ControlWindow : Window, IDisposable
 		{
 			if (thisPtr != null && (IntPtr) thisPtr != IntPtr.Zero)
 			{
-				if (thisPtr->ActualWidth == 4096 && thisPtr->ActualHeight == 4096)
+				if (thisPtr->ActualWidth == 1920 && thisPtr->ActualHeight == 1080)
 				{
 					var tex = _textureOnLoadHook.Original(thisPtr, contents);
 					if(tex)
