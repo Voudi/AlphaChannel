@@ -585,6 +585,7 @@ public class ControlWindow : Window, IDisposable
 		}
 	}
 
+	private int _secondsCounter = 0;
 	private long _lastMilliSecond = 0;
 	public void Refresh()
 	{
@@ -592,6 +593,7 @@ public class ControlWindow : Window, IDisposable
 		if (_lastMilliSecond + 1000 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 		{
 			_lastMilliSecond = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+			_secondsCounter++;
 			CheckAllTVs();
 		}
 	}
@@ -678,7 +680,7 @@ public class ControlWindow : Window, IDisposable
 	private void RefreshVolume()
 	{
 		try {
-			if (!volumeEnabled && _refreshAudio)
+			if (!volumeEnabled && _refreshAudio && _secondsCounter < 5)
 			{
 				var enumerator = new MMDeviceEnumerator();
 				var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
@@ -733,6 +735,7 @@ public class ControlWindow : Window, IDisposable
 	{
 		_currentSubProcess = processId;
 		_refreshAudio = true;
+		_secondsCounter = 0; //Reset counter to try to fetch the process for the first 5 seconds only
 	}
 
     private static Dictionary<uint, uint> GetProcessParentMapFiltered(IEnumerable<uint> pids)
