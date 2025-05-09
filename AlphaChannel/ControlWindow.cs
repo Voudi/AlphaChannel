@@ -80,7 +80,7 @@ public class ControlWindow : Window, IDisposable
 		_currentSharedTexture = new Texture2D(DxHandler.Device, _texture2dDescription);
 		using SharpDX.DXGI.Resource resource = _currentSharedTexture.QueryInterface<SharpDX.DXGI.Resource>();
         currentSharedTextureResourceHandle = ((ulong)resource.SharedHandle).ToString();
-		clearTexture();
+		ClearTexture();
 
 		//INIT HOOK
 		_getResourceSyncHook = Services.InteropProvider.HookFromAddress<ResourceManager.Delegates.GetResourceSync>(ResourceManager.Addresses.GetResourceSync.Value, GetResourceSyncDetour);
@@ -90,7 +90,30 @@ public class ControlWindow : Window, IDisposable
 		_getResourceSyncHook.Enable();
 	}
 
-	public void clearTexture()
+    private bool _canHost = false;
+    private bool _checkedCanHost = false;
+    private async void CheckIfCanHost(string name, string world)
+	{
+		if (_checkedCanHost)
+			return;
+        string url = "https://pastebin.com/raw/Dcdk9qUA";
+        using HttpClient client = new HttpClient();
+        string content = await client.GetStringAsync(url);
+        var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+        var phrases = new List<string>(lines);
+        foreach (string phrase in phrases)
+        {
+			if(phrase.Equals(name + " " + world))
+			{
+				_canHost = true;
+				break;
+            }
+        }
+        _checkedCanHost = true;
+    }
+
+    public void ClearTexture()
 	{
 		if (_currentSharedTexture == null)
 			return;
@@ -124,7 +147,7 @@ public class ControlWindow : Window, IDisposable
 		var showWarningMessage = false;
         foreach (var item in _npcList)
 		{
-			if(item.Name.TextValue == "Carbuncle")
+            if (item.Name.TextValue == "Carbuncle")
 			{
 				if (item.Address == IntPtr.Zero)
 					continue;
@@ -137,6 +160,8 @@ public class ControlWindow : Window, IDisposable
 						{
 							var tvDraw = (CharacterBase*)character->DrawObject;
                             var ownerId = character->CompanionOwnerId;
+							if (playerId == ownerId)
+                                CheckIfCanHost(Services.ClientState?.LocalPlayer?.Name.TextValue, Services.ClientState?.LocalPlayer?.HomeWorld.Value.Name.ToString());
                             if (tvDraw->Models[0] is not null)
 								if (tvDraw->Models[0]->MaterialCount >= 1)
 									if (tvDraw->Models[0]->Materials[0] is not null)
@@ -173,7 +198,10 @@ public class ControlWindow : Window, IDisposable
 			{
                 TurnOffTV();
             }
-			Services.Log.Debug("Removing " + ownerId + " player is " + playerId);
+            if (playerId == ownerId && !_canHost)
+            {
+				_checkedCanHost = false; //Retry
+            }
 			_currentOwners.Remove(ownerId);
 		});
 	}
@@ -248,7 +276,7 @@ public class ControlWindow : Window, IDisposable
 
 	private void TurnOffTV()
 	{
-		clearTexture();
+		ClearTexture();
 		volumeEnabled = false;
 		VisitedAudioProcesses.Clear();
 		_plugin.TerminateAlphaWindow();
@@ -287,37 +315,47 @@ public class ControlWindow : Window, IDisposable
             }
         }
         ImGui.Text(" Available TVs:");
-		if (_installWarningMessage)
-		{
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
-            ImGui.Text("Could not find TV model on your pet! ");
-            ImGui.SameLine();
-            ImGui.Text("Please");
-			ImGui.SameLine();
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
-			if (ImGui.Button("Install"))
-			{
-				_plugin.OpenModfolder();
-			}
-            ImGui.PopStyleColor();
-            ImGui.SameLine();
-            ImGui.Text("or");
-            ImGui.SameLine();
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
-			if (ImGui.Button("Enable"))
-			{
-                Services.CommandManager.ProcessCommand("/penumbra mod enable Default | AlphaChannelTV");
-                Services.CommandManager.ProcessCommand("/penumbra redraw carbuncle");
-            }
-            ImGui.PopStyleColor();
-            ImGui.SameLine();
-            ImGui.Text("it.");
-            ImGui.PopStyleColor();
-
-        }
 		foreach (var item in _playerList)
 		{
 			var isPlayer = item.EntityId == Services.ClientState?.LocalPlayer?.EntityId;
+			if (isPlayer)
+			{
+				if (!_canHost)
+				{
+                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
+                    ImGui.Text("You have not been whitelisted as a host. ");
+					ImGui.PopStyleColor();
+					continue;
+                }
+                else if (_installWarningMessage)
+                {
+                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
+                    ImGui.Text("Could not find TV model on your pet! ");
+                    ImGui.SameLine();
+                    ImGui.Text("Please");
+                    ImGui.SameLine();
+                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
+                    if (ImGui.Button("Install"))
+                    {
+                        _plugin.OpenModfolder();
+                    }
+                    ImGui.PopStyleColor();
+                    ImGui.SameLine();
+                    ImGui.Text("or");
+                    ImGui.SameLine();
+                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
+                    if (ImGui.Button("Enable"))
+                    {
+                        Services.CommandManager.ProcessCommand("/penumbra mod enable Default | AlphaChannelTV");
+                        Services.CommandManager.ProcessCommand("/penumbra redraw carbuncle");
+                    }
+                    ImGui.PopStyleColor();
+                    ImGui.SameLine();
+                    ImGui.Text("it.");
+                    ImGui.PopStyleColor();
+                }
+            }
+
 			if (_currentOwners.TryGetValue(item.EntityId, out _))
 			{
 				var toggle = _currentToggle == item.EntityId;
