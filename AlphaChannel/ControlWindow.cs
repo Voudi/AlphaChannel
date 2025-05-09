@@ -1,5 +1,4 @@
-﻿using System.Numerics;
-using AlphaChannel;
+﻿using AlphaChannel;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Interface.Windowing;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
@@ -17,8 +16,8 @@ using FFXIVClientStructs.FFXIV.Client.System.Resource;
 using InteropGenerator.Runtime;
 using FFXIVClientStructs.FFXIV.Client.System.Resource.Handle;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
+using System.Numerics;
 using SharpDX.Mathematics.Interop;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.TextBox;
 
 public class ControlWindow : Window, IDisposable
 {
@@ -42,7 +41,6 @@ public class ControlWindow : Window, IDisposable
     float volume = 0.5f;
     private bool volumeEnabled = false;
 
-    private static readonly byte[] _blankCanvas = new byte[16777216];
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
 	{
 		Width = 1920,
@@ -79,7 +77,7 @@ public class ControlWindow : Window, IDisposable
 		//INIT TEXTURE
 		_currentSharedTexture = new Texture2D(DxHandler.Device, _texture2dDescription);
 		using SharpDX.DXGI.Resource resource = _currentSharedTexture.QueryInterface<SharpDX.DXGI.Resource>();
-		currentSharedTextureResourceHandle = ((ulong)resource.SharedHandle).ToString();
+        currentSharedTextureResourceHandle = ((ulong)resource.SharedHandle).ToString();
 		clearTexture();
 
 		//INIT HOOK
@@ -97,7 +95,7 @@ public class ControlWindow : Window, IDisposable
 		var rtv = new RenderTargetView(DxHandler.Device, _currentSharedTexture);
 		var clearColor = new RawColor4(0, 0, 0, 1);
 		DxHandler.Device?.ImmediateContext.ClearRenderTargetView(rtv, clearColor);
-	}
+    }
 
 	private void CheckTitles()
 	{

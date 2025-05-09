@@ -17,9 +17,9 @@
 
 	<Target Name="RemoveUnnecessaryWebView2References" AfterTargets="ResolvePackageDependenciesForBuild">
 		<ItemGroup>
-			<ReferenceToBeRemoved Include="@(Reference)" Condition="'%(Reference.FileName)' == 'Microsoft.Web.WebView2.WinForms' And '$(UseWindowsForms)' != 'true'"/>
-			<ReferenceToBeRemoved Include="@(Reference)" Condition="'%(Reference.FileName)' == 'Microsoft.Web.WebView2.Wpf' And '$(UseWpf)' != 'true'"/>
-			<Reference Remove="@(ReferenceToBeRemoved)"/>
+			<ReferenceToBeRemoved Include="@(Reference)" Condition="'%(Reference.FileName)' == 'Microsoft.Web.WebView2.WinForms' And '$(UseWindowsForms)' != 'true'" />
+			<ReferenceToBeRemoved Include="@(Reference)" Condition="'%(Reference.FileName)' == 'Microsoft.Web.WebView2.Wpf' And '$(UseWpf)' != 'true'" />
+			<Reference Remove="@(ReferenceToBeRemoved)" />
 		</ItemGroup>
 	</Target>
 	
@@ -28,12 +28,12 @@
 			<HintPath>$(DalamudLibPath)SharpDX.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
-		<Reference Include="SharpDX.Direct3D11">
-			<HintPath>$(DalamudLibPath)SharpDX.Direct3D11.dll</HintPath>
-			<Private>False</Private>
-		</Reference>
 		<Reference Include="SharpDX.DXGI">
 			<HintPath>$(DalamudLibPath)SharpDX.DXGI.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="SharpDX.Direct3D11">
+			<HintPath>$(DalamudLibPath)SharpDX.Direct3D11.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
 	</ItemGroup>
