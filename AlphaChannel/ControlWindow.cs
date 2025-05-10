@@ -22,7 +22,8 @@ using static FFXIVClientStructs.FFXIV.Component.GUI.AtkUIColorHolder.Delegates;
 
 public class ControlWindow : Window, IDisposable
 {
-	private readonly Dictionary<uint, IntPtr> _currentOwners = []; //Playerpointer, CompanionDrawpointer
+	private const string URL_WHITELIST = "https://pastebin.com/raw/iBatAtHg";
+    private readonly Dictionary<uint, IntPtr> _currentOwners = []; //Playerpointer, CompanionDrawpointer
 	private readonly Dictionary<uint, String> _currentURLs = []; //Playerpointer, URL
 	private readonly Dictionary<uint, String> _currentTitles = []; //Playerpointer, Title
 	private Texture2D _currentSharedTexture;
@@ -96,20 +97,24 @@ public class ControlWindow : Window, IDisposable
 	{
 		if (_checkedCanHost)
 			return;
-        string url = "https://pastebin.com/raw/Dcdk9qUA";
-        using HttpClient client = new HttpClient();
-        string content = await client.GetStringAsync(url);
-        var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-
-        var phrases = new List<string>(lines);
-        foreach (string phrase in phrases)
+        try
         {
-			if(phrase.Equals(name + " " + world))
-			{
-				_canHost = true;
-				break;
+            string url = "https://pastebin.com/raw/iBatAtHg";
+			using HttpClient client = new();
+			string content = await client.GetStringAsync(url);
+            var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+            var phrases = new List<string>(lines);
+            foreach (string phrase in phrases)
+            {
+                if (phrase.Equals(name + " " + world))
+                {
+                    _canHost = true;
+                    break;
+                }
             }
         }
+		catch (Exception) { }
         _checkedCanHost = true;
     }
 
@@ -139,7 +144,7 @@ public class ControlWindow : Window, IDisposable
 		CheckTitles();
 		
 		List<uint> visitedTvs = new List<uint>();
-		_playerList = Services.Objects.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => x.Name.TextValue).ToList();
+		_playerList = Services.Objects.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => (x.EntityId == Services.ClientState?.LocalPlayer?.EntityId) ? "@" : x.Name.TextValue).ToList();
 		_npcList = Services.Objects.Where(x => x is IBattleNpc).Cast<IBattleNpc>().OrderBy(x => x.YalmDistanceX).ToList();
 
 		var playerId = Services.ClientState?.LocalPlayer?.EntityId;
@@ -320,14 +325,7 @@ public class ControlWindow : Window, IDisposable
 			var isPlayer = item.EntityId == Services.ClientState?.LocalPlayer?.EntityId;
 			if (isPlayer)
 			{
-				if (!_canHost)
-				{
-                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
-                    ImGui.Text("You have not been whitelisted as a host. ");
-					ImGui.PopStyleColor();
-					continue;
-                }
-                else if (_installWarningMessage)
+				if (_installWarningMessage)
                 {
                     ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
                     ImGui.Text("Could not find TV model on your pet! ");
@@ -341,7 +339,7 @@ public class ControlWindow : Window, IDisposable
                     }
                     ImGui.PopStyleColor();
                     ImGui.SameLine();
-                    ImGui.Text("or");
+                    ImGui.Text("and/or");
                     ImGui.SameLine();
                     ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
                     if (ImGui.Button("Enable"))
@@ -355,8 +353,12 @@ public class ControlWindow : Window, IDisposable
                     ImGui.PopStyleColor();
                 }
             }
-
-			if (_currentOwners.TryGetValue(item.EntityId, out _))
+            if (!_canHost)
+            {
+                ImGui.Text("Notice: You have not been whitelisted to host a session.");
+                continue;
+            }
+            if (_currentOwners.TryGetValue(item.EntityId, out _))
 			{
 				var toggle = _currentToggle == item.EntityId;
 				var url = String.Empty;
