@@ -201,6 +201,7 @@ public class ControlWindow : Window, IDisposable
 		{;
 			if (_currentToggle == ownerId)
 			{
+                Services.CommandManager?.ProcessCommand("/honorific force clear"); //Doing it a second time in case Players EntityId changed due to sudden teleport
                 TurnOffTV();
             }
             if (playerId == ownerId && !_canHost)
@@ -277,7 +278,9 @@ public class ControlWindow : Window, IDisposable
 
 		//Assume no TV is running
 		_currentActivatedTV = 0;
-	}
+        //Reset audio counter to try to fetch the process for the first 5 seconds only
+        _secondsCounter = 0; 
+    }
 
 	private void TurnOffTV()
 	{
@@ -353,7 +356,7 @@ public class ControlWindow : Window, IDisposable
                     ImGui.PopStyleColor();
                 }
             }
-            if (!_canHost)
+            if (!_canHost && _checkedCanHost)
             {
                 ImGui.Text("Notice: You have not been whitelisted to host a session.");
                 continue;
@@ -720,7 +723,7 @@ public class ControlWindow : Window, IDisposable
 	private void RefreshVolume()
 	{
 		try {
-			if (!volumeEnabled && _refreshAudio && _secondsCounter < 5)
+			if (!volumeEnabled && _refreshAudio && _secondsCounter < 30)
 			{
 				var enumerator = new MMDeviceEnumerator();
 				var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
@@ -775,8 +778,7 @@ public class ControlWindow : Window, IDisposable
 	{
 		_currentSubProcess = processId;
 		_refreshAudio = true;
-		_secondsCounter = 0; //Reset counter to try to fetch the process for the first 5 seconds only
-	}
+    }
 
     private static Dictionary<uint, uint> GetProcessParentMapFiltered(IEnumerable<uint> pids)
     {

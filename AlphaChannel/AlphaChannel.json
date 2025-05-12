@@ -1,23 +1,21 @@
-﻿{
-  "Author": "Stepp",
-  "Name": "AlphaChannel",
-  "InternalName": "AlphaChannel",
-  "AssemblyVersion": "1.0.0",
-  "Description": "Cute TV for cute watch parties.",
-  "ApplicableVersion": "any",
-  "Tags": [
-    "browser",
-    "website",
-    "video",
-    "cinema",
-	"watch party"
-  ],
-  "DalamudApiLevel": 12,
-  "LoadRequiredState": 0,
-  "LoadSync": false,
-  "CanUnloadAsync": false,
-  "LoadPriority": 0,
-  "Punchline": "Ingame TV",
-  "Changelog": "Initial Prototype",
-  "AcceptsFeedback": true
+{
+    "Author":  "Stepp",
+    "Name":  "AlphaChannel",
+    "InternalName":  "AlphaChannel",
+    "AssemblyVersion":  "1.0.20250512.2",
+    "Description":  "Cute TV for cute watch parties.",
+    "ApplicableVersion":  "any",
+    "Tags":  [
+                 "browser",
+                 "website",
+                 "video",
+                 "cinema",
+                 "watch party"
+             ],
+    "DalamudApiLevel":  12,
+    "Punchline":  "Ingame TV",
+    "Changelog":  "Initial Prototype",
+    "AcceptsFeedback":  false,
+    "DownloadLinkInstall":  "https://gist.githubusercontent.com/Voudi/77c661ec1597925c2856d649a0cfc2d8/raw/AlphaChannel.zip",
+    "DownloadLinkUpdate":  "https://gist.githubusercontent.com/Voudi/77c661ec1597925c2856d649a0cfc2d8/raw/AlphaChannel.zip"
 }

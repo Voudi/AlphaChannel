@@ -15,6 +15,7 @@ public partial class WebView2Client : Form
 	private readonly Dictionary<string, string> _adBlockDirs;
 	private readonly string _cacheDir;
 	private readonly string _initUrl;
+	private bool _coreLoaded = false;
 
 	protected override bool ShowWithoutActivation => true;
 
@@ -201,13 +202,17 @@ public partial class WebView2Client : Form
                 await Task.Delay(2000); //Wait two seconds for adblock to boot up - no other indicator of booting up exists
 				_webView.Source = new Uri(_initUrl);
 			}
-		});
+
+			_coreLoaded = true;
+
+        });
 		
 		//_webView.CoreWebView2.OpenDevToolsWindow();
 	}
 
 	internal void ShutDown()
 	{
+		_coreLoaded = false;
 		_webView.Dispose();
 	}
 
@@ -298,7 +303,7 @@ public partial class WebView2Client : Form
 		_topMostTimer.Start();
 	}
 
-	public async void TryEnterFullScreen()
+	public void TryEnterFullScreen()
 	{
 		string script = @"
         (function() {
@@ -310,8 +315,11 @@ public partial class WebView2Client : Form
 				}
             }
         })();";
-
-		// Execute the JavaScript in the WebView2 control
-		await _webView.CoreWebView2.ExecuteScriptAsync(script);
+		_webView.Invoke(async () =>
+		{
+			if(_coreLoaded)
+				await _webView.CoreWebView2.ExecuteScriptAsync(script); // Execute the JavaScript in the WebView2 control
+        });
+       
 	}
 }
