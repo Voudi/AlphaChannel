@@ -296,29 +296,49 @@ public partial class WebView2Client : Form
 
 	private readonly System.Windows.Forms.Timer _topMostTimer;
 
-	private void StartTopMostEnforcer()
-	{
-		_topMostTimer.Interval = 10000;
-		_topMostTimer.Tick += (s, e) => KeepOnTop();
-		_topMostTimer.Start();
-	}
-
 	public void TryEnterFullScreen()
 	{
-		string script = @"
-        (function() {
-            var video = document.querySelector('video');
-            if (video) {
-                video.play();
-				if (video.requestFullscreen) {
-					video.requestFullscreen();
+        string script = @"
+			(function() {
+				if(document.querySelector(""i[class='mdi-fullscreen-exit mdi v-icon notranslate v-theme--dark v-icon--size-default']"")){
+					if (typeof fullscreenDone == 'undefined') {
+						document
+							.querySelector(""i[class='mdi-fullscreen-exit mdi v-icon notranslate v-theme--dark v-icon--size-default']"")
+							.click();
+						fullscreenDone = true;
+					}
+
+					var playButton = document.querySelector(
+						""button[aria-label='Play/Pause'] > span[class='v-btn__content'] > i[class~='mdi-play']""
+					);
+					if (playButton !== null) {
+						playButton.click();
+					}
+
+					var url = document.querySelector(""div[class='player'] > iframe"").src;
+					document.querySelector(""div[class='player'] > iframe"").src = url.replace(""autoplay=0"", ""autoplay=1"");
+
+					const style = document.createElement('style');
+					style.innerHTML = "".fullscreen .video-container .video-subcontainer .video-controls-wrapper { display: none; }"";
+					document.head.appendChild(style);
+				}else{
+					//SCRIPTDEFAULT
+					var video = document.querySelector('video');
+					if (video) {
+						video.play();
+						if (video.requestFullscreen) {
+							video.requestFullscreen();
+						}
+					}
 				}
-            }
-        })();";
-		_webView.Invoke(async () =>
+			})();
+			";
+        _webView.Invoke(async () =>
 		{
 			if(_coreLoaded)
-				await _webView.CoreWebView2.ExecuteScriptAsync(script); // Execute the JavaScript in the WebView2 control
+			{
+                await _webView.CoreWebView2.ExecuteScriptAsync(script); // Execute the JavaScript in the WebView2 control
+            }
         });
        
 	}
