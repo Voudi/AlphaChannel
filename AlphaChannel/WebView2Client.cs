@@ -406,11 +406,12 @@ public partial class WebView2Client : Form
 								var checkboxAge = document.querySelector(""div[class='p-checkbox-box']"");
 								if(checkboxAge != null) {
 									checkboxAge.click();
-									setTimeout(() => {
-										var joinButton = document.querySelector(""button[class~='p-button']"");
-										joinButton.click();
-									}, 1000);
 								}
+        
+								setTimeout(() => {
+									var joinButton = document.querySelector(""button[class~='p-button']"");
+									joinButton.click();
+								}, 1000);
         
         
 								setTimeout(() =>  {
