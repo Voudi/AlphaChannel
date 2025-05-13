@@ -743,7 +743,7 @@ public class ControlWindow : Window, IDisposable
 		try {
             _ = Task.Run(() =>
             {
-                if (!volumeEnabled && _refreshAudio && 0 < _secondsCounter && _secondsCounter < 30 && _secondsCounter % 10 == 0)
+                if (!volumeEnabled && _refreshAudio && 0 < _secondsCounter && _secondsCounter < 30 && _secondsCounter % 4 == 0)
                 {
                     var enumerator = new MMDeviceEnumerator();
                     var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);

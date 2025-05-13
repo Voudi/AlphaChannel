@@ -407,7 +407,7 @@ public partial class WebView2Client : Form
 								if(checkboxAge != null) {
 									checkboxAge.click();
 								}
-        
+
 								setTimeout(() => {
 									var joinButton = document.querySelector(""button[class~='p-button']"");
 									joinButton.click();
@@ -423,8 +423,9 @@ public partial class WebView2Client : Form
 								}, 3000);
 
 								setTimeout(() => {
-									document.querySelector(""div[class*='chatContainer']"").setAttribute(""style"", ""display:none;"");
-								}, 4500);
+									document.querySelector(""div[class*='chatContainer']"").remove()
+									setTimeout(() => document.querySelector(""button[class*='fsChatBtn']"").remove(), 500);
+								}, 4000);
 							}
 							// Default
 							else {
