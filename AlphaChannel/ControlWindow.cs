@@ -450,15 +450,33 @@ public class ControlWindow : Window, IDisposable
                 if (toggle)
                 {
                     ImGui.PushFont(UiBuilder.IconFont);
-                    if (ImGui.Button(FontAwesomeIcon.ExpandArrowsAlt.ToIconString()))
+                    if (ImGui.Button(FontAwesomeIcon.PlayCircle.ToIconString()))
                     {
-						_plugin.PlayAndFullscreen();
+						_plugin.Play();
                     }
                     ImGui.PopFont();
                     if (ImGui.IsItemHovered())
                     {
                         ImGui.BeginTooltip();
-                        ImGui.Text("Fullscreen and play - BETA");
+                        ImGui.Text("Force-Play Video - BETA");
+                        ImGui.EndTooltip();
+                    }
+                }
+
+                ImGui.SameLine();
+
+                if (toggle)
+                {
+                    ImGui.PushFont(UiBuilder.IconFont);
+                    if (ImGui.Button(FontAwesomeIcon.ExpandArrowsAlt.ToIconString()))
+                    {
+                        _plugin.Fullscreen();
+                    }
+                    ImGui.PopFont();
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text("Go Fullscreen - BETA");
                         ImGui.EndTooltip();
                     }
                 }

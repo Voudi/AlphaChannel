@@ -1,3 +1,4 @@
+using FFXIVClientStructs.FFXIV.Client.Graphics.Render;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 using System;
@@ -158,59 +159,63 @@ public partial class WebView2Client : Form
 
 	private void WebViewCoreWebView2InitializationCompleted(object? sender, EventArgs e)
 	{
-		_webView.Invoke(async () =>
+        _ = _webView.Invoke(async () =>
         {
-			try {
-				var extensions = await _webView.CoreWebView2.Profile.GetBrowserExtensionsAsync();
-				foreach(var adblock in _adBlockDirs)
-				{
-					var installed = false;
-					foreach (var extension in extensions)
-					{
+            try
+            {
+                var extensions = await _webView.CoreWebView2.Profile.GetBrowserExtensionsAsync();
+                foreach (var adblock in _adBlockDirs)
+                {
+                    var installed = false;
+                    foreach (var extension in extensions)
+                    {
 
-						if (extension.IsEnabled && extension.Name.Contains(adblock.Key))
-						{
-							installed = true;
+                        if (extension.IsEnabled && extension.Name.Contains(adblock.Key))
+                        {
+                            installed = true;
                             Services.Log.Debug("Found browser extension: " + extension.Name + " | " + extension.IsEnabled);
                         }
-						else if (extension.Name.Contains(adblock.Key))
-						{
+                        else if (extension.Name.Contains(adblock.Key))
+                        {
                             installed = true;
                             await extension.EnableAsync(true);
                             Services.Log.Debug("Enabling browser extension: " + extension.Name + " | " + extension.IsEnabled);
                         }
-					}
-					if (!installed)
-					{
+                    }
+                    if (!installed)
+                    {
                         Services.Log.Debug("Installing browser extension: " + adblock.Key + " | " + adblock.Value);
                         await _webView.CoreWebView2.Profile.AddBrowserExtensionAsync(adblock.Value);
                     }
-				}
-			}
-			catch (Exception ex) {
-				Console.Out.WriteLine(ex.ToString());
-			}
-			
-			var processId = _webView?.CoreWebView2.BrowserProcessId;
-			if (processId.HasValue)
-			{
-				_mainWindow?.AddSubProcess(processId.Value);
-			}
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Out.WriteLine(ex.ToString());
+            }
 
-			if(_webView != null)
-			{
+            var processId = _webView?.CoreWebView2.BrowserProcessId;
+            if (processId.HasValue)
+            {
+                _mainWindow?.AddSubProcess(processId.Value);
+            }
+
+            _webView.CoreWebView2.DOMContentLoaded += TryFullscreenAndPlay;
+
+            if (_webView != null)
+            {
                 await Task.Delay(2000); //Wait two seconds for adblock to boot up - no other indicator of booting up exists
-				_webView.Source = new Uri(_initUrl);
-			}
+                _webView.Source = new Uri(_initUrl);
+            }
 
-			_coreLoaded = true;
+            _coreLoaded = true;
 
         });
 		
 		//_webView.CoreWebView2.OpenDevToolsWindow();
 	}
 
-	internal void ShutDown()
+    internal void ShutDown()
 	{
 		_coreLoaded = false;
 		_webView.Dispose();
@@ -296,48 +301,139 @@ public partial class WebView2Client : Form
 
 	private readonly System.Windows.Forms.Timer _topMostTimer;
 
-	public void TryEnterFullScreen()
+    public void TryPlay()
+    {
+        string scriptPlay = @"(function() {
+								var title = document.querySelector(""title"").textContent;
+								// OpenTogether Tube
+								if(title.includes(""OpenTogetherTube"")) {
+									var playButton = document.querySelector(
+										""button[aria-label='Play/Pause'] > span[class='v-btn__content'] > i[class~='mdi-play']""
+									);
+									if (playButton !== null) {
+										playButton.click();
+									}
+
+									var url = document.querySelector(""div[class='player'] > iframe"").src;
+									document.querySelector(""div[class='player'] > iframe"").src = url.replace(""autoplay=0"", ""autoplay=1"");
+								// Hyperbeam
+								} else if (title.includes(""Hyperbeam"")) {
+									// DO NOTHING
+								}
+								// Default
+								else {
+									//SCRIPTDEFAULT
+									var video = document.querySelector('video');
+									if (video) {
+										video.play();
+									}
+								}
+							})();
+		";
+
+        _webView.Invoke(async () =>
+        {
+            if (_coreLoaded)
+            {
+                await _webView.CoreWebView2.ExecuteScriptAsync(scriptPlay); // Execute the JavaScript in the WebView2 control
+            }
+        });
+
+    }
+
+    public void TryFullscreen()
+    {
+        string scriptFullscreen = @"(function() {
+								var title = document.querySelector(""title"").textContent;
+								// OpenTogether Tube
+								if(title.includes(""OpenTogetherTube"")) {
+									document.querySelector(""i[class='mdi-fullscreen-exit mdi v-icon notranslate v-theme--dark v-icon--size-default']"")
+										.click();
+								// Hyperbeam
+								} else if (title.includes(""Hyperbeam"")) {
+										document.querySelector(""span[class*='layoutBtns']>button:last-child"").click();
+									setTimeout(() => {
+										document.querySelector(""div[class*='chatContainer']"").setAttribute(""style"", ""display:none;"");
+									}, 500);
+								}
+								// Default
+								else {
+									//SCRIPTDEFAULT
+									var video = document.querySelector('video');
+									if (video) {
+										if (video.requestFullscreen) {
+											video.requestFullscreen();
+										}
+									}
+								}
+							})();
+		";
+
+        _webView.Invoke(async () =>
+        {
+            if (_coreLoaded)
+            {
+                await _webView.CoreWebView2.ExecuteScriptAsync(scriptFullscreen); // Execute the JavaScript in the WebView2 control
+            }
+        });
+
+    }
+
+    private void TryFullscreenAndPlay(object? sender, CoreWebView2DOMContentLoadedEventArgs e)
 	{
-        string script = @"
-			(function() {
-				if(document.querySelector(""i[class='mdi-fullscreen-exit mdi v-icon notranslate v-theme--dark v-icon--size-default']"")){
-					if (typeof fullscreenDone == 'undefined') {
-						document
-							.querySelector(""i[class='mdi-fullscreen-exit mdi v-icon notranslate v-theme--dark v-icon--size-default']"")
-							.click();
-						fullscreenDone = true;
-					}
+        string scriptBoth = @"(function() {
+							var title = document.querySelector(""title"").textContent;
+							// OpenTogether Tube
+							if(title.includes(""OpenTogetherTube"")) {
+								document.querySelector(""i[class='mdi-fullscreen-exit mdi v-icon notranslate v-theme--dark v-icon--size-default']"")
+									.click();
 
-					var playButton = document.querySelector(
-						""button[aria-label='Play/Pause'] > span[class='v-btn__content'] > i[class~='mdi-play']""
-					);
-					if (playButton !== null) {
-						playButton.click();
-					}
+								var playButton = document.querySelector(
+									""button[aria-label='Play/Pause'] > span[class='v-btn__content'] > i[class~='mdi-play']""
+								);
+								if (playButton !== null) {
+									playButton.click();
+								}
 
-					var url = document.querySelector(""div[class='player'] > iframe"").src;
-					document.querySelector(""div[class='player'] > iframe"").src = url.replace(""autoplay=0"", ""autoplay=1"");
+								var url = document.querySelector(""div[class='player'] > iframe"").src;
+								document.querySelector(""div[class='player'] > iframe"").src = url.replace(""autoplay=0"", ""autoplay=1"");
 
-					const style = document.createElement('style');
-					style.innerHTML = "".fullscreen .video-container .video-subcontainer .video-controls-wrapper { display: none; }"";
-					document.head.appendChild(style);
-				}else{
-					//SCRIPTDEFAULT
-					var video = document.querySelector('video');
-					if (video) {
-						video.play();
-						if (video.requestFullscreen) {
-							video.requestFullscreen();
-						}
-					}
-				}
-			})();
-			";
+								const style = document.createElement('style');
+								style.innerHTML = "".fullscreen .video-container .video-subcontainer .video-controls-wrapper { display: none; }"";
+								document.head.appendChild(style);
+							// Hyperbeam
+							} else if (title.includes(""Hyperbeam"")) {
+								document.querySelector(""div[class='p-checkbox-box']"").click();
+								setTimeout(() => document.querySelector(""button[class~='p-button']"").click(), 1000);
+								setTimeout(() =>  {
+									Array.from(document.querySelectorAll(""span[class='tu-btn-content']"")).find(btn => btn.textContent.toUpperCase().includes(""SKIP"")).click();
+									document.querySelector(""span[class*='layoutBtns']>button:last-child"").click();
+								}, 1500);
+
+								setTimeout(() => {
+									document.querySelector(""div[class*='chatContainer']"").setAttribute(""style"", ""display:none;"");
+								}, 2000);
+							}
+							// Default
+							else {
+								//SCRIPTDEFAULT
+								var video = document.querySelector('video');
+								if (video) {
+									video.play();
+									if (video.requestFullscreen) {
+										video.requestFullscreen();
+									}
+								}
+							}
+						})();
+		";
+
         _webView.Invoke(async () =>
 		{
 			if(_coreLoaded)
 			{
-                await _webView.CoreWebView2.ExecuteScriptAsync(script); // Execute the JavaScript in the WebView2 control
+                await Task.Delay(1000); //Wait one second for elements to load up
+                await _webView.CoreWebView2.ExecuteScriptAsync(scriptBoth); // Execute the JavaScript in the WebView2 control
             }
         });
        

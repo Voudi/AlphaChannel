@@ -170,12 +170,17 @@ public class Plugin : IDalamudPlugin
 		_webView2Client?.ToggleResize();
 	}
 
-	public void PlayAndFullscreen()
-	{
-        _webView2Client?.TryEnterFullScreen();
+    public void Play()
+    {
+        _webView2Client?.TryPlay();
     }
 
-	internal void UpdateTitle(uint entityId, TitleData titleData)
+    public void Fullscreen()
+    {
+        _webView2Client?.TryFullscreen();
+    }
+
+    internal void UpdateTitle(uint entityId, TitleData titleData)
 	{
 		if (titleData?.Title != null)
 			_mainWindow?.UpdateTitle(entityId, titleData.Title);
