@@ -424,7 +424,7 @@ public partial class WebView2Client : Form
 
 								setTimeout(() => {
 									document.querySelector(""div[class*='chatContainer']"").setAttribute(""style"", ""display:none;"");
-								}, 3500);
+								}, 4500);
 							}
 							// Default
 							else {
