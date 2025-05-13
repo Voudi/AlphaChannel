@@ -476,7 +476,7 @@ public class ControlWindow : Window, IDisposable
                     if (ImGui.IsItemHovered())
                     {
                         ImGui.BeginTooltip();
-                        ImGui.Text("Go Fullscreen - BETA");
+                        ImGui.Text("Toggle Fullscreen - BETA");
                         ImGui.EndTooltip();
                     }
                 }
@@ -741,36 +741,39 @@ public class ControlWindow : Window, IDisposable
 	private void RefreshVolume()
 	{
 		try {
-			if (!volumeEnabled && _refreshAudio && _secondsCounter < 30)
-			{
-				var enumerator = new MMDeviceEnumerator();
-				var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-				var sessionManager = device.AudioSessionManager;
-				var sessionsCount = sessionManager.Sessions.Count;
-
-				if (sessionManager == null) return;
-
-				Dictionary<uint, AudioSessionControl> sessionPIDs = [];
-                for (int i = 0; i < sessionManager.Sessions.Count; i++)
+            _ = Task.Run(() =>
+            {
+                if (!volumeEnabled && _refreshAudio && 0 < _secondsCounter && _secondsCounter < 30 && _secondsCounter % 10 == 0)
                 {
-					var session = sessionManager.Sessions[i];
-                    sessionPIDs.Add(session.GetProcessID, session);
-                }
-				var parents = GetProcessParentMapFiltered(sessionPIDs.Keys);
-				var unvisitedAudioProcesses = sessionPIDs.Where(pid => !VisitedAudioProcesses.Contains(pid.Key));
-                foreach (var pid in unvisitedAudioProcesses)
-                {
-					var parent = parents[pid.Key];
-                    if (_currentSubProcess == parent && _currentSubProcess != 0 && parent != 0)
+                    var enumerator = new MMDeviceEnumerator();
+                    var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                    var sessionManager = device.AudioSessionManager;
+                    var sessionsCount = sessionManager.Sessions.Count;
+
+                    if (sessionManager == null) return;
+
+                    Dictionary<uint, AudioSessionControl> sessionPIDs = [];
+                    for (int i = 0; i < sessionManager.Sessions.Count; i++)
                     {
-                        _currentAudioProcess = pid.Key;
-                        volume = pid.Value.SimpleAudioVolume.Volume;
-                        volumeEnabled = true;
-						_refreshAudio = false;
-                        return;
+                        var session = sessionManager.Sessions[i];
+                        sessionPIDs.Add(session.GetProcessID, session);
+                    }
+                    var parents = GetProcessParentMapFiltered(sessionPIDs.Keys);
+                    var unvisitedAudioProcesses = sessionPIDs.Where(pid => !VisitedAudioProcesses.Contains(pid.Key));
+                    foreach (var pid in unvisitedAudioProcesses)
+                    {
+                        var parent = parents[pid.Key];
+                        if (_currentSubProcess == parent && _currentSubProcess != 0 && parent != 0)
+                        {
+                            _currentAudioProcess = pid.Key;
+                            volume = pid.Value.SimpleAudioVolume.Volume;
+                            volumeEnabled = true;
+                            _refreshAudio = false;
+                            return;
+                        }
                     }
                 }
-			}
+            });
 		}
 		catch {  }
 	}

@@ -403,16 +403,27 @@ public partial class WebView2Client : Form
 								document.head.appendChild(style);
 							// Hyperbeam
 							} else if (title.includes(""Hyperbeam"")) {
-								document.querySelector(""div[class='p-checkbox-box']"").click();
-								setTimeout(() => document.querySelector(""button[class~='p-button']"").click(), 1000);
+								var checkboxAge = document.querySelector(""div[class='p-checkbox-box']"");
+								if(checkboxAge != null) {
+									checkboxAge.click();
+									setTimeout(() => {
+										var joinButton = document.querySelector(""button[class~='p-button']"");
+										joinButton.click();
+									}, 1000);
+								}
+        
+        
 								setTimeout(() =>  {
-									Array.from(document.querySelectorAll(""span[class='tu-btn-content']"")).find(btn => btn.textContent.toUpperCase().includes(""SKIP"")).click();
+									var skipButton = Array.from(document.querySelectorAll(""span[class='tu-btn-content']"")).find(btn => btn.textContent.toUpperCase().includes(""SKIP""));
+									if(skipButton != null) {
+										skipButton.click();
+									}
 									document.querySelector(""span[class*='layoutBtns']>button:last-child"").click();
-								}, 1500);
+								}, 3000);
 
 								setTimeout(() => {
 									document.querySelector(""div[class*='chatContainer']"").setAttribute(""style"", ""display:none;"");
-								}, 2000);
+								}, 3500);
 							}
 							// Default
 							else {
