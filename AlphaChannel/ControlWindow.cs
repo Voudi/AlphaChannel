@@ -18,7 +18,6 @@ using FFXIVClientStructs.FFXIV.Client.System.Resource.Handle;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
 using System.Numerics;
 using SharpDX.Mathematics.Interop;
-using static FFXIVClientStructs.FFXIV.Component.GUI.AtkUIColorHolder.Delegates;
 
 public class ControlWindow : Window, IDisposable
 {
@@ -139,77 +138,100 @@ public class ControlWindow : Window, IDisposable
 	private List<IBattleNpc> _npcList = [];
 	private unsafe void CheckAllTVs()
 	{
-		RefreshVolume();
+        var playerId = Services.ClientState?.LocalPlayer?.EntityId;
 
-		CheckTitles();
-		
-		List<uint> visitedTvs = new List<uint>();
-		_playerList = Services.Objects.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => (x.EntityId == Services.ClientState?.LocalPlayer?.EntityId) ? "@" : x.Name.TextValue).ToList();
-		_npcList = Services.Objects.Where(x => x is IBattleNpc).Cast<IBattleNpc>().OrderBy(x => x.YalmDistanceX).ToList();
-
-		var playerId = Services.ClientState?.LocalPlayer?.EntityId;
-
-		var showWarningMessage = false;
-        foreach (var item in _npcList)
+        bool hookEnabled = _getResourceSyncHook.IsEnabled;
+        if (hookEnabled) //Only check for stuff while the hook is activated, which is outside from duties
 		{
-            if (item.Name.TextValue == "Carbuncle")
-			{
-				if (item.Address == IntPtr.Zero)
-					continue;
-				var character = (Character*)item.Address;
-				if (character != null && character->DrawObject != null)
-				{
-					if (character->DrawObject->GetObjectType() == ObjectType.CharacterBase)
-					{
-						try
-						{
-							var tvDraw = (CharacterBase*)character->DrawObject;
-                            var ownerId = character->CompanionOwnerId;
-							if (playerId == ownerId)
-                                CheckIfCanHost(Services.ClientState?.LocalPlayer?.Name.TextValue, Services.ClientState?.LocalPlayer?.HomeWorld.Value.Name.ToString());
-                            if (tvDraw->Models[0] is not null)
-								if (tvDraw->Models[0]->MaterialCount >= 1)
-									if (tvDraw->Models[0]->Materials[0] is not null)
-										if (tvDraw->Models[0]->Materials[0]->TextureCount >= 4)
-											if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture is not null)
-												if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture is not null)
-												{
-													if(tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualHeight == 1024
-														&& tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualWidth == 1024)
-													{
-                                                        visitedTvs.Add(ownerId);
-                                                        CheckOutPossibleTV((IntPtr)tvDraw, ownerId, item.Address);
-														continue;
-                                                    }
-												}
+			RefreshVolume();
 
-                            if (playerId == ownerId)
-                            {
-                                showWarningMessage = true;
-                            }
-                        }
-						catch (Exception) { }
+			CheckTitles();
+		
+			List<uint> visitedTvs = new List<uint>();
+			_playerList = Services.Objects.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => (x.EntityId == Services.ClientState?.LocalPlayer?.EntityId) ? "@" : x.Name.TextValue).ToList();
+			_npcList = Services.Objects.Where(x => x is IBattleNpc).Cast<IBattleNpc>().OrderBy(x => x.YalmDistanceX).ToList();
+
+
+			var showWarningMessage = false;
+			foreach (var item in _npcList)
+			{
+				if (item.Name.TextValue == "Carbuncle")
+				{
+					if (item.Address == IntPtr.Zero)
+						continue;
+					var character = (Character*)item.Address;
+					if (character != null && character->DrawObject != null)
+					{
+						if (character->DrawObject->GetObjectType() == ObjectType.CharacterBase)
+						{
+							try
+							{
+								var tvDraw = (CharacterBase*)character->DrawObject;
+								var ownerId = character->CompanionOwnerId;
+								if (playerId == ownerId)
+									CheckIfCanHost(Services.ClientState?.LocalPlayer?.Name.TextValue, Services.ClientState?.LocalPlayer?.HomeWorld.Value.Name.ToString());
+								if (tvDraw->Models[0] is not null)
+									if (tvDraw->Models[0]->MaterialCount >= 1)
+										if (tvDraw->Models[0]->Materials[0] is not null)
+											if (tvDraw->Models[0]->Materials[0]->TextureCount >= 4)
+												if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture is not null)
+													if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture is not null)
+													{
+														if(tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualHeight == 1024
+															&& tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualWidth == 1024)
+														{
+															visitedTvs.Add(ownerId);
+															CheckOutPossibleTV((IntPtr)tvDraw, ownerId, item.Address);
+															continue;
+														}
+													}
+
+								if (playerId == ownerId)
+								{
+									showWarningMessage = true;
+								}
+							}
+							catch (Exception) { }
+						}
 					}
 				}
 			}
+
+			_installWarningMessage = showWarningMessage;
+
+			//Remove unvisited TVs
+			_currentOwners.Where(owner => !visitedTvs.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
+			{;
+				if (_currentToggle == ownerId)
+				{
+					if(playerId == ownerId)
+						Services.CommandManager?.ProcessCommand("/honorific force clear"); //In case Players EntityId changed due to sudden teleport
+					TurnOffTV();
+				}
+				if (playerId == ownerId && !_canHost)
+				{
+					_checkedCanHost = false; //Retry
+				}
+				_currentOwners.Remove(ownerId);
+			});
+        }
+
+		//Disable hook during duties
+        bool dutyStarted = Services.DutyState.IsDutyStarted;
+        if (dutyStarted && hookEnabled)
+		{
+			if(_currentToggle != 0) {
+				if(playerId == _currentToggle)
+					Services.CommandManager?.ProcessCommand("/honorific force clear"); //In case Player vanishes into duty
+			
+				TurnOffTV();
+            }
+            _getResourceSyncHook.Disable();
 		}
-
-        _installWarningMessage = showWarningMessage;
-
-        //Remove unvisited TVs
-        _currentOwners.Where(owner => !visitedTvs.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
-		{;
-			if (_currentToggle == ownerId)
-			{
-                Services.CommandManager?.ProcessCommand("/honorific force clear"); //Doing it a second time in case Players EntityId changed due to sudden teleport
-                TurnOffTV();
-            }
-            if (playerId == ownerId && !_canHost)
-            {
-				_checkedCanHost = false; //Retry
-            }
-			_currentOwners.Remove(ownerId);
-		});
+		else if (!dutyStarted && !hookEnabled)
+        {
+			_getResourceSyncHook.Enable();
+		}
 	}
 
 	private void CheckOutPossibleTV(IntPtr tvDraw, uint ownerId, nint address)
@@ -288,10 +310,6 @@ public class ControlWindow : Window, IDisposable
 		volumeEnabled = false;
 		VisitedAudioProcesses.Clear();
 		_plugin.TerminateAlphaWindow();
-		if (_currentToggle == Services.ClientState?.LocalPlayer?.EntityId)
-		{
-			Services.CommandManager?.ProcessCommand("/honorific force clear");
-		}
 		_currentSubProcess = 0;
 		_currentAudioProcess = 0;
 		_currentActivatedTV = 0;
@@ -315,6 +333,11 @@ public class ControlWindow : Window, IDisposable
 	private List<IPlayerCharacter> _playerList = [];
 	public override void Draw()
 	{
+		if (Services.DutyState.IsDutyStarted)
+		{
+            ImGui.Text("AlphaChannel is deactivated during a duty!");
+			return;
+        }
 		if(_currentActivatedTV != 0 && volumeEnabled)
 		{
 			if(ImGui.SliderFloat("Volume", ref volume, 0.0f, 1.0f))
@@ -411,7 +434,11 @@ public class ControlWindow : Window, IDisposable
 						}
 						else
 						{
-							TurnOffTV();
+                            if (isPlayer)
+                            {
+                                Services.CommandManager?.ProcessCommand("/honorific force clear");
+                            }
+                            TurnOffTV();
 							if (isPlayer && string.IsNullOrEmpty(_inputURL))
 							{
 								_inputURL = _placeHolderURL;
@@ -674,7 +701,7 @@ public class ControlWindow : Window, IDisposable
 				_signalShareTitle = true; //Shortened URL will be updated on main thread
 				
 			}, error => {
-				TurnOffTV(); //TODO: Proper Error Handling!
+                TurnOffTV(); //TODO: Proper Error Handling!
 			});
 		}
 	}

@@ -31,6 +31,9 @@ public class Services
 	[PluginService]
 	public static IGameInteropProvider InteropProvider { get; private set; } = null!;
 
-	[PluginService]
-	public static ISigScanner SigScanner { get; private set; } = null!;
+    [PluginService]
+    public static ISigScanner SigScanner { get; private set; } = null!;
+
+    [PluginService]
+    public static IDutyState DutyState { get; private set; } = null!;
 }
