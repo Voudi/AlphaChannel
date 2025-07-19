@@ -21,11 +21,13 @@ using SharpDX.Mathematics.Interop;
 using System.Text.Json;
 using System.Text;
 using Dalamud.Utility;
+using System.Text.Json.Nodes;
 
 public class ControlWindow : Window, IDisposable
 {
    
     private const string URL_WHITELIST = "https://pastebin.com/raw/iBatAtHg";
+	List<string> whitelistedNames = new List<string>();
     private readonly Dictionary<uint, IntPtr> _currentOwners = []; //Playerpointer, CompanionDrawpointer
 	private readonly Dictionary<uint, String> _currentURLs = []; //Playerpointer, URL
 	private readonly Dictionary<uint, String> _currentTitles = []; //Playerpointer, Title
@@ -99,6 +101,39 @@ public class ControlWindow : Window, IDisposable
 		ActorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
 		_getResourceSyncHook.Enable();
 
+        // Retrieve whitelist
+        HttpClient client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", "Bot MTM5NTg5NjIzMzk5MzcwMzYzNg.GmAEen.SPgodjzUP_wPQhZ5wnlJWIudMNPuhV--7lVCDI");
+        var apiTask = Task.Run(() => {
+            try
+            {
+                var getTask = client.GetAsync("https://discord.com/api/channels/1395896063629463645/messages");
+				getTask.Wait();
+                return getTask.Result.Content.ReadAsStringAsync();
+            }
+            catch (Exception ex)
+            {
+                Services.Log.Debug("An exception has occured while trying to call discord API for whitelist : " + ex.Message);
+                return null;
+            }
+        });
+        apiTask.Wait();
+        // Request completed (if not null, if null, already handled by the catch above)
+        if (apiTask.Result != null)
+        {
+            JsonNode jsonResult = JsonSerializer.Deserialize<JsonNode>(apiTask.Result);
+            if (jsonResult.GetType() != typeof(JsonArray))
+            {
+                // This is not the result we are expecting, most likely an API error (Triggered with editing the key and making it fail on purpose
+                Services.Log.Error("Mismatched result from Discord API while retrieving the whitelist. Content : " + jsonResult.ToString());
+            }
+            else
+            {
+                // We have the list
+                whitelistedNames = ((JsonArray)jsonResult).Select(message => message["content"].ToString()).ToList();
+            }
+        }
+
         _ = CheckTVMod();
     }
 
@@ -110,7 +145,8 @@ public class ControlWindow : Window, IDisposable
 			return;
         try
         {
-            string url = "https://pastebin.com/raw/iBatAtHg";
+			// OLD CODE, Keeping for now, delete when confirmed new whitelist is working
+			/*string url = "https://pastebin.com/raw/iBatAtHg";
 
             string content = await HTTPCLIENT.GetStringAsync(url);
             var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
@@ -123,7 +159,9 @@ public class ControlWindow : Window, IDisposable
                     _canHost = true;
                     break;
                 }
-            }
+            }*/
+
+			_canHost = whitelistedNames.Contains(name + " " + world);
         }
 		catch (Exception) { }
         _checkedCanHost = true;
