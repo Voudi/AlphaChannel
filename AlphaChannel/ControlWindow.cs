@@ -20,7 +20,6 @@ using System.Numerics;
 using SharpDX.Mathematics.Interop;
 using System.Text.Json;
 using System.Text;
-using Dalamud.Utility;
 
 public class ControlWindow : Window, IDisposable
 {
@@ -42,7 +41,7 @@ public class ControlWindow : Window, IDisposable
     private bool _modexists = false;
     private bool _modenabled = false;
     private bool _installWarningMessage = false;
-	private bool _installingMod = false;
+	private bool _installedmod = false;
 
     //Render Vars
     private String _inputURL = "";
@@ -369,9 +368,8 @@ public class ControlWindow : Window, IDisposable
 		return _modexists;
     }
 
-    private async void EnableTVMod()
+    private async void InstallTVMod()
 	{
-		_installingMod = true;
         var apiUrl = "http://localhost:42069/api";
 
         try
@@ -391,6 +389,7 @@ public class ControlWindow : Window, IDisposable
                 responseInstall.EnsureSuccessStatusCode();
 
 				_modexists = true;
+                _installedmod = true;
             }
         }
         catch (Exception ex)
@@ -398,7 +397,6 @@ public class ControlWindow : Window, IDisposable
             Services.Log.Debug("Error:" + ex.Message);
 
         }
-        _installingMod = false;
     }
 
 	private bool _isFocused = false;
@@ -418,6 +416,29 @@ public class ControlWindow : Window, IDisposable
 				SetVolume(volume);
             }
         }
+        if (!_modexists)
+        {
+            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please install the AlphaChannelTV Penumbra mod before continuing:");
+			if (ImGui.Button("Step 1 - Install"))
+			{
+                InstallTVMod();
+            }
+			return;
+        }
+        if (!_modenabled && _installedmod)
+        {
+            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please enable the AlphaChannelTV Penumbra mod before continuing:");
+            if (ImGui.Button("Step 2 - Enable"))
+            {
+                Services.CommandManager?.ProcessCommand("/penumbra reload");
+                Services.CommandManager?.ProcessCommand("/penumbra mod enable Default | AlphaChannelTV");
+                Services.CommandManager?.ProcessCommand("/penumbra redraw carbuncle");
+                _modenabled = true;
+				_installedmod = false;
+            }
+            return;
+        }
+
         ImGui.Text(" Available TVs:");
 
 		foreach (var item in _playerList)
@@ -427,7 +448,7 @@ public class ControlWindow : Window, IDisposable
 			if(isPlayer && _installWarningMessage && _modenabled)
 			{
                 ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Searching for TV...");
-                ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please set your Penumbra mod 'AlphaChannelTV' to visible and make sure it has the highest priority.");
+                ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please enable the AlphaChannelTV Penumbra mod and make sure it has the highest priority.");
 			}
             if ((isPlayer && _installWarningMessage) || _currentOwners.TryGetValue(item.EntityId, out _)) //Checks if players carbuncle exists OR other players TV exists
 			{
@@ -507,18 +528,15 @@ public class ControlWindow : Window, IDisposable
 						: FontAwesomeIcon.Stop.ToIconString()
 					)
 					: ((isPlayer && _installWarningMessage) ?
-						(_modexists ?
-							FontAwesomeIcon.PowerOff.ToIconString() :
-							FontAwesomeIcon.Download.ToIconString()
-						) :
-						FontAwesomeIcon.Play.ToIconString()
+						FontAwesomeIcon.PowerOff.ToIconString()
+						: FontAwesomeIcon.Play.ToIconString()
 					)) + "##" + item.EntityId))
 				{
 					try
 					{
                         if ((isPlayer && _installWarningMessage))
                         {
-                            if (!_installingMod)
+                            if (!_installedmod)
                             {
 								if (_modexists)
 								{
@@ -527,10 +545,6 @@ public class ControlWindow : Window, IDisposable
                                     Services.CommandManager?.ProcessCommand("/penumbra redraw carbuncle");
 									_modenabled = true;
 								}
-								else
-								{
-                                    EnableTVMod();
-                                }
                             }
                         }
 						else
