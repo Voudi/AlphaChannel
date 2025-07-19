@@ -29,30 +29,9 @@ public partial class WebView2Client : Form
 	[DllImport("user32.dll")]
 	public static extern bool SetForegroundWindow(IntPtr hWnd);
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct RECT
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
+	private IntPtr _gameWindow = IntPtr.Zero;
 
-    [DllImport("user32.dll")]
-    public static extern bool GetWindowRect(nint hWnd, out RECT lpRect);
-    private RECT GetWindowRectHelper(nint hWnd)
-    {
-		if (!GetWindowRect(hWnd, out RECT rect))
-			Services.Log.Error("FATAL: Failed to get game window rect!");
-        return rect;
-    }
-
-    private IntPtr _gameWindow = IntPtr.Zero;
-
-	private RECT _gameWindowCoords => GetWindowRectHelper(_gameWindow);
-
-
-    public WebView2Client(int res, ControlWindow mainWindow, Dictionary<string, string> adBlockDirs, string cacheDir, string initUrl)
+	public WebView2Client(int res, ControlWindow mainWindow, Dictionary<string, string> adBlockDirs, string cacheDir, string initUrl)
 	{
 		_mainWindow = mainWindow;
 		_initUrl = initUrl;
@@ -71,8 +50,7 @@ public partial class WebView2Client : Form
 		_classicWidth = Width;
 		Height = (1080 / (1920 / Width) );
 		_classicHeight = Height;
-
-		Location = new Point(_gameWindowCoords.Left - 1, _gameWindowCoords.Top - 1);
+		Location = new Point(GetRightMostCoord().X - 1, GetRightMostCoord().Y - 1);
 		_classicLeft = Location.X;
 		_classicTop = Location.Y;
 		_topMostTimer = new System.Windows.Forms.Timer();
@@ -84,9 +62,9 @@ public partial class WebView2Client : Form
 			Dock = DockStyle.Fill
 		};
 
-		_gameWindow = GetGameWindow(); 
+		_gameWindow = GetGameWindow();
 
-        Init();
+		Init();
 	}
 
 	public static IntPtr GetGameWindow()
@@ -172,7 +150,7 @@ public partial class WebView2Client : Form
 		_webView.CoreWebView2InitializationCompleted += WebViewCoreWebView2InitializationCompleted;
 		
 		this.handle = Handle;
-		//KeepOnTop();
+		KeepOnTop();
 		//StartTopMostEnforcer();
 		if (_gameWindow != IntPtr.Zero)
 			SetForegroundWindow(_gameWindow);
@@ -258,7 +236,7 @@ public partial class WebView2Client : Form
 		else
 		{
 			FormBorderStyle = FormBorderStyle.None;
-			Location = new Point(_gameWindowCoords.Left, _gameWindowCoords.Right);
+			Location = new Point(_classicLeft, _classicTop);
 			TopMost = false;
 			Enabled = false;
 			Width = _classicWidth;

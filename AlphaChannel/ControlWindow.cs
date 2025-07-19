@@ -20,11 +20,14 @@ using System.Numerics;
 using SharpDX.Mathematics.Interop;
 using System.Text.Json;
 using System.Text;
+using Dalamud.Utility;
+using System.Text.Json.Nodes;
 
 public class ControlWindow : Window, IDisposable
 {
    
     private const string URL_WHITELIST = "https://pastebin.com/raw/iBatAtHg";
+	List<string> whitelistedNames = new List<string>();
     private readonly Dictionary<uint, IntPtr> _currentOwners = []; //Playerpointer, CompanionDrawpointer
 	private readonly Dictionary<uint, String> _currentURLs = []; //Playerpointer, URL
 	private readonly Dictionary<uint, String> _currentTitles = []; //Playerpointer, Title
@@ -41,7 +44,7 @@ public class ControlWindow : Window, IDisposable
     private bool _modexists = false;
     private bool _modenabled = false;
     private bool _installWarningMessage = false;
-	private bool _installedmod = false;
+	private bool _installingMod = false;
 
     //Render Vars
     private String _inputURL = "";
@@ -98,6 +101,39 @@ public class ControlWindow : Window, IDisposable
 		ActorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
 		_getResourceSyncHook.Enable();
 
+        // Retrieve whitelist
+        HttpClient client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Authorization", "Bot MTM5NTg5NjIzMzk5MzcwMzYzNg.GmAEen.SPgodjzUP_wPQhZ5wnlJWIudMNPuhV--7lVCDI");
+        var apiTask = Task.Run(() => {
+            try
+            {
+                var getTask = client.GetAsync("https://discord.com/api/channels/1395896063629463645/messages");
+				getTask.Wait();
+                return getTask.Result.Content.ReadAsStringAsync();
+            }
+            catch (Exception ex)
+            {
+                Services.Log.Debug("An exception has occured while trying to call discord API for whitelist : " + ex.Message);
+                return null;
+            }
+        });
+        apiTask.Wait();
+        // Request completed (if not null, if null, already handled by the catch above)
+        if (apiTask.Result != null)
+        {
+            JsonNode jsonResult = JsonSerializer.Deserialize<JsonNode>(apiTask.Result);
+            if (jsonResult.GetType() != typeof(JsonArray))
+            {
+                // This is not the result we are expecting, most likely an API error (Triggered with editing the key and making it fail on purpose
+                Services.Log.Error("Mismatched result from Discord API while retrieving the whitelist. Content : " + jsonResult.ToString());
+            }
+            else
+            {
+                // We have the list
+                whitelistedNames = ((JsonArray)jsonResult).Select(message => message["content"].ToString()).ToList();
+            }
+        }
+
         _ = CheckTVMod();
     }
 
@@ -109,7 +145,8 @@ public class ControlWindow : Window, IDisposable
 			return;
         try
         {
-            string url = "https://pastebin.com/raw/iBatAtHg";
+			// OLD CODE, Keeping for now, delete when confirmed new whitelist is working
+			/*string url = "https://pastebin.com/raw/iBatAtHg";
 
             string content = await HTTPCLIENT.GetStringAsync(url);
             var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
@@ -122,7 +159,9 @@ public class ControlWindow : Window, IDisposable
                     _canHost = true;
                     break;
                 }
-            }
+            }*/
+
+			_canHost = whitelistedNames.Contains(name + " " + world);
         }
 		catch (Exception) { }
         _checkedCanHost = true;
@@ -368,8 +407,9 @@ public class ControlWindow : Window, IDisposable
 		return _modexists;
     }
 
-    private async void InstallTVMod()
+    private async void EnableTVMod()
 	{
+		_installingMod = true;
         var apiUrl = "http://localhost:42069/api";
 
         try
@@ -389,7 +429,6 @@ public class ControlWindow : Window, IDisposable
                 responseInstall.EnsureSuccessStatusCode();
 
 				_modexists = true;
-                _installedmod = true;
             }
         }
         catch (Exception ex)
@@ -397,6 +436,7 @@ public class ControlWindow : Window, IDisposable
             Services.Log.Debug("Error:" + ex.Message);
 
         }
+        _installingMod = false;
     }
 
 	private bool _isFocused = false;
@@ -416,29 +456,6 @@ public class ControlWindow : Window, IDisposable
 				SetVolume(volume);
             }
         }
-        if (!_modexists)
-        {
-            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please install the AlphaChannelTV Penumbra mod before continuing:");
-			if (ImGui.Button("Step 1 - Install"))
-			{
-                InstallTVMod();
-            }
-			return;
-        }
-        if (!_modenabled && _installedmod)
-        {
-            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please enable the AlphaChannelTV Penumbra mod before continuing:");
-            if (ImGui.Button("Step 2 - Enable"))
-            {
-                Services.CommandManager?.ProcessCommand("/penumbra reload");
-                Services.CommandManager?.ProcessCommand("/penumbra mod enable Default | AlphaChannelTV");
-                Services.CommandManager?.ProcessCommand("/penumbra redraw carbuncle");
-                _modenabled = true;
-				_installedmod = false;
-            }
-            return;
-        }
-
         ImGui.Text(" Available TVs:");
 
 		foreach (var item in _playerList)
@@ -448,7 +465,7 @@ public class ControlWindow : Window, IDisposable
 			if(isPlayer && _installWarningMessage && _modenabled)
 			{
                 ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Searching for TV...");
-                ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please enable the AlphaChannelTV Penumbra mod and make sure it has the highest priority.");
+                ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please set your Penumbra mod 'AlphaChannelTV' to visible and make sure it has the highest priority.");
 			}
             if ((isPlayer && _installWarningMessage) || _currentOwners.TryGetValue(item.EntityId, out _)) //Checks if players carbuncle exists OR other players TV exists
 			{
@@ -528,15 +545,18 @@ public class ControlWindow : Window, IDisposable
 						: FontAwesomeIcon.Stop.ToIconString()
 					)
 					: ((isPlayer && _installWarningMessage) ?
-						FontAwesomeIcon.PowerOff.ToIconString()
-						: FontAwesomeIcon.Play.ToIconString()
+						(_modexists ?
+							FontAwesomeIcon.PowerOff.ToIconString() :
+							FontAwesomeIcon.Download.ToIconString()
+						) :
+						FontAwesomeIcon.Play.ToIconString()
 					)) + "##" + item.EntityId))
 				{
 					try
 					{
                         if ((isPlayer && _installWarningMessage))
                         {
-                            if (!_installedmod)
+                            if (!_installingMod)
                             {
 								if (_modexists)
 								{
@@ -545,6 +565,10 @@ public class ControlWindow : Window, IDisposable
                                     Services.CommandManager?.ProcessCommand("/penumbra redraw carbuncle");
 									_modenabled = true;
 								}
+								else
+								{
+                                    EnableTVMod();
+                                }
                             }
                         }
 						else
