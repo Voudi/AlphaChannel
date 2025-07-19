@@ -189,7 +189,10 @@ public class ControlWindow : Window, IDisposable
 														if(tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualHeight == 1024
 															&& tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualWidth == 1024)
 														{
-															visitedTvs.Add(ownerId);
+															if (playerId == ownerId)
+																_modenabled = false;
+
+                                                            visitedTvs.Add(ownerId);
 															CheckOutPossibleTV((IntPtr)tvDraw, ownerId, item.Address);
 															continue;
 														}
@@ -423,7 +426,8 @@ public class ControlWindow : Window, IDisposable
             
 			if(isPlayer && _installWarningMessage && _modenabled)
 			{
-				ImGui.TextColored(new Vector4(0.3f, 0.8f, 0.8f, 1.0f), " Please set your Penumbra mod 'AlphaChannelTV' to visible and make sure it has the highest priority.");
+                ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Searching for TV...");
+                ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please set your Penumbra mod 'AlphaChannelTV' to visible and make sure it has the highest priority.");
 			}
             if ((isPlayer && _installWarningMessage) || _currentOwners.TryGetValue(item.EntityId, out _)) //Checks if players carbuncle exists OR other players TV exists
 			{
