@@ -18,10 +18,13 @@ using FFXIVClientStructs.FFXIV.Client.System.Resource.Handle;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
 using System.Numerics;
 using SharpDX.Mathematics.Interop;
+using System.Text.Json;
+using System.Text;
 
 public class ControlWindow : Window, IDisposable
 {
-	private const string URL_WHITELIST = "https://pastebin.com/raw/iBatAtHg";
+   
+    private const string URL_WHITELIST = "https://pastebin.com/raw/iBatAtHg";
     private readonly Dictionary<uint, IntPtr> _currentOwners = []; //Playerpointer, CompanionDrawpointer
 	private readonly Dictionary<uint, String> _currentURLs = []; //Playerpointer, URL
 	private readonly Dictionary<uint, String> _currentTitles = []; //Playerpointer, Title
@@ -34,7 +37,9 @@ public class ControlWindow : Window, IDisposable
 	private bool _refreshAudio = false;
 	private Dictionary<IntPtr, bool> _currentVFXTextures = new Dictionary<IntPtr, bool>(); //Texturepointer, Flag (whether overridden once)
     private bool _signalShareTitle = false;
+    private bool _modexists = false;
     private bool _installWarningMessage = false;
+	private bool _installingMod = false;
 
     //Render Vars
     private String _inputURL = "";
@@ -64,7 +69,9 @@ public class ControlWindow : Window, IDisposable
 	public delegate void URLShortenerErrorCallback(string result);
 	public delegate void URLFetchCallback(string result);
 
-	public unsafe ControlWindow(Plugin plugin)
+    private static readonly HttpClient HTTPCLIENT = new HttpClient();
+
+    public unsafe ControlWindow(Plugin plugin)
         : base("AlphaChannel remote", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
 
@@ -88,7 +95,9 @@ public class ControlWindow : Window, IDisposable
 		var actorVfxCreateAddress = Services.SigScanner.ScanText(ActorVfxCreateSig);
 		ActorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
 		_getResourceSyncHook.Enable();
-	}
+
+        _ = CheckTVMod();
+    }
 
     private bool _canHost = false;
     private bool _checkedCanHost = false;
@@ -99,8 +108,8 @@ public class ControlWindow : Window, IDisposable
         try
         {
             string url = "https://pastebin.com/raw/iBatAtHg";
-			using HttpClient client = new();
-			string content = await client.GetStringAsync(url);
+
+            string content = await HTTPCLIENT.GetStringAsync(url);
             var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
 
             var phrases = new List<string>(lines);
@@ -140,7 +149,7 @@ public class ControlWindow : Window, IDisposable
 	{
         var playerId = Services.ClientState?.LocalPlayer?.EntityId;
 
-        bool hookEnabled = _getResourceSyncHook.IsEnabled;
+        bool hookEnabled = _getResourceSyncHook.IsEnabled && !_getResourceSyncHook.IsDisposed;
         if (hookEnabled) //Only check for stuff while the hook is activated, which is outside from duties
 		{
 			RefreshVolume();
@@ -288,6 +297,10 @@ public class ControlWindow : Window, IDisposable
 				_plugin.NavigateAlphaWindow(url.ToString(), currentSharedTextureResourceHandle);
 				ShareTitle(url.ToString());
 			}
+			else
+			{
+				return;
+			}
 		}
 		else
 		{
@@ -296,7 +309,11 @@ public class ControlWindow : Window, IDisposable
 				_currentToggle = entityId;
 				_plugin.NavigateAlphaWindow(url, currentSharedTextureResourceHandle);
 			}
-		}
+            else
+            {
+                return;
+            }
+        }
 
 		//Assume no TV is running
 		_currentActivatedTV = 0;
@@ -327,6 +344,59 @@ public class ControlWindow : Window, IDisposable
 			   && (url.Scheme == Uri.UriSchemeHttp || url.Scheme == Uri.UriSchemeHttps) && url.Host.Contains(".") && !url.Host.EndsWith(".") && Uri.CheckHostName(url.Host) == UriHostNameType.Dns;
 	}
 
+	private async Task<bool> CheckTVMod()
+	{
+		var apiUrl = "http://localhost:42069/api";
+
+        try
+        {
+            var responseMods = await HTTPCLIENT.GetAsync(apiUrl + "/mods");
+
+            responseMods.EnsureSuccessStatusCode();
+
+            var responseModsBody = await responseMods.Content.ReadAsStringAsync();
+
+			_modexists = responseModsBody.Contains("AlphaChannelTV");
+        }
+        catch (Exception ex)
+        {
+            Services.Log.Debug("Error:" + ex.Message);
+        }
+
+		return _modexists;
+    }
+
+    private async void EnableTVMod()
+	{
+		_installingMod = true;
+        var apiUrl = "http://localhost:42069/api";
+
+        try
+        {
+            if (!await CheckTVMod())
+            {
+                var content = new StringContent(JsonSerializer.Serialize(
+                    new
+                    {
+                        Path = _plugin.GetModPath()
+                    }
+                ), Encoding.UTF8, "application/json");
+
+                Services.Log.Debug("Installing mod: " + _plugin.GetModPath());
+                var responseInstall = await HTTPCLIENT.PostAsync(apiUrl + "/installmod", content);
+
+                responseInstall.EnsureSuccessStatusCode();
+
+				_modexists = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Services.Log.Debug("Error:" + ex.Message);
+
+        }
+        _installingMod = false;
+    }
 
 	private bool _isFocused = false;
 	private String _placeHolderURL = String.Empty;
@@ -351,8 +421,10 @@ public class ControlWindow : Window, IDisposable
 			var isPlayer = item.EntityId == Services.ClientState?.LocalPlayer?.EntityId;
 			if (isPlayer)
 			{
+				
 				if (_installWarningMessage)
                 {
+                    /*
                     ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
                     ImGui.Text("Could not find TV model on your pet! ");
                     ImGui.SameLine();
@@ -377,14 +449,17 @@ public class ControlWindow : Window, IDisposable
                     ImGui.SameLine();
                     ImGui.Text("it.");
                     ImGui.PopStyleColor();
+					*/
+                }
+
+                if (!_canHost && _checkedCanHost)
+                {
+                    ImGui.Text("Notice: You have not been whitelisted to host a session.");
+                    continue;
                 }
             }
-            if (!_canHost && _checkedCanHost)
-            {
-                ImGui.Text("Notice: You have not been whitelisted to host a session.");
-                continue;
-            }
-            if (_currentOwners.TryGetValue(item.EntityId, out _))
+            
+            if (isPlayer || _currentOwners.TryGetValue(item.EntityId, out _))
 			{
 				var toggle = _currentToggle == item.EntityId;
 				var url = String.Empty;
@@ -408,6 +483,10 @@ public class ControlWindow : Window, IDisposable
 					Vector4 textColor = isPlayer ? new Vector4(1.0f, 0.0f, 0.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f); ;
 					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
 				}
+				else if((isPlayer && _installWarningMessage))
+				{
+                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
+                }
 				else if (!urlExists)
 				{
 					ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1.0f));
@@ -415,35 +494,61 @@ public class ControlWindow : Window, IDisposable
 
 
 				ImGui.PushFont(UiBuilder.IconFont);
-				if (ImGui.Button((toggle ? 
-					(!string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists ? FontAwesomeIcon.Repeat.ToIconString() 
+				if (ImGui.Button((toggle ?
+					(!string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists ?
+						FontAwesomeIcon.Repeat.ToIconString()
 						: FontAwesomeIcon.Stop.ToIconString()
 					)
-					: FontAwesomeIcon.Play.ToIconString()) + "##" + item.EntityId))
+					: ((isPlayer && _installWarningMessage) ?
+						(_modexists ?
+							FontAwesomeIcon.PowerOff.ToIconString() :
+							FontAwesomeIcon.Download.ToIconString()
+						) :
+						FontAwesomeIcon.Play.ToIconString()
+					)) + "##" + item.EntityId))
 				{
 					try
 					{
-						if (!toggle || (toggle && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists))
-						{
-							TurnOnTV(item.EntityId);
-							if (isPlayer)
-							{
-								_placeHolderURL = _inputURL;
-								_inputURL = String.Empty;
-							}
-						}
+                        if ((isPlayer && _installWarningMessage))
+                        {
+                            if (!_installingMod)
+                            {
+                                Services.Log.Debug("Attempt to install!");
+								if (_modexists)
+								{
+                                    Services.CommandManager.ProcessCommand("/penumbra mod enable Default | AlphaChannelTV");
+                                    Services.CommandManager.ProcessCommand("/penumbra redraw carbuncle");
+								}
+								else
+								{
+                                    EnableTVMod();
+                                }
+                            }
+                        }
 						else
 						{
-                            if (isPlayer)
+                            if (!toggle || (toggle && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists))
                             {
-                                Services.CommandManager?.ProcessCommand("/honorific force clear");
+                                TurnOnTV(item.EntityId);
+                                if (isPlayer)
+                                {
+                                    _placeHolderURL = _inputURL;
+                                    _inputURL = String.Empty;
+                                }
                             }
-                            TurnOffTV();
-							if (isPlayer && string.IsNullOrEmpty(_inputURL))
-							{
-								_inputURL = _placeHolderURL;
-							}
-						}
+                            else
+                            {
+                                if (isPlayer)
+                                {
+                                    Services.CommandManager?.ProcessCommand("/honorific force clear");
+                                }
+                                TurnOffTV();
+                                if (isPlayer && string.IsNullOrEmpty(_inputURL))
+                                {
+                                    _inputURL = _placeHolderURL;
+                                }
+                            }
+                        }
 					}
 					catch (Exception ex)
 					{
@@ -708,30 +813,27 @@ public class ControlWindow : Window, IDisposable
 
 	public async Task ShortenURL(string inputURL, URLShortenerCallback callback, URLShortenerErrorCallback error)
 	{
-		using (HttpClient client = new HttpClient())
-		{
-			try
-			{
-				HttpResponseMessage response = await client.GetAsync("https://is.gd/create.php?format=simple&url=" + Uri.EscapeDataString(inputURL));
-				response.EnsureSuccessStatusCode();
-				string responseBody = await response.Content.ReadAsStringAsync();
+        try
+        {
+            HttpResponseMessage response = await HTTPCLIENT.GetAsync("https://is.gd/create.php?format=simple&url=" + Uri.EscapeDataString(inputURL));
+            response.EnsureSuccessStatusCode();
+            string responseBody = await response.Content.ReadAsStringAsync();
 
-				if (responseBody.Contains("error") || responseBody.Contains("Error"))
-				{
-					Services.Log.Debug("Request exception: Could not create Shortlink: " + responseBody);
-					error(String.Empty);
-				}
-				else
-				{
-					callback(responseBody);
-				}
-			}
-			catch (HttpRequestException)
-			{
-				Services.Log.Debug("Request exception: Could not create Shortlink.");
-			}
-		}
-	}
+            if (responseBody.Contains("error") || responseBody.Contains("Error"))
+            {
+                Services.Log.Debug("Request exception: Could not create Shortlink: " + responseBody);
+                error(String.Empty);
+            }
+            else
+            {
+                callback(responseBody);
+            }
+        }
+        catch (HttpRequestException)
+        {
+            Services.Log.Debug("Request exception: Could not create Shortlink.");
+        }
+    }
 
 	private async Task FetchURLData(string url, URLFetchCallback callback)
 	{
@@ -739,29 +841,26 @@ public class ControlWindow : Window, IDisposable
 		{
 			handler.AllowAutoRedirect = false;
 
-			using (HttpClient client = new HttpClient(handler))
-			{
-				try
-				{
-					HttpResponseMessage response = await client.GetAsync(url);
+            try
+            {
+                HttpResponseMessage response = await HTTPCLIENT.GetAsync(url);
 
-					if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400)
-					{
-						// Get the Location header value
-						if (response.Headers.Location != null)
-						{
-							callback(response.Headers.Location.ToString());
-							return;
-						}
-					}
-					Services.Log.Debug("Request exception: Shortlink returned 200-OK instead of a 300-redirect, which should happen with Shortlinks");
-				}
-				catch (HttpRequestException e)
-				{
-					Services.Log.Debug("Request exception: " + e.Message + e.StackTrace);
-				}
-			}
-		}
+                if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400)
+                {
+                    // Get the Location header value
+                    if (response.Headers.Location != null)
+                    {
+                        callback(response.Headers.Location.ToString());
+                        return;
+                    }
+                }
+                Services.Log.Debug("Request exception: Shortlink returned 200-OK instead of a 300-redirect, which should happen with Shortlinks");
+            }
+            catch (HttpRequestException e)
+            {
+                Services.Log.Debug("Request exception: " + e.Message + e.StackTrace);
+            }
+        }
 	}
 
 	private List<uint> VisitedAudioProcesses = new List<uint>();

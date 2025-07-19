@@ -186,12 +186,8 @@ public class Plugin : IDalamudPlugin
 			_mainWindow?.UpdateTitle(entityId, titleData.Title);
 	}
 
-    internal void OpenModfolder()
-    {
-		Process.Start(new ProcessStartInfo
-		{
-			FileName = Path.Combine(_pluginDir, "resources"),
-			UseShellExecute = true
-		});
-    }
+	internal string GetModPath()
+	{
+		return Path.Combine(_pluginDir, "resources\\AlphaChannelTV.pmp");
+	}
 }

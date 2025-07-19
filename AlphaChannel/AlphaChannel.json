@@ -2,7 +2,7 @@
     "Author":  "Stepp",
     "Name":  "AlphaChannel",
     "InternalName":  "AlphaChannel",
-    "AssemblyVersion":  "1.0.20250515.17",
+    "AssemblyVersion":  "1.0.20250719.35",
     "Description":  "Cute TV for cute watch parties.",
     "ApplicableVersion":  "any",
     "Tags":  [
@@ -16,6 +16,6 @@
     "Punchline":  "Ingame TV",
     "Changelog":  "Initial Prototype",
     "AcceptsFeedback":  false,
-    "DownloadLinkInstall":  "https://gist.githubusercontent.com/Voudi/77c661ec1597925c2856d649a0cfc2d8/raw/AlphaChannel.zip",
-    "DownloadLinkUpdate":  "https://gist.githubusercontent.com/Voudi/77c661ec1597925c2856d649a0cfc2d8/raw/AlphaChannel.zip"
+    "DownloadLinkInstall":  "https://gist.github.com/Voudi/77c661ec1597925c2856d649a0cfc2d8/raw/AlphaChannel.zip",
+    "DownloadLinkUpdate":  "https://gist.github.com/Voudi/77c661ec1597925c2856d649a0cfc2d8/raw/AlphaChannel.zip"
 }
