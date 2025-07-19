@@ -20,6 +20,7 @@ using System.Numerics;
 using SharpDX.Mathematics.Interop;
 using System.Text.Json;
 using System.Text;
+using Dalamud.Utility;
 
 public class ControlWindow : Window, IDisposable
 {
@@ -37,7 +38,9 @@ public class ControlWindow : Window, IDisposable
 	private bool _refreshAudio = false;
 	private Dictionary<IntPtr, bool> _currentVFXTextures = new Dictionary<IntPtr, bool>(); //Texturepointer, Flag (whether overridden once)
     private bool _signalShareTitle = false;
+	private bool _signalToggleShare = false;
     private bool _modexists = false;
+    private bool _modenabled = false;
     private bool _installWarningMessage = false;
 	private bool _installingMod = false;
 
@@ -137,14 +140,13 @@ public class ControlWindow : Window, IDisposable
 
 	private void CheckTitles()
 	{
-		if (_signalShareTitle)
+		if (_signalShareTitle &&  _signalToggleShare)
 		{
 			Services.CommandManager.ProcessCommand("/honorific force set alpha:" + _shortenedURL + "|silent");
 			_signalShareTitle = false;
 		}
 	}
 
-	private List<IBattleNpc> _npcList = [];
 	private unsafe void CheckAllTVs()
 	{
         var playerId = Services.ClientState?.LocalPlayer?.EntityId;
@@ -157,12 +159,10 @@ public class ControlWindow : Window, IDisposable
 			CheckTitles();
 		
 			List<uint> visitedTvs = new List<uint>();
-			_playerList = Services.Objects.Where(x => x is IPlayerCharacter).Cast<IPlayerCharacter>().OrderBy(x => (x.EntityId == Services.ClientState?.LocalPlayer?.EntityId) ? "@" : x.Name.TextValue).ToList();
-			_npcList = Services.Objects.Where(x => x is IBattleNpc).Cast<IBattleNpc>().OrderBy(x => x.YalmDistanceX).ToList();
-
+			_playerList = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => (x.EntityId == Services.ClientState?.LocalPlayer?.EntityId) ? "@" : x.Name.TextValue);
 
 			var showWarningMessage = false;
-			foreach (var item in _npcList)
+			foreach (var item in Services.Objects.Where(x => x is IBattleNpc))
 			{
 				if (item.Name.TextValue == "Carbuncle")
 				{
@@ -400,12 +400,12 @@ public class ControlWindow : Window, IDisposable
 
 	private bool _isFocused = false;
 	private String _placeHolderURL = String.Empty;
-	private List<IPlayerCharacter> _playerList = [];
+	private IEnumerable<IGameObject> _playerList = [];
 	public override void Draw()
 	{
 		if (Services.DutyState.IsDutyStarted)
 		{
-            ImGui.Text("AlphaChannel is deactivated during a duty!");
+            ImGui.Text("AlphaChannel is deactivated during a duty.");
 			return;
         }
 		if(_currentActivatedTV != 0 && volumeEnabled)
@@ -416,52 +416,18 @@ public class ControlWindow : Window, IDisposable
             }
         }
         ImGui.Text(" Available TVs:");
+
 		foreach (var item in _playerList)
 		{
 			var isPlayer = item.EntityId == Services.ClientState?.LocalPlayer?.EntityId;
-			if (isPlayer)
-			{
-				
-				if (_installWarningMessage)
-                {
-                    /*
-                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
-                    ImGui.Text("Could not find TV model on your pet! ");
-                    ImGui.SameLine();
-                    ImGui.Text("Please");
-                    ImGui.SameLine();
-                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
-                    if (ImGui.Button("Install"))
-                    {
-                        _plugin.OpenModfolder();
-                    }
-                    ImGui.PopStyleColor();
-                    ImGui.SameLine();
-                    ImGui.Text("and/or");
-                    ImGui.SameLine();
-                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
-                    if (ImGui.Button("Enable"))
-                    {
-                        Services.CommandManager.ProcessCommand("/penumbra mod enable Default | AlphaChannelTV");
-                        Services.CommandManager.ProcessCommand("/penumbra redraw carbuncle");
-                    }
-                    ImGui.PopStyleColor();
-                    ImGui.SameLine();
-                    ImGui.Text("it.");
-                    ImGui.PopStyleColor();
-					*/
-                }
-
-                if (!_canHost && _checkedCanHost)
-                {
-                    ImGui.Text("Notice: You have not been whitelisted to host a session.");
-                    continue;
-                }
-            }
             
-            if (isPlayer || _currentOwners.TryGetValue(item.EntityId, out _))
+			if(isPlayer && _installWarningMessage && _modenabled)
 			{
-				var toggle = _currentToggle == item.EntityId;
+				ImGui.TextColored(new Vector4(0.3f, 0.8f, 0.8f, 1.0f), " Please set your Penumbra mod 'AlphaChannelTV' to visible and make sure it has the highest priority.");
+			}
+            if ((isPlayer && _installWarningMessage) || _currentOwners.TryGetValue(item.EntityId, out _)) //Checks if players carbuncle exists OR other players TV exists
+			{
+				var isTheRunningTV = _currentToggle == item.EntityId;
 				var url = String.Empty;
 				bool urlExists = false;
 
@@ -478,7 +444,44 @@ public class ControlWindow : Window, IDisposable
 					}
 				}
 
-				if (toggle)
+				if(isPlayer && isTheRunningTV)
+				{
+                    Vector4 textColor = !_canHost ? new Vector4(0.5f, 0.5f, 0.5f, 1.0f) : (_signalToggleShare ? new Vector4(0.0f, 0.0f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
+                    ImGui.PushStyleColor(ImGuiCol.Text, textColor);
+
+                    ImGui.PushFont(UiBuilder.IconFont);
+                    if (ImGui.Button((_signalToggleShare ? FontAwesomeIcon.Eye.ToIconString() : FontAwesomeIcon.EyeSlash.ToIconString()) + "##" + item.EntityId))
+                    {
+						if(_canHost)
+						{
+                            _signalToggleShare = !_signalToggleShare;
+                            if (_signalToggleShare)
+                            {
+                                //Reapply sharing
+                                _signalShareTitle = true;
+                            }
+                            else
+                            {
+                                _signalShareTitle = false;
+                                Services.CommandManager?.ProcessCommand("/honorific force clear");
+                            }
+                        }
+                    }
+                    ImGui.PopFont();
+
+                    ImGui.PopStyleColor();
+
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+						ImGui.Text(!_canHost ? "Unable to share. You have not been whitelisted." : (_signalToggleShare ? "Currently sharing URL, press to stop sharing" : "Currently not sharing URL, press to share URL"));
+                        ImGui.EndTooltip();
+                    }
+
+                    ImGui.SameLine();
+                }
+				
+				if (isTheRunningTV)
 				{
 					Vector4 textColor = isPlayer ? new Vector4(1.0f, 0.0f, 0.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f); ;
 					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
@@ -494,7 +497,7 @@ public class ControlWindow : Window, IDisposable
 
 
 				ImGui.PushFont(UiBuilder.IconFont);
-				if (ImGui.Button((toggle ?
+				if (ImGui.Button((isTheRunningTV ?
 					(!string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists ?
 						FontAwesomeIcon.Repeat.ToIconString()
 						: FontAwesomeIcon.Stop.ToIconString()
@@ -513,11 +516,12 @@ public class ControlWindow : Window, IDisposable
                         {
                             if (!_installingMod)
                             {
-                                Services.Log.Debug("Attempt to install!");
 								if (_modexists)
 								{
-                                    Services.CommandManager.ProcessCommand("/penumbra mod enable Default | AlphaChannelTV");
-                                    Services.CommandManager.ProcessCommand("/penumbra redraw carbuncle");
+                                    Services.CommandManager?.ProcessCommand("/penumbra reload");
+                                    Services.CommandManager?.ProcessCommand("/penumbra mod enable Default | AlphaChannelTV");
+                                    Services.CommandManager?.ProcessCommand("/penumbra redraw carbuncle");
+									_modenabled = true;
 								}
 								else
 								{
@@ -527,7 +531,8 @@ public class ControlWindow : Window, IDisposable
                         }
 						else
 						{
-                            if (!toggle || (toggle && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists))
+                            _signalToggleShare = false; //Just turn off host visibility whenever we switch something
+                            if (!isTheRunningTV || (isTheRunningTV && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists))
                             {
                                 TurnOnTV(item.EntityId);
                                 if (isPlayer)
@@ -540,7 +545,7 @@ public class ControlWindow : Window, IDisposable
                             {
                                 if (isPlayer)
                                 {
-                                    Services.CommandManager?.ProcessCommand("/honorific force clear");
+                                    Services.CommandManager?.ProcessCommand("/honorific force clear"); //When turning off the players TV
                                 }
                                 TurnOffTV();
                                 if (isPlayer && string.IsNullOrEmpty(_inputURL))
@@ -557,14 +562,14 @@ public class ControlWindow : Window, IDisposable
 				}
 				ImGui.PopFont();
 
-				if (toggle || !urlExists) ImGui.PopStyleColor();
+				if (isTheRunningTV || !urlExists) ImGui.PopStyleColor();
 
                 if (ImGui.IsItemHovered())
                 {
                     ImGui.BeginTooltip();
                     ImGui.Text(
 
-                        (toggle ?
+                        (isTheRunningTV ?
 							(!string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists ? "Visit new URL"
 							 : "Stop"
                         )
@@ -579,7 +584,7 @@ public class ControlWindow : Window, IDisposable
 
                 ImGui.SameLine();
 
-                if (toggle)
+                if (isTheRunningTV)
                 {
                     ImGui.PushFont(UiBuilder.IconFont);
                     if (ImGui.Button(FontAwesomeIcon.PlayCircle.ToIconString()))
@@ -597,7 +602,7 @@ public class ControlWindow : Window, IDisposable
 
                 ImGui.SameLine();
 
-                if (toggle)
+                if (isTheRunningTV)
                 {
                     ImGui.PushFont(UiBuilder.IconFont);
                     if (ImGui.Button(FontAwesomeIcon.ExpandArrowsAlt.ToIconString()))
@@ -615,7 +620,7 @@ public class ControlWindow : Window, IDisposable
 
                 ImGui.SameLine();
 
-				if (toggle) {
+				if (isTheRunningTV) {
 					ImGui.PushFont(UiBuilder.IconFont);
 					if (ImGui.Button(FontAwesomeIcon.WindowRestore.ToIconString()))
 					{
@@ -632,20 +637,23 @@ public class ControlWindow : Window, IDisposable
 
                 ImGui.SameLine();
 
-				ImGui.PushFont(UiBuilder.IconFont);
-				if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##" + item.EntityId))
+				if (urlExists || isPlayer)
 				{
-					ImGui.SetClipboardText(isPlayer ? (string.IsNullOrEmpty(_inputURL) && toggle ? _placeHolderURL : _inputURL) : (url ?? String.Empty));
-				}
-				ImGui.PopFont();
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.BeginTooltip();
-                    ImGui.Text("Copy URL to clipboard");
-                    ImGui.EndTooltip();
-                }
+                    ImGui.PushFont(UiBuilder.IconFont);
+                    if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##" + item.EntityId))
+                    {
+                        ImGui.SetClipboardText(isPlayer ? (string.IsNullOrEmpty(_inputURL) && isTheRunningTV ? _placeHolderURL : _inputURL) : (url ?? String.Empty));
+                    }
+                    ImGui.PopFont();
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text("Copy URL to clipboard");
+                        ImGui.EndTooltip();
+                    }
 
-                ImGui.SameLine();
+                    ImGui.SameLine();
+                }
 
 				if (isPlayer)
 				{
@@ -658,7 +666,7 @@ public class ControlWindow : Window, IDisposable
 						_isFocused = false;
 
 					// Render placeholder if input is empty and unfocused
-					if (!_isFocused && string.IsNullOrEmpty(_inputURL) && toggle)
+					if (!_isFocused && string.IsNullOrEmpty(_inputURL) && isTheRunningTV)
 					{
 						var pos = ImGui.GetItemRectMin();
 						var max = ImGui.GetItemRectMax();
@@ -683,14 +691,29 @@ public class ControlWindow : Window, IDisposable
 				}
 				else
 				{
-					if(toggle)
+					if(isTheRunningTV)
 						ImGui.TextColored(new Vector4(0.3f, 0.8f, 0.3f, 1.0f), url);
-					else
+					else if(!urlExists)
+                        ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Not sharing anything");
+                    else
 						ImGui.Text(url);
-				}
+
+                }
 			}
+			else
+			{
+				if(isPlayer)
+					ImGui.Text(" Notice: You have not summoned your carbuncle.");
+            }
 		}
-	}
+        if (!_canHost && _checkedCanHost)
+        {
+            ImGui.Text("");
+            ImGui.Text(" Notice:");
+			ImGui.Text("  You have not been whitelisted to share your URL.");
+            ImGui.Text("  Other Players won't be able to view your TV.");
+        }
+    }
 
 	private const string VFXPath = "chara/monster/m7002/obj/body/b0001/vfx/eff/carbuncleemittor.avfx";
 
