@@ -577,10 +577,24 @@ public class ControlWindow : Window, IDisposable
                         }
 						else
 						{
-                            _signalToggleShare = false; //Just turn off host visibility whenever we switch something
                             if (!isTheRunningTV || (isTheRunningTV && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists))
                             {
+								if (!isTheRunningTV)
+								{
+                                    _signalToggleShare = false; //Turn off host visibility when starting to play own tv or other players tv
+                                }
                                 TurnOnTV(item.EntityId);
+
+								if (isTheRunningTV && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists) 
+								{
+									//Update title share if player is changing url
+                                    if (_signalToggleShare)
+                                    {
+                                        //Reapply sharing
+                                        _signalShareTitle = true;
+                                    }
+                                }
+
                                 if (isPlayer)
                                 {
                                     _placeHolderURL = _inputURL;
@@ -591,6 +605,7 @@ public class ControlWindow : Window, IDisposable
                             {
                                 if (isPlayer)
                                 {
+                                    _signalToggleShare = false; //Turn off host visibility when stopping the tv that plays
                                     Services.CommandManager?.ProcessCommand("/honorific force clear"); //When turning off the players TV
                                 }
                                 TurnOffTV();
