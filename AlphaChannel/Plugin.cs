@@ -195,4 +195,10 @@ public class Plugin : IDalamudPlugin
 	{
 		return Path.Combine(_pluginDir, "resources\\AlphaChannelTV.pmp");
 	}
+
+    internal void CheckURLHook()
+    {
+		if (!IpcProvider.Initialized)
+			IpcProvider.Init(this);
+    }
 }

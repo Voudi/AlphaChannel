@@ -7,9 +7,6 @@ namespace AlphaChannel;
 
 public static class IpcProvider
 {
-	public const uint MajorVersion = 3;
-	public const uint MinorVersion = 1;
-
 	public static bool Initialized = false;
 
 	private static ICallGateProvider<int, string, object>? SetCharacterTitle;
@@ -52,7 +49,9 @@ public static class IpcProvider
 				});
 
 				SetCharacterTitle?.RegisterAction(proxyAction);
-			}
+
+                Initialized = true;
+            }
 			else
 			{
 				Services.Log.Error("Could not Intercept Hook, has Dalamud been updated? IPCProvider.cs L34");
@@ -63,7 +62,6 @@ public static class IpcProvider
 		{
 			Services.Log.Error(ex.Message + ex.StackTrace);
 		}
-		Initialized = true;
 	}
 	internal static void DeInit()
 	{

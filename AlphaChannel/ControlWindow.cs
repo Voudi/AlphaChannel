@@ -851,8 +851,12 @@ public class ControlWindow : Window, IDisposable
 		{
 			_lastMilliSecond = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 			_secondsCounter++;
+
 			CheckAllTVs();
+
 			_plugin.PollWebviewWindow();
+
+            _plugin.CheckURLHook();
         }
 	}
 
