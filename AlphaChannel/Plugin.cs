@@ -170,6 +170,11 @@ public class Plugin : IDalamudPlugin
 		_webView2Client?.ToggleResize();
 	}
 
+    public void PollWebviewWindow()
+    {
+        _webView2Client?.PollMainwindow();
+    }
+
     public void Play()
     {
         _webView2Client?.TryPlay();

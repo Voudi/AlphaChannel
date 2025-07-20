@@ -13,12 +13,28 @@ public partial class WebView2Client : Form
     private readonly WebView2 _webView;
     public IntPtr handle;
     public ControlWindow _mainWindow;
-    private int _classicWidth, _classicHeight;
+
+    private int ClassicWidth => CalculateResolution();
+    private int ClassicHeight => (1080 / (1920 / ClassicWidth));
+
     private readonly Dictionary<string, string> _adBlockDirs;
     private readonly string _cacheDir;
     private readonly string _initUrl;
     private bool _coreLoaded = false;
 
+    [DllImport("user32.dll")]
+    static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    const int SW_HIDE = 0;
+    const int SW_SHOW = 5;
+    const int SW_MINIMIZE = 6;
+    const int SW_RESTORE = 9;
+
+    [DllImport("user32.dll")]
+    static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    static extern bool IsIconic(IntPtr hWnd);
 
     [DllImport("user32.dll", SetLastError = true)]
     static extern IntPtr SetWindowLong(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
@@ -39,21 +55,6 @@ public partial class WebView2Client : Form
 
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax,
-    IntPtr hmodWinEventProc, WinEventDelegate lpfnWinEventProc,
-    uint idProcess, uint idThread, uint dwFlags);
-
-    delegate void WinEventDelegate(IntPtr hWinEventHook, uint eventType,
-        IntPtr hwnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime);
-
-    const uint EVENT_SYSTEM_MINIMIZESTART = 0x0016;
-    const uint EVENT_SYSTEM_MINIMIZEEND = 0x0017;
-    const uint WINEVENT_OUTOFCONTEXT = 0;
-
-    [DllImport("user32.dll")]
-    static extern bool UnhookWinEvent(IntPtr hWinEventHook);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT
@@ -77,17 +78,13 @@ public partial class WebView2Client : Form
 
     private RECT _gameWindowCoords => GetWindowRectHelper(_gameWindow);
 
-    private readonly IntPtr _winEventHook;
+    private int _gameWindowCoordsLeft => (_gameWindowCoords.Right - _gameWindowCoords.Left) > ClassicWidth + 25 ? _gameWindowCoords.Left + 20 : _gameWindowCoords.Left;
+
+    private int _gameWindowCoordsTop => (_gameWindowCoords.Bottom - _gameWindowCoords.Top) > ClassicHeight + 25 ? _gameWindowCoords.Top + 20 : _gameWindowCoords.Top;
+
     public WebView2Client(ControlWindow mainWindow, Dictionary<string, string> adBlockDirs, string cacheDir, string initUrl)
     {
         _gameWindow = GetGameWindow();
-
-        WinEventDelegate procDelegate = new WinEventDelegate(WinEventProc);
-
-        _winEventHook = SetWinEventHook(
-            EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND,
-            IntPtr.Zero, procDelegate,
-            0, 0, WINEVENT_OUTOFCONTEXT);
 
         _mainWindow = mainWindow;
         _initUrl = initUrl;
@@ -135,10 +132,7 @@ public partial class WebView2Client : Form
         SetWindowPos(this.handle, HWND_BOTTOM, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
-        _classicWidth = CalculateResolution();
-        _classicHeight = (1080 / (1920 / _classicWidth));
-
-        Bounds = new Rectangle(_gameWindowCoords.Left, _gameWindowCoords.Top, _classicWidth, _classicHeight);
+        Bounds = new Rectangle(_gameWindowCoordsLeft, _gameWindowCoordsTop, ClassicWidth, ClassicHeight);
 
         //KeepOnTop();
         //StartTopMostEnforcer();
@@ -148,25 +142,31 @@ public partial class WebView2Client : Form
         await _webView.EnsureCoreWebView2Async(environment);
     }
 
-    private void WinEventProc(IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
-    int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
+    private bool minimized = false;
+    public void PollMainwindow()
     {
-        if (hwnd == _gameWindow)
+        if (IsIconic(_gameWindow) || !IsWindowVisible(_gameWindow))
         {
-            Services.Log.Debug("GAME WINDOW EVENT!" + eventType);
-            if (eventType == EVENT_SYSTEM_MINIMIZESTART)
+            if (!minimized)
             {
-                Services.Log.Debug("GAME WINDOW MINIMIZE!");
-                this.Hide(); // or minimize
-            }
-            else if (eventType == EVENT_SYSTEM_MINIMIZEEND)
-            {
-                Services.Log.Debug("GAME WINDOW MAXIMIZE!");
-                this.Show();
+                minimized = true;
+                ShowWindow(handle, SW_HIDE);
             }
         }
-    }
-
+        else
+        {
+            if (minimized)
+            {
+                minimized = false;
+                ShowWindow(handle, SW_SHOW);
+                if (!_resized)
+                {
+                    SetWindowPos(this.handle, HWND_BOTTOM, _gameWindowCoordsLeft, _gameWindowCoordsTop, ClassicWidth, ClassicHeight,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                }
+            }
+        }
+    } 
     public static IntPtr GetGameWindow()
     {
         var handle = IntPtr.Zero;
@@ -223,7 +223,6 @@ public partial class WebView2Client : Form
     {
         var maxWidth = 480; //Start at smallest width 360p
 
-        Services.Log.Debug("COORDS: " + _gameWindowCoords.Left + ", " + _gameWindowCoords.Top + ", " + _gameWindowCoords.Right + ", " + _gameWindowCoords.Bottom);
         maxWidth = Math.Max(480, _gameWindowCoords.Right - _gameWindowCoords.Left);
         if (maxWidth >= 480 && maxWidth < 960)
             maxWidth = 480;
@@ -295,11 +294,6 @@ public partial class WebView2Client : Form
 
     internal void ShutDown()
     {
-        if (_winEventHook != IntPtr.Zero)
-        {
-            UnhookWinEvent(_winEventHook);
-        }
-
         _coreLoaded = false;
         _webView.Dispose();
     }
@@ -312,7 +306,7 @@ public partial class WebView2Client : Form
             FormBorderStyle = FormBorderStyle.SizableToolWindow;
             TopMost = true;
             Enabled = true;
-            Bounds = new Rectangle(Cursor.Position.X - _classicWidth / 4, Cursor.Position.Y, (int)(_classicWidth / 1.5), (int)(_classicHeight / 1.5));
+            Bounds = new Rectangle(Cursor.Position.X - ClassicWidth / 4, Cursor.Position.Y, (int)(ClassicWidth / 1.5), (int)(ClassicHeight / 1.5));
         }
         else
         {
@@ -320,9 +314,9 @@ public partial class WebView2Client : Form
             TopMost = false;
             Enabled = false;
 
-            Bounds = new Rectangle(_gameWindowCoords.Left, _gameWindowCoords.Top, _classicWidth, _classicHeight);
+            Bounds = new Rectangle(_gameWindowCoordsLeft, _gameWindowCoordsTop, ClassicWidth, ClassicHeight);
 
-            SetWindowPos(this.handle, HWND_BOTTOM, _gameWindowCoords.Left, _gameWindowCoords.Top, _classicWidth, _classicHeight,
+            SetWindowPos(this.handle, HWND_BOTTOM, _gameWindowCoordsLeft, _gameWindowCoordsTop, ClassicWidth, ClassicHeight,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
             Services.Log.Debug("Set width and height to " + Width + "x" + Height);
@@ -511,17 +505,6 @@ public partial class WebView2Client : Form
 									document.querySelector(""div[class*='chatContainer']"").remove()
 									setTimeout(() => document.querySelector(""button[class*='fsChatBtn']"").remove(), 500);
 								}, 4000);
-							}
-							// Default
-							else {
-								//SCRIPTDEFAULT
-								var video = document.querySelector('video');
-								if (video) {
-									video.play();
-									if (video.requestFullscreen) {
-										video.requestFullscreen();
-									}
-								}
 							}
 						})();
 		";

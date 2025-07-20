@@ -534,7 +534,7 @@ public class ControlWindow : Window, IDisposable
 					Vector4 textColor = isPlayer ? new Vector4(1.0f, 0.0f, 0.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f); ;
 					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
 				}
-				else if((isPlayer && _installWarningMessage))
+				else if(isPlayer && _installWarningMessage)
 				{
                     ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
                 }
@@ -603,7 +603,7 @@ public class ControlWindow : Window, IDisposable
 				}
 				ImGui.PopFont();
 
-				if (isTheRunningTV || !urlExists) ImGui.PopStyleColor();
+				if (isTheRunningTV || !urlExists || (isPlayer && _installWarningMessage)) ImGui.PopStyleColor();
 
                 if (ImGui.IsItemHovered())
                 {
@@ -852,7 +852,8 @@ public class ControlWindow : Window, IDisposable
 			_lastMilliSecond = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 			_secondsCounter++;
 			CheckAllTVs();
-		}
+			_plugin.PollWebviewWindow();
+        }
 	}
 
 	private async void ShareTitle(string url)
