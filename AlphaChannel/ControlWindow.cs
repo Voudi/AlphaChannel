@@ -75,6 +75,9 @@ public class ControlWindow : Window, IDisposable
 	public delegate void URLFetchCallback(string result);
 
     private static readonly HttpClient HTTPCLIENT = new HttpClient();
+    private static readonly HttpClient NOREDIRECTHTTPCLIENT = new HttpClient(
+		new HttpClientHandler { AllowAutoRedirect = false }
+	);
 
     public unsafe ControlWindow(Plugin plugin)
         : base("AlphaChannel remote", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
@@ -260,11 +263,13 @@ public class ControlWindow : Window, IDisposable
 			
 				TurnOffTV();
             }
-            _getResourceSyncHook.Disable();
+            if(!_getResourceSyncHook.IsDisposed)
+				_getResourceSyncHook.Disable();
 		}
 		else if (!dutyStarted && !hookEnabled)
         {
-			_getResourceSyncHook.Enable();
+            if (!_getResourceSyncHook.IsDisposed)
+                _getResourceSyncHook.Enable();
 		}
 	}
 
@@ -498,7 +503,7 @@ public class ControlWindow : Window, IDisposable
                     ImGui.PushStyleColor(ImGuiCol.Text, textColor);
 
                     ImGui.PushFont(UiBuilder.IconFont);
-                    if (ImGui.Button((_signalToggleShare ? FontAwesomeIcon.Eye.ToIconString() : FontAwesomeIcon.EyeSlash.ToIconString()) + "##" + item.EntityId))
+                    if (ImGui.Button((_signalToggleShare ? FontAwesomeIcon.Eye.ToIconString() : FontAwesomeIcon.EyeSlash.ToIconString()) + "##eye" + item.EntityId))
                     {
 						if(_canHost)
 						{
@@ -553,7 +558,7 @@ public class ControlWindow : Window, IDisposable
 					: ((isPlayer && _installWarningMessage) ?
 							FontAwesomeIcon.Download.ToIconString()
 						 : FontAwesomeIcon.Play.ToIconString()
-					)) + "##" + item.EntityId))
+					)) + "##play" + item.EntityId))
 				{
 					try
 					{
@@ -628,7 +633,7 @@ public class ControlWindow : Window, IDisposable
                 if (isTheRunningTV)
                 {
                     ImGui.PushFont(UiBuilder.IconFont);
-                    if (ImGui.Button(FontAwesomeIcon.PlayCircle.ToIconString()))
+                    if (ImGui.Button(FontAwesomeIcon.PlayCircle.ToIconString() + "##forceplay" + item.EntityId))
                     {
 						_plugin.Play();
                     }
@@ -646,7 +651,7 @@ public class ControlWindow : Window, IDisposable
                 if (isTheRunningTV)
                 {
                     ImGui.PushFont(UiBuilder.IconFont);
-                    if (ImGui.Button(FontAwesomeIcon.ExpandArrowsAlt.ToIconString()))
+                    if (ImGui.Button(FontAwesomeIcon.ExpandArrowsAlt.ToIconString() + "##expand" + item.EntityId))
                     {
                         _plugin.Fullscreen();
                     }
@@ -663,7 +668,7 @@ public class ControlWindow : Window, IDisposable
 
 				if (isTheRunningTV) {
 					ImGui.PushFont(UiBuilder.IconFont);
-					if (ImGui.Button(FontAwesomeIcon.WindowRestore.ToIconString()))
+					if (ImGui.Button(FontAwesomeIcon.WindowRestore.ToIconString() + "##restore" + item.EntityId))
 					{
 						_plugin.ToggleExpandAlphaWindow();
 					}
@@ -681,7 +686,7 @@ public class ControlWindow : Window, IDisposable
 				if (urlExists || isPlayer)
 				{
                     ImGui.PushFont(UiBuilder.IconFont);
-                    if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##" + item.EntityId))
+                    if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##clipboard" + item.EntityId))
                     {
                         ImGui.SetClipboardText(isPlayer ? (string.IsNullOrEmpty(_inputURL) && isTheRunningTV ? _placeHolderURL : _inputURL) : (url ?? String.Empty));
                     }
@@ -834,6 +839,7 @@ public class ControlWindow : Window, IDisposable
 			{
 				var url = "https://is.gd/" + title.Substring("alpha:".Length);
 				await FetchURLData(url, response => {
+					Services.Log.Debug("New URL: " + url);
 					_currentURLs[entityId] = response;
 					if (_currentToggle == entityId)
 						_plugin.NavigateAlphaWindow(response, currentSharedTextureResourceHandle);
@@ -906,29 +912,24 @@ public class ControlWindow : Window, IDisposable
 
 	private async Task FetchURLData(string url, URLFetchCallback callback)
 	{
-		using (HttpClientHandler handler = new HttpClientHandler())
-		{
-			handler.AllowAutoRedirect = false;
+        try
+        {
+            HttpResponseMessage response = await NOREDIRECTHTTPCLIENT.GetAsync(url);
 
-            try
+            if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400)
             {
-                HttpResponseMessage response = await HTTPCLIENT.GetAsync(url);
-
-                if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400)
+                // Get the Location header value
+                if (response.Headers.Location != null)
                 {
-                    // Get the Location header value
-                    if (response.Headers.Location != null)
-                    {
-                        callback(response.Headers.Location.ToString());
-                        return;
-                    }
+                    callback(response.Headers.Location.ToString());
+                    return;
                 }
-                Services.Log.Debug("Request exception: Shortlink returned 200-OK instead of a 300-redirect, which should happen with Shortlinks");
             }
-            catch (HttpRequestException e)
-            {
-                Services.Log.Debug("Request exception: " + e.Message + e.StackTrace);
-            }
+            Services.Log.Debug("Request exception: Shortlink returned 200-OK instead of a 300-redirect, which should happen with Shortlinks");
+        }
+        catch (HttpRequestException e)
+        {
+            Services.Log.Debug("Request exception: " + e.Message + e.StackTrace);
         }
 	}
 

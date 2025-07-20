@@ -199,6 +199,9 @@ public class Plugin : IDalamudPlugin
     internal void CheckURLHook()
     {
 		if (!IpcProvider.Initialized)
-			IpcProvider.Init(this);
-    }
+		{
+            IpcProvider.Init(this);
+			Services.Log.Error("Hook Initialization failed. Retrying...");
+        }
+	}
 }

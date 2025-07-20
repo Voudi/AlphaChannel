@@ -48,6 +48,7 @@ public static class IpcProvider
 					// Optionally do something after the original action
 				});
 
+				Services.Log.Debug("Successfully registered proxy Action");
 				SetCharacterTitle?.RegisterAction(proxyAction);
 
                 Initialized = true;

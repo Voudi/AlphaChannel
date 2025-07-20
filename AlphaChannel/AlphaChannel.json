@@ -1,9 +1,9 @@
 {
-    "Author":  "Stepp",
+    "Author":  "Voudisteppi",
     "Name":  "AlphaChannel",
     "InternalName":  "AlphaChannel",
-    "AssemblyVersion":  "1.0.20250720.76",
-    "Description":  "Cute TV for cute watch parties.",
+    "AssemblyVersion":  "1.0.20250720.82",
+    "Description":  "Ingame watch parties.",
     "ApplicableVersion":  "any",
     "Tags":  [
                  "browser",
@@ -16,6 +16,7 @@
     "Punchline":  "Ingame TV",
     "Changelog":  "Initial Prototype",
     "AcceptsFeedback":  false,
+    "IconUrl":  "https://gist.githubusercontent.com/Voudi/77c661ec1597925c2856d649a0cfc2d8/raw/icon.png",
     "DownloadLinkInstall":  "https://gist.github.com/Voudi/77c661ec1597925c2856d649a0cfc2d8/raw/AlphaChannel.zip",
     "DownloadLinkUpdate":  "https://gist.github.com/Voudi/77c661ec1597925c2856d649a0cfc2d8/raw/AlphaChannel.zip"
 }

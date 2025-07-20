@@ -5,10 +5,12 @@ git clone https://gist.github.com/Voudi/$GIST.git
 
 cp AlphaChannel.zip $GIST/
 cp pluginmaster.json $GIST/pluginmaster.json
+cp AlphaChannel/images/icon.png $GIST/icon.png
 cd $GIST
 git show-ref 
 git add AlphaChannel.zip
 git add pluginmaster.json
+git add icon.png
 
 git commit -m "Adding Zip to Gist"
  
