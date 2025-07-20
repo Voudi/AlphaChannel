@@ -20,7 +20,6 @@ using System.Numerics;
 using SharpDX.Mathematics.Interop;
 using System.Text.Json;
 using System.Text;
-using Dalamud.Utility;
 using System.Text.Json.Nodes;
 
 public class ControlWindow : Window, IDisposable
@@ -146,22 +145,6 @@ public class ControlWindow : Window, IDisposable
 			return;
         try
         {
-			// OLD CODE, Keeping for now, delete when confirmed new whitelist is working
-			/*string url = "https://pastebin.com/raw/iBatAtHg";
-
-            string content = await HTTPCLIENT.GetStringAsync(url);
-            var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-
-            var phrases = new List<string>(lines);
-            foreach (string phrase in phrases)
-            {
-                if (phrase.Equals(name + " " + world))
-                {
-                    _canHost = true;
-                    break;
-                }
-            }*/
-
 			_canHost = whitelistedNames.Contains(name + " " + world);
         }
 		catch (Exception) { }

@@ -65,7 +65,10 @@ namespace AlphaChannel.GraphicsCapture
 			_captureFramePool = Direct3D11CaptureFramePool.CreateFreeThreaded(_device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 3, _captureItem.Size);
 
 			_captureSession = _captureFramePool.CreateCaptureSession(_captureItem);
-			_captureFramePool.FrameArrived += (pool, e) => Program.Set();
+
+            _captureSession.IsCursorCaptureEnabled = false;
+
+            _captureFramePool.FrameArrived += (pool, e) => Program.Set();
 
 			_captureSession.StartCapture();
 
@@ -83,7 +86,8 @@ namespace AlphaChannel.GraphicsCapture
 					_itemSize = new Point(_captureItem.Size.Width, _captureItem.Size.Height);
 					_captureFramePool = Direct3D11CaptureFramePool.CreateFreeThreaded(_device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 3, _captureItem.Size);
 					_captureSession = _captureFramePool.CreateCaptureSession(_captureItem);
-					_captureFramePool.FrameArrived += (pool, e) => Program.Set();
+                    _captureSession.IsCursorCaptureEnabled = false;
+                    _captureFramePool.FrameArrived += (pool, e) => Program.Set();
 					_captureSession.StartCapture();
 				}
 			}

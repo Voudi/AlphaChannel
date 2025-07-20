@@ -120,7 +120,7 @@ public class Plugin : IDalamudPlugin
             {
                 { "uBlock", _dependencyManager.GetDependencyPathFor("ublock") }
             };
-            _webView2Client = new WebView2Client(-1, _mainWindow, adBlocknames, Path.Combine(_pluginConfigDir, "webview-cache"), url);
+            _webView2Client = new WebView2Client(_mainWindow, adBlocknames, Path.Combine(_pluginConfigDir, "webview-cache"), url);
 			capturestaThread.Start();
 			Application.Run(_webView2Client);
 		});

@@ -1,3 +1,4 @@
+using Dalamud.Hooking;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Render;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
@@ -9,156 +10,233 @@ namespace AlphaChannel.Renderer;
 
 public partial class WebView2Client : Form
 {
-	private readonly WebView2 _webView;
-	public IntPtr handle;
-	public ControlWindow _mainWindow;
-	private readonly int _classicWidth, _classicHeight, _classicLeft, _classicTop;
-	private readonly Dictionary<string, string> _adBlockDirs;
-	private readonly string _cacheDir;
-	private readonly string _initUrl;
-	private bool _coreLoaded = false;
+    private readonly WebView2 _webView;
+    public IntPtr handle;
+    public ControlWindow _mainWindow;
+    private int _classicWidth, _classicHeight;
+    private readonly Dictionary<string, string> _adBlockDirs;
+    private readonly string _cacheDir;
+    private readonly string _initUrl;
+    private bool _coreLoaded = false;
 
-	protected override bool ShowWithoutActivation => true;
 
-	[DllImport("user32.dll", SetLastError = true)]
-	public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern IntPtr SetWindowLong(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
-	[DllImport("user32.dll", CharSet = CharSet.Auto)]
-	public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string? lpszWindow);
+    private const int GWL_HWNDPARENT = -8;
 
-	[DllImport("user32.dll")]
-	public static extern bool SetForegroundWindow(IntPtr hWnd);
+    private const uint SWP_NOACTIVATE = 0x0010;
 
-	private IntPtr _gameWindow = IntPtr.Zero;
+    private static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
 
-	public WebView2Client(int res, ControlWindow mainWindow, Dictionary<string, string> adBlockDirs, string cacheDir, string initUrl)
-	{
-		_mainWindow = mainWindow;
-		_initUrl = initUrl;
-		_adBlockDirs = adBlockDirs;
-		_cacheDir = cacheDir;
+    protected override bool ShowWithoutActivation => true;
 
-		Text = "AlphaChannelWebView2";
-		StartPosition = FormStartPosition.Manual;
-		FormBorderStyle = FormBorderStyle.None;
-		AllowTransparency = false;
-		ShowInTaskbar = false;
-		TopMost = false;
-		Enabled = false;
-		this.FormClosing += ToggleFormClosing;
-		Width = CalculateResolution(res);
-		_classicWidth = Width;
-		Height = (1080 / (1920 / Width) );
-		_classicHeight = Height;
-		Location = new Point(GetRightMostCoord().X - 1, GetRightMostCoord().Y - 1);
-		_classicLeft = Location.X;
-		_classicTop = Location.Y;
-		_topMostTimer = new System.Windows.Forms.Timer();
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
-		//SystemEvents.DisplaySettingsChanged += SystemEvents_DisplaySettingsChanged;
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string? lpszWindow);
 
-		_webView = new WebView2()
-		{
-			Dock = DockStyle.Fill
-		};
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
 
-		_gameWindow = GetGameWindow();
+    [DllImport("user32.dll")]
+    static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax,
+    IntPtr hmodWinEventProc, WinEventDelegate lpfnWinEventProc,
+    uint idProcess, uint idThread, uint dwFlags);
 
-		Init();
-	}
+    delegate void WinEventDelegate(IntPtr hWinEventHook, uint eventType,
+        IntPtr hwnd, int idObject, int idChild, uint dwEventThread, uint dwmsEventTime);
 
-	public static IntPtr GetGameWindow()
-	{
-		var handle = IntPtr.Zero;
-		while (true)
-		{
-			handle = FindWindowEx(IntPtr.Zero, handle, "FFXIVGAME", null);
-			if (handle == IntPtr.Zero)
-				break; //No more windows
+    const uint EVENT_SYSTEM_MINIMIZESTART = 0x0016;
+    const uint EVENT_SYSTEM_MINIMIZEEND = 0x0017;
+    const uint WINEVENT_OUTOFCONTEXT = 0;
 
-			GetWindowThreadProcessId(handle, out var processId);
-			if (processId == Environment.ProcessId) 
-				break; //Found Process Window
-		}
-		return handle;
-	}
+    [DllImport("user32.dll")]
+    static extern bool UnhookWinEvent(IntPtr hWinEventHook);
 
-	private Point GetRightMostCoord()
-	{
-		var left = 0;
-		var top = 0;
-		foreach (Screen screen in Screen.AllScreens)
-		{
-			var screenX = screen.Bounds.X;
-			var screenY = screen.Bounds.Y;
-			var screenWidth = screen.Bounds.Width;
-			var screenHeight = screen.Bounds.Height;
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
 
-			using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
-			{
-				float dpiX = g.DpiX; // Get DPI scaling for X
-				float dpiY = g.DpiY; // Get DPI scaling for Y
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(nint hWnd, out RECT lpRect);
+    private RECT GetWindowRectHelper(nint hWnd)
+    {
+        if (!GetWindowRect(hWnd, out RECT rect))
+            Services.Log.Error("FATAL: Failed to get game window rect!");
+        return rect;
+    }
 
-				float scaleFactorX = dpiX / 96f; // 96 DPI is standard 100%
-				float scaleFactorY = dpiY / 96f;
+    private IntPtr _gameWindow = IntPtr.Zero;
 
-				screenWidth = (int)(screenWidth / scaleFactorX);
-				screenHeight = (int)(screenHeight / scaleFactorY);
-			}
+    private RECT _gameWindowCoords => GetWindowRectHelper(_gameWindow);
 
-			if (screenX + screenWidth > left)
-			{
-				left = screenX + screenWidth;
-				top = screenY + screenHeight;
-			}
-			else if (screenX + screenWidth == left && screenY + screenHeight > top)
-			{
-				top = screenY + screenHeight;
-			}
-		}
+    private readonly IntPtr _winEventHook;
+    public WebView2Client(ControlWindow mainWindow, Dictionary<string, string> adBlockDirs, string cacheDir, string initUrl)
+    {
+        _gameWindow = GetGameWindow();
 
-		return new Point(left, top);
-	}
-	private int CalculateResolution(int res)
-	{
-		var maxWidth = 480; //Start at smallest width 360p
-		foreach (Screen screen in Screen.AllScreens)
-		{
-			maxWidth = screen.Bounds.Width > maxWidth ? Math.Min(screen.Bounds.Width, 1920) : maxWidth;
-		}
-		if (maxWidth >= 480 && maxWidth < 960)
-			maxWidth = 480;
-		if (maxWidth >= 960 && maxWidth < 1920)
-			maxWidth = 960;
-		if (maxWidth >= 1920)
-			maxWidth = 1920;
-		return res == -1 ? maxWidth : res;
-		
-		
-	}
+        WinEventDelegate procDelegate = new WinEventDelegate(WinEventProc);
 
-	private async void Init()
-	{
-		var options = new CoreWebView2EnvironmentOptions()
-		{
-			AreBrowserExtensionsEnabled = true
-		};
-		var environment = CoreWebView2Environment.CreateAsync(null, _cacheDir, options).Result;
-		
-		Controls.Add(_webView);
+        _winEventHook = SetWinEventHook(
+            EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND,
+            IntPtr.Zero, procDelegate,
+            0, 0, WINEVENT_OUTOFCONTEXT);
 
-		_webView.CoreWebView2InitializationCompleted += WebViewCoreWebView2InitializationCompleted;
-		
-		this.handle = Handle;
-		KeepOnTop();
-		//StartTopMostEnforcer();
-		if (_gameWindow != IntPtr.Zero)
-			SetForegroundWindow(_gameWindow);
-		await _webView.EnsureCoreWebView2Async(environment);
-	}
+        _mainWindow = mainWindow;
+        _initUrl = initUrl;
+        _adBlockDirs = adBlockDirs;
+        _cacheDir = cacheDir;
 
-	private void WebViewCoreWebView2InitializationCompleted(object? sender, EventArgs e)
-	{
+        Text = "AlphaChannelWebView2";
+        StartPosition = FormStartPosition.Manual;
+        FormBorderStyle = FormBorderStyle.None;
+        AllowTransparency = false;
+        ShowInTaskbar = false;
+        TopMost = false;
+        Enabled = false;
+        this.FormClosing += ToggleFormClosing;
+
+        _topMostTimer = new System.Windows.Forms.Timer();
+
+        //SystemEvents.DisplaySettingsChanged += SystemEvents_DisplaySettingsChanged;
+
+        _webView = new WebView2()
+        {
+            Dock = DockStyle.Fill
+        };
+
+        Init();
+    }
+    private async void Init()
+    {
+        var options = new CoreWebView2EnvironmentOptions()
+        {
+            AreBrowserExtensionsEnabled = true
+        };
+        var environment = CoreWebView2Environment.CreateAsync(null, _cacheDir, options).Result;
+
+        Controls.Add(_webView);
+
+        _webView.CoreWebView2InitializationCompleted += WebViewCoreWebView2InitializationCompleted;
+
+        this.handle = Handle;
+
+        // Set the main window as the parent
+        SetWindowLong(this.handle, GWL_HWNDPARENT, _gameWindow);
+
+        // Optionally move it behind
+        SetWindowPos(this.handle, HWND_BOTTOM, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+        _classicWidth = CalculateResolution();
+        _classicHeight = (1080 / (1920 / _classicWidth));
+
+        Bounds = new Rectangle(_gameWindowCoords.Left, _gameWindowCoords.Top, _classicWidth, _classicHeight);
+
+        //KeepOnTop();
+        //StartTopMostEnforcer();
+        if (_gameWindow != IntPtr.Zero)
+            SetForegroundWindow(_gameWindow);
+
+        await _webView.EnsureCoreWebView2Async(environment);
+    }
+
+    private void WinEventProc(IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
+    int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
+    {
+        if (hwnd == _gameWindow)
+        {
+            Services.Log.Debug("GAME WINDOW EVENT!" + eventType);
+            if (eventType == EVENT_SYSTEM_MINIMIZESTART)
+            {
+                Services.Log.Debug("GAME WINDOW MINIMIZE!");
+                this.Hide(); // or minimize
+            }
+            else if (eventType == EVENT_SYSTEM_MINIMIZEEND)
+            {
+                Services.Log.Debug("GAME WINDOW MAXIMIZE!");
+                this.Show();
+            }
+        }
+    }
+
+    public static IntPtr GetGameWindow()
+    {
+        var handle = IntPtr.Zero;
+        while (true)
+        {
+            handle = FindWindowEx(IntPtr.Zero, handle, "FFXIVGAME", null);
+            if (handle == IntPtr.Zero)
+                break; //No more windows
+
+            GetWindowThreadProcessId(handle, out var processId);
+            if (processId == Environment.ProcessId)
+                break; //Found Process Window
+        }
+        return handle;
+    }
+
+    private Point GetRightMostCoord()
+    {
+        var left = 0;
+        var top = 0;
+        foreach (Screen screen in Screen.AllScreens)
+        {
+            var screenX = screen.Bounds.X;
+            var screenY = screen.Bounds.Y;
+            var screenWidth = screen.Bounds.Width;
+            var screenHeight = screen.Bounds.Height;
+
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                float dpiX = g.DpiX; // Get DPI scaling for X
+                float dpiY = g.DpiY; // Get DPI scaling for Y
+
+                float scaleFactorX = dpiX / 96f; // 96 DPI is standard 100%
+                float scaleFactorY = dpiY / 96f;
+
+                screenWidth = (int)(screenWidth / scaleFactorX);
+                screenHeight = (int)(screenHeight / scaleFactorY);
+            }
+
+            if (screenX + screenWidth > left)
+            {
+                left = screenX + screenWidth;
+                top = screenY + screenHeight;
+            }
+            else if (screenX + screenWidth == left && screenY + screenHeight > top)
+            {
+                top = screenY + screenHeight;
+            }
+        }
+
+        return new Point(left, top);
+    }
+    private int CalculateResolution()
+    {
+        var maxWidth = 480; //Start at smallest width 360p
+
+        Services.Log.Debug("COORDS: " + _gameWindowCoords.Left + ", " + _gameWindowCoords.Top + ", " + _gameWindowCoords.Right + ", " + _gameWindowCoords.Bottom);
+        maxWidth = Math.Max(480, _gameWindowCoords.Right - _gameWindowCoords.Left);
+        if (maxWidth >= 480 && maxWidth < 960)
+            maxWidth = 480;
+        if (maxWidth >= 960 && maxWidth < 1920)
+            maxWidth = 960;
+        if (maxWidth >= 1920)
+            maxWidth = 1920;
+
+        return maxWidth;
+    }
+
+    private void WebViewCoreWebView2InitializationCompleted(object? sender, EventArgs e)
+    {
         _ = _webView.Invoke(async () =>
         {
             try
@@ -211,95 +289,102 @@ public partial class WebView2Client : Form
             _coreLoaded = true;
 
         });
-		
-		//_webView.CoreWebView2.OpenDevToolsWindow();
-	}
+
+        //_webView.CoreWebView2.OpenDevToolsWindow();
+    }
 
     internal void ShutDown()
-	{
-		_coreLoaded = false;
-		_webView.Dispose();
-	}
+    {
+        if (_winEventHook != IntPtr.Zero)
+        {
+            UnhookWinEvent(_winEventHook);
+        }
 
-	private bool _resized = false;
-	internal void ToggleResize()
-	{
-		if (!_resized)
-		{
-			FormBorderStyle = FormBorderStyle.SizableToolWindow;
-			TopMost = true;
-			Enabled = true;
-			Width = (int)(_classicWidth / 1.5);
-			Height = (int)(_classicHeight / 1.5);
-			Location = new Point(Cursor.Position.X-_classicWidth/4, Cursor.Position.Y);
-		}
-		else
-		{
-			FormBorderStyle = FormBorderStyle.None;
-			Location = new Point(_classicLeft, _classicTop);
-			TopMost = false;
-			Enabled = false;
-			Width = _classicWidth;
-			Height = _classicHeight;
-		}
-		
-		_resized = !_resized;
-	}
+        _coreLoaded = false;
+        _webView.Dispose();
+    }
 
-	protected override void WndProc(ref Message m)
-	{
-		const int WM_NCLBUTTONDBLCLK = 0x00A3; // Double-click on title bar
+    private bool _resized = false;
+    internal void ToggleResize()
+    {
+        if (!_resized)
+        {
+            FormBorderStyle = FormBorderStyle.SizableToolWindow;
+            TopMost = true;
+            Enabled = true;
+            Bounds = new Rectangle(Cursor.Position.X - _classicWidth / 4, Cursor.Position.Y, (int)(_classicWidth / 1.5), (int)(_classicHeight / 1.5));
+        }
+        else
+        {
+            FormBorderStyle = FormBorderStyle.None;
+            TopMost = false;
+            Enabled = false;
 
-		if (m.Msg == WM_NCLBUTTONDBLCLK)
-			return; // Ignore the message, stopping maximize
+            Bounds = new Rectangle(_gameWindowCoords.Left, _gameWindowCoords.Top, _classicWidth, _classicHeight);
 
-		base.WndProc(ref m);
-	}
+            SetWindowPos(this.handle, HWND_BOTTOM, _gameWindowCoords.Left, _gameWindowCoords.Top, _classicWidth, _classicHeight,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
-	private bool _close_flag = false;
-	private void ToggleFormClosing(object? sender, FormClosingEventArgs e)
-	{
-		if(!_close_flag) 
-			ToggleResize();
-		e.Cancel = !_close_flag;
-	}
+            Services.Log.Debug("Set width and height to " + Width + "x" + Height);
+        }
 
-	public void RemoveWindow()
-	{
-		_close_flag = true;
-		Close();
-		ShutDown();
-	}
+        _resized = !_resized;
+    }
 
-	internal void Navigate(string url)
-	{
-		_webView.Invoke(() =>
-		{
-			_webView.Source = new Uri(url);
-			Console.WriteLine("Navigating to URL " + url);
-			return Task.CompletedTask;
-		});
-	}
+    protected override void WndProc(ref Message m)
+    {
+        const int WM_NCLBUTTONDBLCLK = 0x00A3; // Double-click on title bar
 
-	private const int HWND_TOPMOST = -1;
-	private const int SWP_NOSIZE = 0x0001;
-	private const int SWP_NOMOVE = 0x0002;
-	private const int SWP_SHOWWINDOW = 0x0040;
+        if (m.Msg == WM_NCLBUTTONDBLCLK)
+            return; // Ignore the message, stopping maximize
 
-	[DllImport("user32.dll")]
-	private static extern bool SetWindowPos(
-		IntPtr hWnd, IntPtr hWndInsertAfter,
-		int X, int Y, int cx, int cy,
-		uint uFlags
-	);
+        base.WndProc(ref m);
+    }
 
-	private void KeepOnTop()
-	{
-		SetWindowPos(this.Handle, (IntPtr)HWND_TOPMOST, 0, 0, 0, 0,
-			SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-	}
+    private bool _close_flag = false;
+    private void ToggleFormClosing(object? sender, FormClosingEventArgs e)
+    {
+        if (!_close_flag)
+            ToggleResize();
+        e.Cancel = !_close_flag;
+    }
 
-	private readonly System.Windows.Forms.Timer _topMostTimer;
+    public void RemoveWindow()
+    {
+        _close_flag = true;
+        Close();
+        ShutDown();
+    }
+
+    internal void Navigate(string url)
+    {
+        _webView.Invoke(() =>
+        {
+            _webView.Source = new Uri(url);
+            Console.WriteLine("Navigating to URL " + url);
+            return Task.CompletedTask;
+        });
+    }
+
+    private const int HWND_TOPMOST = -1;
+    private const int SWP_NOSIZE = 0x0001;
+    private const int SWP_NOMOVE = 0x0002;
+    private const int SWP_SHOWWINDOW = 0x0040;
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd, IntPtr hWndInsertAfter,
+        int X, int Y, int cx, int cy,
+        uint uFlags
+    );
+
+    private void KeepOnTop()
+    {
+        SetWindowPos(this.Handle, (IntPtr)HWND_TOPMOST, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    }
+
+    private readonly System.Windows.Forms.Timer _topMostTimer;
 
     public void TryPlay()
     {
@@ -380,7 +465,7 @@ public partial class WebView2Client : Form
     }
 
     private void TryFullscreenAndPlay(object? sender, CoreWebView2DOMContentLoadedEventArgs e)
-	{
+    {
         string scriptBoth = @"(function() {
 							var title = document.querySelector(""title"").textContent;
 							// OpenTogether Tube
@@ -442,13 +527,13 @@ public partial class WebView2Client : Form
 		";
 
         _webView.Invoke(async () =>
-		{
-			if(_coreLoaded)
-			{
+        {
+            if (_coreLoaded)
+            {
                 await Task.Delay(1000); //Wait one second for elements to load up
                 await _webView.CoreWebView2.ExecuteScriptAsync(scriptBoth); // Execute the JavaScript in the WebView2 control
             }
         });
-       
-	}
+
+    }
 }
