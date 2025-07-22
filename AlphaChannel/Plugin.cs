@@ -28,8 +28,15 @@ public class Plugin : IDalamudPlugin
 		Application.EnableVisualStyles();
 		Application.SetCompatibleTextRenderingDefault(false);
 
-		// init services
-		pluginInterface.Create<Services>();
+		string title = "AlphaChannel Remote ";
+
+		#if IS_TEST
+			title += pluginInterface.Manifest.TestingAssemblyVersion + " (Test Version)";
+		#endif
+
+
+        // init services
+        pluginInterface.Create<Services>();
 
 		_pluginDir = pluginInterface.AssemblyLocation.DirectoryName ?? "";
 		if (String.IsNullOrEmpty(_pluginDir))
@@ -43,8 +50,10 @@ public class Plugin : IDalamudPlugin
 		_dependencyManager.DependenciesReady += (_, _) => DependenciesReady();
 		_dependencyManager.Initialise();
 
-		// Spin up DX handling from the plugin interface
-		DxHandler.Initialise(Services.PluginInterface);
+       
+
+        // Spin up DX handling from the plugin interface
+        DxHandler.Initialise(Services.PluginInterface);
 
 		// Hook up render hook
 		pluginInterface.UiBuilder.Draw += Render;
@@ -52,7 +61,7 @@ public class Plugin : IDalamudPlugin
 		IpcProvider.Init(this);
 
 		// Create Main Window
-		_mainWindow = new ControlWindow(this);
+		_mainWindow = new ControlWindow(this, title);
 		WindowSystem.AddWindow(_mainWindow);
 
 		pluginInterface.UiBuilder.OpenConfigUi += ToggleMainUI;

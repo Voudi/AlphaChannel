@@ -5,6 +5,7 @@
 		<Copy SourceFiles="$(NuGetPackageRoot)sharpdx\4.2.0\lib\net40\SharpDX.dll" DestinationFolder="$(OutputPath)capture"/>
 		<Copy SourceFiles="$(NuGetPackageRoot)sharpdx.direct3d11\4.2.0\lib\net40\SharpDX.Direct3D11.dll" DestinationFolder="$(OutputPath)capture"/>
 		<Copy SourceFiles="$(NuGetPackageRoot)sharpdx.dxgi\4.2.0\lib\net40\SharpDX.DXGI.dll" DestinationFolder="$(OutputPath)capture"/>
+		<Copy SourceFiles="$(NuGetPackageRoot)sharpdx.direct2d1\4.2.0\lib\net40\SharpDX.Direct2D1.dll" DestinationFolder="$(OutputPath)capture"/>
 		<Copy SourceFiles="$(OutputPath)..\Resources\AlphaChannelTV.pmp" DestinationFolder="$(OutputPath)resources"/>
 	</Target>
 	<Target Name="PackagePlugin" AfterTargets="PrepareOutput" Condition="'$(Configuration)' == 'Release'">

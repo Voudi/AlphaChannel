@@ -79,8 +79,8 @@ public class ControlWindow : Window, IDisposable
 		new HttpClientHandler { AllowAutoRedirect = false }
 	);
 
-    public unsafe ControlWindow(Plugin plugin)
-        : base("AlphaChannel remote", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
+    public unsafe ControlWindow(Plugin plugin, string title)
+        : base(title, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
 
 		SizeConstraints = new WindowSizeConstraints

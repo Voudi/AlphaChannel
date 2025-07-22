@@ -9,6 +9,12 @@ using Windows.Graphics.DirectX.Direct3D11;
 using SharpDX.Direct3D11;
 
 using System.Drawing;
+using SharpDX.DXGI;
+using SharpDX.Direct2D1;
+using SharpDX.Mathematics.Interop;
+using SharpDX;
+using SharpDX.Direct3D;
+using System.Threading;
 
 namespace AlphaChannel.GraphicsCapture
 {
@@ -20,12 +26,28 @@ namespace AlphaChannel.GraphicsCapture
 		private IDirect3DDevice _device;
 		private Point _itemSize;
 		private Texture2D _textureSource;
+        private Texture2D _doubleBuffer; //Technically a 1.5-Buffer in our use-case, since CopyResource() is clean
 
-		public GraphicsCapture(IntPtr sharedHandle)
+        public GraphicsCapture(IntPtr sharedHandle)
         {
             IsCapturing = false;
 			_textureSource = DxHandler.Device?.OpenSharedResource<Texture2D>(sharedHandle);
-		}
+
+            Texture2DDescription texture2dDescription = new Texture2DDescription
+            {
+                Width = 1920,
+                Height = 1080,
+                MipLevels = 1,
+                ArraySize = 1,
+                Format = Format.B8G8R8A8_UNorm,
+                BindFlags = BindFlags.ShaderResource | BindFlags.RenderTarget,
+                CpuAccessFlags = CpuAccessFlags.None,
+                SampleDescription = new SampleDescription(1, 0),
+                Usage = ResourceUsage.Default,
+                OptionFlags = ResourceOptionFlags.None
+            };
+            _doubleBuffer = new Texture2D(DxHandler.Device, texture2dDescription);
+        }
 
         public bool IsCapturing { get; private set; }
 
@@ -61,8 +83,8 @@ namespace AlphaChannel.GraphicsCapture
             Marshal.Release(pUnknown);
 
 			_itemSize = new Point(_captureItem.Size.Width, _captureItem.Size.Height);
-			
-			_captureFramePool = Direct3D11CaptureFramePool.CreateFreeThreaded(_device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 3, _captureItem.Size);
+
+            _captureFramePool = Direct3D11CaptureFramePool.CreateFreeThreaded(_device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 3, _captureItem.Size);
 
 			_captureSession = _captureFramePool.CreateCaptureSession(_captureItem);
 
@@ -77,24 +99,21 @@ namespace AlphaChannel.GraphicsCapture
 		
 		public bool TryRecreateFrame()
 		{
-			try
+			if (_itemSize.X != _captureItem.Size.Width || _itemSize.Y != _captureItem.Size.Height)
 			{
-				if (_itemSize.X != _captureItem.Size.Width || _itemSize.Y != _captureItem.Size.Height)
-				{
-					_captureSession?.Dispose();
-					_captureFramePool?.Dispose();
-					_itemSize = new Point(_captureItem.Size.Width, _captureItem.Size.Height);
-					_captureFramePool = Direct3D11CaptureFramePool.CreateFreeThreaded(_device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 3, _captureItem.Size);
-					_captureSession = _captureFramePool.CreateCaptureSession(_captureItem);
-                    _captureSession.IsCursorCaptureEnabled = false;
-                    _captureFramePool.FrameArrived += (pool, e) => Program.Set();
-					_captureSession.StartCapture();
-				}
-			}
-			catch(ArgumentException)
-			{
-				return false;
-			}
+                _captureSession?.Dispose();
+				_captureFramePool?.Dispose();
+                _itemSize = new Point(_captureItem.Size.Width, _captureItem.Size.Height);
+				_captureFramePool = Direct3D11CaptureFramePool.CreateFreeThreaded(_device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 3, _captureItem.Size);
+				_captureSession = _captureFramePool.CreateCaptureSession(_captureItem);
+                _captureSession.IsCursorCaptureEnabled = false;
+                _captureFramePool.FrameArrived += (pool, e) => Program.Set();
+				_captureSession.StartCapture();
+
+
+                return false;
+            }
+			
 			return true;
 		}
 
@@ -106,9 +125,9 @@ namespace AlphaChannel.GraphicsCapture
 				return false;
 			}
 
-			if (!TryRecreateFrame()) return false;
+			if (!TryRecreateFrame()) return true; //Skip this frame for the sake of capture booting up
 
-			try
+            try
 			{
 				using var frame = _captureFramePool?.TryGetNextFrame();
 
@@ -120,17 +139,10 @@ namespace AlphaChannel.GraphicsCapture
 			
 				using var surfaceTexture = new Texture2D(pResource); // shared resource
 
-				var copyRegion = new ResourceRegion(
-					0,  // X position in source texture
-					0,  // Y position in source texture
-					0,  // Z position (for 3D textures)
-					Math.Min(surfaceTexture.Description.Width, 1920), // X + width of crop region
-					Math.Min(surfaceTexture.Description.Height, 1080),// Y + height of crop region
-					1   // Depth (for 3D textures)
-				);
+                ScaleAndCopy(surfaceTexture, _doubleBuffer);
+                DxHandler.Device.ImmediateContext.CopyResource(_doubleBuffer, _textureSource);
 
-				DxHandler.Device.ImmediateContext.CopySubresourceRegion(surfaceTexture, 0, copyRegion, _textureSource, 0, 0, 0, 0);
-				return true;
+                return true;
 			}
 			catch (Exception ex)
 			{
@@ -165,6 +177,50 @@ namespace AlphaChannel.GraphicsCapture
         private void CaptureItemOnClosed(GraphicsCaptureItem sender, object args)
         {
 			StopCapture();
+        }
+
+        private static readonly object d2dLock = new object();
+        private void ScaleAndCopy(Texture2D source, Texture2D target)
+        {
+            lock (d2dLock)
+            {
+                var d2dContext = DxHandler.Device2DContext;
+
+                using var targetSurface = target.QueryInterface<Surface>();
+                using var sourceSurface = source.QueryInterface<Surface>();
+
+                var sourceBitmapProperties = new BitmapProperties1(
+                    new PixelFormat(Format.B8G8R8A8_UNorm, SharpDX.Direct2D1.AlphaMode.Premultiplied),
+                    96, 96,
+                    BitmapOptions.Target);
+
+                using var targetBitmap = new Bitmap1(d2dContext, targetSurface, sourceBitmapProperties);
+                using var sourceBitmap = new Bitmap1(d2dContext, sourceSurface, sourceBitmapProperties);
+
+                d2dContext.Target = targetBitmap;
+
+                using (var query = new Query(DxHandler.Device, new QueryDescription
+                {
+                    Type = QueryType.Event
+                }))
+                {
+                    // Issue GPU event after GraphicsCapture writes
+                    DxHandler.Device.ImmediateContext.End(query);
+
+                    DxHandler.Device.ImmediateContext.GetData(query); // BLOCK until GPU caught up
+                }
+
+                d2dContext.BeginDraw();
+
+                var destRect = new RawRectangleF(0, 0, target.Description.Width, target.Description.Height);
+                d2dContext.DrawBitmap(sourceBitmap, destRect, 1.0f, BitmapInterpolationMode.Linear);
+
+                var result = d2dContext.TryEndDraw(out _, out _);
+                d2dContext.Target = null;
+
+                if (result.Failure)
+                    throw new SharpDXException(result, $"EndDraw failed: 0x{result.Code:X8}");
+            }
         }
     }
 }

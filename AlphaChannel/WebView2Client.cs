@@ -183,42 +183,6 @@ public partial class WebView2Client : Form
         return handle;
     }
 
-    private Point GetRightMostCoord()
-    {
-        var left = 0;
-        var top = 0;
-        foreach (Screen screen in Screen.AllScreens)
-        {
-            var screenX = screen.Bounds.X;
-            var screenY = screen.Bounds.Y;
-            var screenWidth = screen.Bounds.Width;
-            var screenHeight = screen.Bounds.Height;
-
-            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
-            {
-                float dpiX = g.DpiX; // Get DPI scaling for X
-                float dpiY = g.DpiY; // Get DPI scaling for Y
-
-                float scaleFactorX = dpiX / 96f; // 96 DPI is standard 100%
-                float scaleFactorY = dpiY / 96f;
-
-                screenWidth = (int)(screenWidth / scaleFactorX);
-                screenHeight = (int)(screenHeight / scaleFactorY);
-            }
-
-            if (screenX + screenWidth > left)
-            {
-                left = screenX + screenWidth;
-                top = screenY + screenHeight;
-            }
-            else if (screenX + screenWidth == left && screenY + screenHeight > top)
-            {
-                top = screenY + screenHeight;
-            }
-        }
-
-        return new Point(left, top);
-    }
     private int CalculateResolution()
     {
         var maxWidth = 480; //Start at smallest width 360p

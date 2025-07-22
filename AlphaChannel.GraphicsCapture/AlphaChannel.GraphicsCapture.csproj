@@ -68,15 +68,19 @@
     </PackageReference>
     <PackageReference Include="SharpDX">
       <Version>4.2.0</Version>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="SharpDX.Direct2D1">
+      <Version>4.2.0</Version>
 	  <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
     <PackageReference Include="SharpDX.Direct3D11">
       <Version>4.2.0</Version>
-	  <ExcludeAssets>runtime</ExcludeAssets>
+      <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
     <PackageReference Include="SharpDX.DXGI">
       <Version>4.2.0</Version>
-	  <ExcludeAssets>runtime</ExcludeAssets>
+      <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

@@ -156,9 +156,9 @@ internal class CaptureProcess : IDisposable
 		};
 		process.OutputDataReceived += (_, args) =>
 		{
-			Console.WriteLine($"[Capture]: {args.Data}");
+			Services.Log.Debug($"[Capture]: {args.Data}");
 		};
-		process.ErrorDataReceived += (_, args) => Console.WriteLine($"[CaptureERROR]: {args.Data}");
+		process.ErrorDataReceived += (_, args) => Services.Log.Debug($"[CaptureERROR]: {args.Data}");
 
 		return process;
 	}
