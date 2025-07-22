@@ -179,48 +179,33 @@ namespace AlphaChannel.GraphicsCapture
 			StopCapture();
         }
 
-        private static readonly object d2dLock = new object();
         private void ScaleAndCopy(Texture2D source, Texture2D target)
         {
-            lock (d2dLock)
-            {
-                var d2dContext = DxHandler.Device2DContext;
+            var d2dContext = DxHandler.Device2DContext;
 
-                using var targetSurface = target.QueryInterface<Surface>();
-                using var sourceSurface = source.QueryInterface<Surface>();
+            using var targetSurface = target.QueryInterface<Surface>();
+            using var sourceSurface = source.QueryInterface<Surface>();
 
-                var sourceBitmapProperties = new BitmapProperties1(
-                    new PixelFormat(Format.B8G8R8A8_UNorm, SharpDX.Direct2D1.AlphaMode.Premultiplied),
-                    96, 96,
-                    BitmapOptions.Target);
+            var sourceBitmapProperties = new BitmapProperties1(
+                new PixelFormat(Format.B8G8R8A8_UNorm, SharpDX.Direct2D1.AlphaMode.Premultiplied),
+                96, 96,
+                BitmapOptions.Target);
 
-                using var targetBitmap = new Bitmap1(d2dContext, targetSurface, sourceBitmapProperties);
-                using var sourceBitmap = new Bitmap1(d2dContext, sourceSurface, sourceBitmapProperties);
+            using var targetBitmap = new Bitmap1(d2dContext, targetSurface, sourceBitmapProperties);
+            using var sourceBitmap = new Bitmap1(d2dContext, sourceSurface, sourceBitmapProperties);
 
-                d2dContext.Target = targetBitmap;
+            d2dContext.Target = targetBitmap;
 
-                using (var query = new Query(DxHandler.Device, new QueryDescription
-                {
-                    Type = QueryType.Event
-                }))
-                {
-                    // Issue GPU event after GraphicsCapture writes
-                    DxHandler.Device.ImmediateContext.End(query);
+            d2dContext.BeginDraw();
 
-                    DxHandler.Device.ImmediateContext.GetData(query); // BLOCK until GPU caught up
-                }
+            var destRect = new RawRectangleF(0, 0, target.Description.Width, target.Description.Height);
+            d2dContext.DrawBitmap(sourceBitmap, destRect, 1.0f, BitmapInterpolationMode.Linear);
 
-                d2dContext.BeginDraw();
+            var result = d2dContext.TryEndDraw(out _, out _);
+            d2dContext.Target = null;
 
-                var destRect = new RawRectangleF(0, 0, target.Description.Width, target.Description.Height);
-                d2dContext.DrawBitmap(sourceBitmap, destRect, 1.0f, BitmapInterpolationMode.Linear);
-
-                var result = d2dContext.TryEndDraw(out _, out _);
-                d2dContext.Target = null;
-
-                if (result.Failure)
-                    throw new SharpDXException(result, $"EndDraw failed: 0x{result.Code:X8}");
-            }
+            if (result.Failure)
+                throw new SharpDXException(result, $"EndDraw failed: 0x{result.Code:X8}");
         }
     }
 }
