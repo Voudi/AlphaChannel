@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Dalamud.NET.Sdk/12.0.2">
 	
 	<PropertyGroup>
+		<IsTestVersion>true</IsTestVersion>
 		<BuildDate>$([System.DateTime]::Now.ToString('yyyyMMdd'))</BuildDate>
 	</PropertyGroup>
 	
@@ -14,6 +15,9 @@
 	</PropertyGroup>
 	<ItemGroup>
 	  <Content Include="AlphaChannel.json" />
+	</ItemGroup>
+	<ItemGroup>
+	  <None Include="DalamudPackager.targets" />
 	</ItemGroup>
 	
 	<ItemGroup>
@@ -49,10 +53,17 @@
 	<ItemGroup>
 	  <Compile Update="WebView2Client.cs" />
 	</ItemGroup>
-	
+
 	<Target Name="UpdateJsonWithBuildNumber" AfterTargets="Build">
-		<!--<Exec Command="powershell -ExecutionPolicy Bypass -Command &quot;$json = Get-Content &quot;AlphaChannel.json&quot; | ConvertFrom-Json; $json.AssemblyVersion = '$(PluginVersion)'; $json | ConvertTo-Json -Depth 10 | Set-Content &quot;AlphaChannel.json&quot;&quot;" />-->
-		<Exec Command="powershell -ExecutionPolicy Bypass -Command &quot;$j=Get-Content 'AlphaChannel.json' | ConvertFrom-Json; $v=$j.AssemblyVersion.Split('.'); $v[2]='$(BuildDate)'; $v[3]=([int]$v[3]+1); $j.AssemblyVersion=$v -join '.'; $j | ConvertTo-Json -Depth 10 | Set-Content 'AlphaChannel.json'&quot;" />
+		<CallTarget Targets="UpdateForTestVersion" Condition="'$(IsTestVersion)' == 'true'" />
+		<CallTarget Targets="UpdateForNormalVersion" Condition="'$(IsTestVersion)' != 'true'" />
 	</Target>
 	
+	<Target Name="UpdateForTestVersion">
+			<Exec Condition=" '$(IsTestVersion)' == 'true'" Command="powershell -ExecutionPolicy Bypass -Command &quot;$j=Get-Content 'AlphaChannel.json' | ConvertFrom-Json; $v=$j.TestingAssemblyVersion.Split('.'); $v[2]='$(BuildDate)'; $v[3]=([int]$v[3]+1); $j.TestingAssemblyVersion=$v -join '.'; $j | ConvertTo-Json -Depth 10 | Set-Content 'AlphaChannel.json'&quot;" />
+	</Target>
+	
+	<Target Name="UpdateForNormalVersion">
+		<Exec Condition=" '$(IsTestVersion)' == 'false'" Command="powershell -ExecutionPolicy Bypass -Command &quot;$j=Get-Content 'AlphaChannel.json' | ConvertFrom-Json; $v=$j.AssemblyVersion.Split('.'); $v[2]='$(BuildDate)'; $v[3]=([int]$v[3]+1); $j.AssemblyVersion=$v -join '.'; $j | ConvertTo-Json -Depth 10 | Set-Content 'AlphaChannel.json'&quot;" />
+	</Target>
 </Project>
