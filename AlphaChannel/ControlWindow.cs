@@ -764,7 +764,7 @@ public class ControlWindow : Window, IDisposable
 			else
 			{
 				if(isPlayer)
-					ImGui.Text(" Notice: You have not summoned your carbuncle.");
+					ImGui.Text(" Notice: You have not summoned your (standard blue) carbuncle.");
             }
 		}
         if (!_canHost && _checkedCanHost)
