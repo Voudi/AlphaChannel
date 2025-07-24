@@ -6,6 +6,7 @@ using AlphaChannel.Renderer;
 using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
+using Microsoft.Web.WebView2.WinForms;
 
 namespace AlphaChannel;
 
@@ -125,10 +126,13 @@ public class Plugin : IDalamudPlugin
 		Thread staThread = new(() => {
 			Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
-			var adBlocknames = new Dictionary<string, string>
-            {
-                { "uBlock", _dependencyManager.GetDependencyPathFor("ublock") }
-            };
+			var adBlocknames = new Dictionary<string, string>();
+			if (_mainWindow.HasAdBlock)
+			{
+				adBlocknames.Add("uBlock", _dependencyManager.GetDependencyPathFor("ublock"));
+
+            }
+
             _webView2Client = new WebView2Client(_mainWindow, adBlocknames, Path.Combine(_pluginConfigDir, "webview-cache"), url);
 			capturestaThread.Start();
 			Application.Run(_webView2Client);
@@ -164,9 +168,12 @@ public class Plugin : IDalamudPlugin
 	public void TerminateAlphaWindow()
 	{
 		_webViewInitialized = false;
-		_webView2Client?.RemoveWindow();
+        Task.Run(() =>
+        {
+            _webView2Client?.RemoveWindow();
 
-		_capture?.Dispose();
+            _capture?.Dispose();
+        });
 	}
 
 	public void NavigateAlphaWindow(string url, string sharedHandle)

@@ -424,6 +424,8 @@ public partial class WebView2Client : Form
 
     private void TryFullscreenAndPlay(object? sender, CoreWebView2DOMContentLoadedEventArgs e)
     {
+        _mainWindow.OnDOMContentLoaded();
+
         string scriptBoth = @"(function() {
 							var title = document.querySelector(""title"").textContent;
 							// OpenTogether Tube

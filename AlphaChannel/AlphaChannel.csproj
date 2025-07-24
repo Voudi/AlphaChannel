@@ -1,10 +1,12 @@
 ﻿<Project Sdk="Dalamud.NET.Sdk/12.0.2">
 	
 	<PropertyGroup>
-		<IsTestVersion>false</IsTestVersion>
+		<IsTestVersion>true</IsTestVersion>
 		<BuildDate>$([System.DateTime]::Now.ToString('yyyyMMdd'))</BuildDate>
 	</PropertyGroup>
-	
+	<PropertyGroup>
+		<LangVersion>latest</LangVersion>
+	</PropertyGroup>
 	<PropertyGroup>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Configurations>Release</Configurations>

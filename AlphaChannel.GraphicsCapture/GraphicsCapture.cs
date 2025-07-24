@@ -99,22 +99,28 @@ namespace AlphaChannel.GraphicsCapture
 		
 		public bool TryRecreateFrame()
 		{
-			if (_itemSize.X != _captureItem.Size.Width || _itemSize.Y != _captureItem.Size.Height)
-			{
-                _captureSession?.Dispose();
-				_captureFramePool?.Dispose();
-                _itemSize = new Point(_captureItem.Size.Width, _captureItem.Size.Height);
-				_captureFramePool = Direct3D11CaptureFramePool.CreateFreeThreaded(_device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 3, _captureItem.Size);
-				_captureSession = _captureFramePool.CreateCaptureSession(_captureItem);
-                _captureSession.IsCursorCaptureEnabled = false;
-                _captureFramePool.FrameArrived += (pool, e) => Program.Set();
-				_captureSession.StartCapture();
+            try
+            {
 
+                if (_itemSize.X != _captureItem.Size.Width || _itemSize.Y != _captureItem.Size.Height)
+                {
+                    _captureSession?.Dispose();
+                    _captureFramePool?.Dispose();
+                    _itemSize = new Point(_captureItem.Size.Width, _captureItem.Size.Height);
+                    _captureFramePool = Direct3D11CaptureFramePool.CreateFreeThreaded(_device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 3, _captureItem.Size);
+                    _captureSession = _captureFramePool.CreateCaptureSession(_captureItem);
+                    _captureSession.IsCursorCaptureEnabled = false;
+                    _captureFramePool.FrameArrived += (pool, e) => Program.Set();
+                    _captureSession.StartCapture();
+                    return true;
+                }
 
                 return false;
+
             }
-			
-			return true;
+            catch (Exception) {
+                return true;
+            }
 		}
 
         public bool PollFrame()
@@ -125,7 +131,7 @@ namespace AlphaChannel.GraphicsCapture
 				return false;
 			}
 
-			if (!TryRecreateFrame()) return true; //Skip this frame for the sake of capture booting up
+			if (TryRecreateFrame()) return true; //Skip this frame for the sake of capture booting up
 
             try
 			{
