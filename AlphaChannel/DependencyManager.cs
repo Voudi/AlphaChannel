@@ -1,5 +1,5 @@
 using Dalamud.Interface.Textures;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Net;

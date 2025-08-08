@@ -3,7 +3,7 @@ using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Interface.Windowing;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using SharpDX.Direct3D11;
 using SharpDX.Direct3D;
 using Dalamud.Game.ClientState.Objects.Types;

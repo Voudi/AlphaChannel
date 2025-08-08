@@ -1,7 +1,7 @@
 ﻿using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using AlphaChannel.Renderer;
 using System.Diagnostics;
 using System.Numerics;
