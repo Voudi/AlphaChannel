@@ -444,7 +444,7 @@ public partial class WebView2Client : Form
 								document.querySelector(""div[class='player'] > iframe"").src = url.replace(""autoplay=0"", ""autoplay=1"");
 
 								const style = document.createElement('style');
-								style.innerHTML = "".fullscreen .video-container .video-subcontainer .video-controls-wrapper { display: none; }"";
+								style.innerHTML = "".fullscreen .video-container .video-subcontainer .video-controls-wrapper { display: none; } .toast-list { display: none !important; } .no-video>span{ display: none !important; } .in-video-chat { display: none !important}"";
 								document.head.appendChild(style);
 							// Hyperbeam
 							} else if (title.includes(""Hyperbeam"")) {

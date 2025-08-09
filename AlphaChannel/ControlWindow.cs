@@ -3,7 +3,7 @@ using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Interface.Windowing;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using SharpDX.Direct3D11;
 using SharpDX.Direct3D;
 using Dalamud.Game.ClientState.Objects.Types;
@@ -31,7 +31,9 @@ public class ControlWindow : Window, IDisposable
 	private readonly Dictionary<uint, String> _currentURLs = []; //Playerpointer, URL
 	private readonly Dictionary<uint, String> _currentTitles = []; //Playerpointer, Title
 	private Texture2D _currentSharedTexture;
-	public string currentSharedTextureResourceHandle;
+	private bool _textureLoaded = false;
+	private bool _domContentloaded = false;
+    public string currentSharedTextureResourceHandle;
 	private uint _currentToggle; //Playerpointer (whether TV toggled or not)
 	private uint _currentActivatedTV = 0; //Playerpointer (whether TV toggled or not)
 	private uint _currentAudioProcess;
@@ -45,7 +47,12 @@ public class ControlWindow : Window, IDisposable
     private bool _installWarningMessage = false;
 	private bool _installingMod = false;
     private bool _installedmod = false;
-	private bool _syncPlayToggle = false;
+	private bool _syncPlayToggle = true;
+	private bool isSyncPlay(Uri url)
+	{
+        return _syncPlayToggle && !url.Host.EndsWith(".opentogethertube.com", StringComparison.OrdinalIgnoreCase)
+                 && !string.Equals(url.Host, "opentogethertube.com", StringComparison.OrdinalIgnoreCase);
+	}
 	private bool _adBlockToggle = true;
 
     //Render Vars
@@ -90,8 +97,8 @@ public class ControlWindow : Window, IDisposable
 
         SizeConstraints = new WindowSizeConstraints
 		{
-			MinimumSize = new Vector2(225, 100),
-			MaximumSize = new Vector2(1920, 500)
+			MinimumSize = new Vector2(325, 200),
+			MaximumSize = new Vector2(1800, 900)
 		};
 
 		this._plugin = plugin;
@@ -143,6 +150,9 @@ public class ControlWindow : Window, IDisposable
         }
 
         _ = CheckTVMod();
+
+        if (!_OTTApi.initialized)
+            _OTTApi.Login();
     }
 
     private bool _canHost = false;
@@ -329,7 +339,7 @@ public class ControlWindow : Window, IDisposable
 			{
 				_currentToggle = entityId;
 
-				if (isSyncRefresh)
+				if (isSyncRefresh && isSyncPlay(url))
 					ForceSyncPlay(); //Just send a sync play signal if sync is on, no need to refresh webpage
 				else
 					_plugin.NavigateAlphaWindow(url.ToString(), currentSharedTextureResourceHandle);
@@ -357,7 +367,9 @@ public class ControlWindow : Window, IDisposable
 		//Assume no TV is running
 		_currentActivatedTV = 0;
         //Reset audio counter to try to fetch the process for the first 5 seconds only
-        _secondsCounter = 0; 
+        _secondsCounter = 0;
+        //Assume site hasnt been loaded up
+        _domContentloaded = false;
     }
 
 	private void TurnOffTV()
@@ -384,7 +396,7 @@ public class ControlWindow : Window, IDisposable
 		if (!result)
 			return false;
 
-		if (_syncPlayToggle)
+		if (isSyncPlay(url))
 		{
             _OTTApi.CheckURL(formattedUrl);
 
@@ -464,7 +476,13 @@ public class ControlWindow : Window, IDisposable
             ImGui.Text("AlphaChannel is deactivated during a duty.");
 			return;
         }
-		if(_currentActivatedTV != 0 && volumeEnabled)
+        if (_currentToggle != 0 && !_textureLoaded && _domContentloaded)
+        {
+            ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " Unable to fetch the TV screen! Has the plugin been deactivated during play? Please make sure to: ");
+            ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 1. Restart the game client with the plugin turned on");
+            ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 2. Make sure the AlphaChannelTV Penumbra mod is enabled");
+        }
+        if (_currentActivatedTV != 0 && volumeEnabled)
 		{
 			if(ImGui.SliderFloat("Volume", ref volume, 0.0f, 1.0f))
 			{
@@ -493,9 +511,9 @@ public class ControlWindow : Window, IDisposable
             }
             return;
         }
-		ImGui.Text(" Host Settings:");
+        ImGui.Text(" Host Settings:");
 
-        Vector4 textColor = !_canHost ? new Vector4(0.5f, 0.5f, 0.5f, 1.0f) : (_signalToggleShare ? new Vector4(0.0f, 0.0f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
+        Vector4 textColor = !_canHost ? new Vector4(0.5f, 0.5f, 0.5f, 1.0f) : (_signalToggleShare ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
         ImGui.PushStyleColor(ImGuiCol.Text, textColor);
 
         ImGui.PushFont(UiBuilder.IconFont);
@@ -526,13 +544,14 @@ public class ControlWindow : Window, IDisposable
         if (ImGui.IsItemHovered())
         {
             ImGui.BeginTooltip();
-            ImGui.Text(!_canHost ? "Unable to share TV. You have not been whitelisted." : (_signalToggleShare ? "Currently sharing TV with others, press to stop sharing URL" : "Currently not sharing TV with others, press to share URL"));
+            ImGui.Text(!_canHost && _checkedCanHost ? "Unable to share TV. You have not been whitelisted." : (!_canHost ? "Please summon your TV first."  : (_signalToggleShare ? "Currently sharing TV with others, press to stop sharing URL." : "Currently not sharing TV with others, press to share URL.")));
             ImGui.EndTooltip();
         }
 
+        
         ImGui.SameLine();
 
-        textColor = _syncPlayToggle ? new Vector4(0.8f, 0.8f, 0.3f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
+        textColor = _syncPlayToggle ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
         ImGui.PushStyleColor(ImGuiCol.Text, textColor);
 
         ImGui.PushFont(UiBuilder.IconFont);
@@ -560,10 +579,11 @@ public class ControlWindow : Window, IDisposable
         if (ImGui.IsItemHovered())
         {
             ImGui.BeginTooltip();
-            ImGui.Text(_syncPlayToggle ? "Deactivate Synced Play" : "Activate Synced Play");
+            ImGui.Text(_syncPlayToggle ? "Currently using video sync. Click to deactivate." : "Currently not using video sync. Click to activate.");
             ImGui.EndTooltip();
         }
 
+		/*
         ImGui.SameLine();
 
         textColor = _adBlockToggle ? new Vector4(0.8f, 0.8f, 0.3f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
@@ -584,10 +604,11 @@ public class ControlWindow : Window, IDisposable
             ImGui.Text(_adBlockToggle ? "Deactivate Adblock" : "Activate Adblock");
             ImGui.EndTooltip();
         }
+		*/
 
         ImGui.Text(" Available TVs:");
 
-		foreach (var item in _playerList)
+        foreach (var item in _playerList)
 		{
             var isPlayer = item.EntityId == Services.ClientState?.LocalPlayer?.EntityId;
             
@@ -860,9 +881,6 @@ public class ControlWindow : Window, IDisposable
 				if(isPlayer)
 					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: You have not summoned your standard blue carbuncle.");
             }
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
         }
         if (!_canHost && _checkedCanHost)
         {
@@ -919,6 +937,8 @@ public class ControlWindow : Window, IDisposable
 						ShaderResourceView view = new(DxHandler.Device, _currentSharedTexture, new ShaderResourceViewDescription { Format = _currentSharedTexture.Description.Format, Dimension = ShaderResourceViewDimension.Texture2D, Texture2D = { MipLevels = _currentSharedTexture.Description.MipLevels } });
 						thisPtr->D3D11Texture2D = (void*)_currentSharedTexture.NativePointer;
 						thisPtr->D3D11ShaderResourceView = (void*)view.NativePointer;
+
+						_textureLoaded = true;
 					}
 
 					return tex;
@@ -1037,7 +1057,7 @@ public class ControlWindow : Window, IDisposable
                     return;
                 }
             }
-            Services.Log.Debug("Request exception: Shortlink returned 200-OK instead of a 300-redirect, which should happen with Shortlinks");
+            Services.Log.Debug("Request exception: Shortlink returned 200-OK instead of a 300-redirect, which should not happen with Shortlinks");
         }
         catch (HttpRequestException e)
         {
@@ -1144,19 +1164,24 @@ public class ControlWindow : Window, IDisposable
 
     public void OnDOMContentLoaded()
     {
-        if (_syncPlayToggle)
+		_domContentloaded = true;
+        if (_syncPlayToggle && _currentToggle == Services.ClientState?.LocalPlayer?.EntityId)
         {
 			//Wait for own browser to join after DOM Load, doesnt matter if it fails
 			Task.Delay(1000);
-            _OTTApi.ForcePlayVideo();
+            _OTTApi.ForcePlayVideo(); 
+			Task.Delay(1000);
+            _plugin.Play();
         }
     }
 
     private void ForceSyncPlay()
     {
-        if (_syncPlayToggle)
+        if (_syncPlayToggle && _currentToggle == Services.ClientState?.LocalPlayer?.EntityId)
         {
             _OTTApi.ForcePlayVideo();
+			Task.Delay(1000);
+            _plugin.Play();
         }
     }
 }

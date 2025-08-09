@@ -145,6 +145,7 @@ public class OTTApi
     }
 
     private record Queue(string action, List<Requests.Video> queue);
+    private record Stop(string action, bool isPlaying, int playbackPosition, string? currentSource, int playbackSpeed);
     private void OnQueueReceived(string response)
     {
         try
@@ -162,6 +163,22 @@ public class OTTApi
         }
         catch (Exception)
         {
+            try
+            {
+                var message = JsonSerializer.Deserialize<Stop>(response, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (message?.action == "sync" && message?.isPlaying == false)
+                {
+                    Services.Log.Debug("Received Stop!");
+                }
+
+                //Ignore Received Msg
+            }
+            catch (Exception)
+            {
+
+                //Ignore Received Msg
+            }
             //Ignore Received Msg
         }
     }

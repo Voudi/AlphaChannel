@@ -1,7 +1,7 @@
 ﻿using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using AlphaChannel.Renderer;
 using System.Diagnostics;
 using System.Numerics;
@@ -17,7 +17,6 @@ public class Plugin : IDalamudPlugin
 
 	private const string _commandRemote = "/aremote";
 
-	private readonly DependencyManager _dependencyManager;
 	private readonly string _pluginConfigDir;
 	private readonly string _pluginDir;
 
@@ -47,12 +46,6 @@ public class Plugin : IDalamudPlugin
 
 		_pluginConfigDir = pluginInterface.GetPluginConfigDirectory();
 
-		_dependencyManager = new DependencyManager(_pluginDir, _pluginConfigDir);
-		_dependencyManager.DependenciesReady += (_, _) => DependenciesReady();
-		_dependencyManager.Initialise();
-
-       
-
         // Spin up DX handling from the plugin interface
         DxHandler.Initialise(Services.PluginInterface);
 
@@ -67,7 +60,9 @@ public class Plugin : IDalamudPlugin
 
 		pluginInterface.UiBuilder.OpenConfigUi += ToggleMainUI;
 		pluginInterface.UiBuilder.OpenMainUi += ToggleMainUI;
-	}
+
+        Services.CommandManager.AddHandler(_commandRemote, new CommandInfo(HandleCommand) { HelpMessage = "Toggles the Remote Window", ShowInHelp = true });
+    }
 
 
 	// Required for LivePluginLoader support
@@ -85,15 +80,6 @@ public class Plugin : IDalamudPlugin
 		_mainWindow?.Dispose();
 
 		DxHandler.Shutdown();
-
-		_dependencyManager.Dispose();
-	}
-
-	private void DependenciesReady()
-	{
-
-		// Hook up the remote command
-		Services.CommandManager.AddHandler(_commandRemote, new CommandInfo(HandleCommand) { HelpMessage = "Toggles the Remote Window", ShowInHelp = true });
 	}
 
 	public bool _webViewInitialized = false;
@@ -127,11 +113,6 @@ public class Plugin : IDalamudPlugin
 			Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
 			var adBlocknames = new Dictionary<string, string>();
-			if (_mainWindow.HasAdBlock)
-			{
-				adBlocknames.Add("uBlock", _dependencyManager.GetDependencyPathFor("ublock"));
-
-            }
 
             _webView2Client = new WebView2Client(_mainWindow, adBlocknames, Path.Combine(_pluginConfigDir, "webview-cache"), url);
 			capturestaThread.Start();
