@@ -2,8 +2,8 @@
     "Author":  "Voudisteppi",
     "Name":  "AlphaChannel",
     "InternalName":  "AlphaChannel",
-    "AssemblyVersion":  "1.1.20250722.125",
-    "TestingAssemblyVersion":  "1.1.20250809.180",
+    "AssemblyVersion":  "1.1.20251219.205",
+    "TestingAssemblyVersion":  "1.1.20250809.181",
     "Description":  "Ingame watch parties.",
     "ApplicableVersion":  "any",
     "Tags":  [
@@ -13,8 +13,8 @@
                  "cinema",
                  "watch party"
              ],
-    "DalamudApiLevel":  13,
-    "TestingDalamudApiLevel":  13,
+    "DalamudApiLevel":  14,
+    "TestingDalamudApiLevel":  14,
     "IsTestingExclusive":  "False",
     "Punchline":  "Ingame TV",
     "Changelog":  "Initial Prototype",

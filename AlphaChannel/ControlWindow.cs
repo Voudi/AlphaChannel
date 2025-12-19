@@ -26,7 +26,7 @@ public class ControlWindow : Window, IDisposable
 {
    
     private const string URL_WHITELIST = "https://pastebin.com/raw/iBatAtHg";
-	List<string> whitelistedNames = new List<string>();
+	List<string?> whitelistedNames = new List<string?>();
     private readonly Dictionary<uint, IntPtr> _currentOwners = []; //Playerpointer, CompanionDrawpointer
 	private readonly Dictionary<uint, String> _currentURLs = []; //Playerpointer, URL
 	private readonly Dictionary<uint, String> _currentTitles = []; //Playerpointer, Title
@@ -45,13 +45,14 @@ public class ControlWindow : Window, IDisposable
     private bool _modexists = false;
     private bool _modenabled = false;
     private bool _installWarningMessage = false;
-	private bool _installingMod = false;
     private bool _installedmod = false;
 	private bool _syncPlayToggle = true;
-	private bool isSyncPlay(Uri url)
+	private bool isSyncPlay(Uri? url)
 	{
-        return _syncPlayToggle && !url.Host.EndsWith(".opentogethertube.com", StringComparison.OrdinalIgnoreCase)
-                 && !string.Equals(url.Host, "opentogethertube.com", StringComparison.OrdinalIgnoreCase);
+		if (url != null)
+			return _syncPlayToggle && !url.Host.EndsWith(".opentogethertube.com", StringComparison.OrdinalIgnoreCase)
+					 && !string.Equals(url.Host, "opentogethertube.com", StringComparison.OrdinalIgnoreCase);
+		else return false;
 	}
 	private bool _adBlockToggle = true;
 
@@ -136,16 +137,16 @@ public class ControlWindow : Window, IDisposable
         // Request completed (if not null, if null, already handled by the catch above)
         if (apiTask.Result != null)
         {
-            JsonNode jsonResult = JsonSerializer.Deserialize<JsonNode>(apiTask.Result);
-            if (jsonResult.GetType() != typeof(JsonArray))
+            JsonNode? jsonResult = JsonSerializer.Deserialize<JsonNode>(apiTask.Result);
+            if (jsonResult?.GetType() != typeof(JsonArray))
             {
                 // This is not the result we are expecting, most likely an API error (Triggered with editing the key and making it fail on purpose
-                Services.Log.Error("Mismatched result from Discord API while retrieving the whitelist. Content : " + jsonResult.ToString());
+                Services.Log.Error("Mismatched result from Discord API while retrieving the whitelist. Content : " + jsonResult?.ToString());
             }
             else
             {
                 // We have the list
-                whitelistedNames = ((JsonArray)jsonResult).Select(message => message["content"].ToString()).ToList();
+                whitelistedNames = ((JsonArray)jsonResult).Select(message => message?["content"]?.ToString()).ToList();
             }
         }
 
@@ -157,7 +158,7 @@ public class ControlWindow : Window, IDisposable
 
     private bool _canHost = false;
     private bool _checkedCanHost = false;
-    private async void CheckIfCanHost(string name, string world)
+    private async void CheckIfCanHost(string? name, string? world)
 	{
 		if (_checkedCanHost)
 			return;
@@ -189,7 +190,8 @@ public class ControlWindow : Window, IDisposable
 
 	private unsafe void CheckAllTVs()
 	{
-        var playerId = Services.ClientState?.LocalPlayer?.EntityId;
+		
+        var playerId = Services.Objects.LocalPlayer?.EntityId;
 
         bool hookEnabled = _getResourceSyncHook.IsEnabled && !_getResourceSyncHook.IsDisposed;
         if (hookEnabled) //Only check for stuff while the hook is activated, which is outside from duties
@@ -199,7 +201,7 @@ public class ControlWindow : Window, IDisposable
 			CheckTitles();
 		
 			List<uint> visitedTvs = new List<uint>();
-			_playerList = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => (x.EntityId == Services.ClientState?.LocalPlayer?.EntityId) ? "@" : x.Name.TextValue);
+			_playerList = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => (x.EntityId == Services.Objects.LocalPlayer?.EntityId) ? "@" : x.Name.TextValue);
 
 			var showWarningMessage = false;
 			foreach (var item in Services.Objects.Where(x => x is IBattleNpc))
@@ -218,7 +220,7 @@ public class ControlWindow : Window, IDisposable
 								var tvDraw = (CharacterBase*)character->DrawObject;
 								var ownerId = character->CompanionOwnerId;
 								if (playerId == ownerId)
-									CheckIfCanHost(Services.ClientState?.LocalPlayer?.Name.TextValue, Services.ClientState?.LocalPlayer?.HomeWorld.Value.Name.ToString());
+									CheckIfCanHost(Services.Objects.LocalPlayer?.Name.TextValue, Services.Objects.LocalPlayer?.HomeWorld.Value.Name.ToString());
 								if (tvDraw->Models[0] is not null)
 									if (tvDraw->Models[0]->MaterialCount >= 1)
 										if (tvDraw->Models[0]->Materials[0] is not null)
@@ -307,7 +309,7 @@ public class ControlWindow : Window, IDisposable
 		
 		if (_currentToggle == ownerId) //This TV is supposed to be active...
 		{
-			var playeraddr = Services.ClientState?.LocalPlayer?.Address;
+			var playeraddr = Services.Objects.LocalPlayer?.Address;
 			if (_currentActivatedTV != _currentToggle) //...But it's not active
 			{
 				_currentActivatedTV = ownerId;
@@ -331,7 +333,7 @@ public class ControlWindow : Window, IDisposable
 
 	private void TurnOnTV(uint entityId, bool isSyncRefresh)
 	{
-		var player = Services.ClientState?.LocalPlayer;
+		var player = Services.Objects.LocalPlayer;
 		var isPlayer = entityId == player?.EntityId;
 		if (isPlayer)
 		{
@@ -461,7 +463,6 @@ public class ControlWindow : Window, IDisposable
             Services.Log.Debug("Error:" + ex.Message);
 
         }
-        _installingMod = false;
     }
 
 	private bool _isFocused = false;
@@ -469,7 +470,7 @@ public class ControlWindow : Window, IDisposable
 	private IEnumerable<IGameObject> _playerList = [];
 	public override void Draw()
 	{
-		var playerIsRunningTV = _currentToggle == Services.ClientState?.LocalPlayer?.EntityId;
+		var playerIsRunningTV = _currentToggle == Services.Objects.LocalPlayer?.EntityId;
 
         if (Services.DutyState.IsDutyStarted)
 		{
@@ -610,7 +611,7 @@ public class ControlWindow : Window, IDisposable
 
         foreach (var item in _playerList)
 		{
-            var isPlayer = item.EntityId == Services.ClientState?.LocalPlayer?.EntityId;
+            var isPlayer = item.EntityId == Services.Objects.LocalPlayer?.EntityId;
             
 			if(isPlayer && _installWarningMessage && _modenabled)
 			{
@@ -952,7 +953,7 @@ public class ControlWindow : Window, IDisposable
 	
 	internal async void UpdateTitle(uint entityId, string title)
 	{
-		if (entityId == Services.ClientState?.LocalPlayer?.EntityId) return;
+		if (entityId == Services.Objects.LocalPlayer?.EntityId) return;
 		if (!_currentTitles.TryGetValue(entityId, out var oldTitle) || oldTitle != title)
 		{
 			_currentTitles[entityId] = title;
@@ -1165,19 +1166,13 @@ public class ControlWindow : Window, IDisposable
     public void OnDOMContentLoaded()
     {
 		_domContentloaded = true;
-        if (_syncPlayToggle && _currentToggle == Services.ClientState?.LocalPlayer?.EntityId)
-        {
-			//Wait for own browser to join after DOM Load, doesnt matter if it fails
-			Task.Delay(1000);
-            _OTTApi.ForcePlayVideo(); 
-			Task.Delay(1000);
-            _plugin.Play();
-        }
+        Task.Delay(1000);
+        ForceSyncPlay();
     }
 
     private void ForceSyncPlay()
     {
-        if (_syncPlayToggle && _currentToggle == Services.ClientState?.LocalPlayer?.EntityId)
+        if (_syncPlayToggle)
         {
             _OTTApi.ForcePlayVideo();
 			Task.Delay(1000);

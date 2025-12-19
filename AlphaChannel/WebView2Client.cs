@@ -204,6 +204,12 @@ public partial class WebView2Client : Form
         {
             try
             {
+                _webView.CoreWebView2.Settings.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.5993.90 Safari/537.36";
+                _webView.CoreWebView2.Settings.IsStatusBarEnabled = true;
+                _webView.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = true;
+                _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
+                _webView.CoreWebView2.Settings.IsWebMessageEnabled = true;
+
                 var extensions = await _webView.CoreWebView2.Profile.GetBrowserExtensionsAsync();
                 foreach (var adblock in _adBlockDirs)
                 {
@@ -241,7 +247,7 @@ public partial class WebView2Client : Form
                 _mainWindow?.AddSubProcess(processId.Value);
             }
 
-            _webView.CoreWebView2.DOMContentLoaded += TryFullscreenAndPlay;
+            _webView?.CoreWebView2.DOMContentLoaded += TryFullscreenAndPlay;
 
             if (_webView != null)
             {
@@ -424,8 +430,6 @@ public partial class WebView2Client : Form
 
     private void TryFullscreenAndPlay(object? sender, CoreWebView2DOMContentLoadedEventArgs e)
     {
-        _mainWindow.OnDOMContentLoaded();
-
         string scriptBoth = @"(function() {
 							var title = document.querySelector(""title"").textContent;
 							// OpenTogether Tube
@@ -481,6 +485,7 @@ public partial class WebView2Client : Form
             {
                 await Task.Delay(1000); //Wait one second for elements to load up
                 await _webView.CoreWebView2.ExecuteScriptAsync(scriptBoth); // Execute the JavaScript in the WebView2 control
+                _mainWindow.OnDOMContentLoaded();
             }
         });
 

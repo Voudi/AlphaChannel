@@ -1,7 +1,6 @@
-﻿<Project Sdk="Dalamud.NET.Sdk/13.0.0">
-	
+﻿<Project Sdk="Dalamud.NET.Sdk/14.0.0">
 	<PropertyGroup>
-		<IsTestVersion>true</IsTestVersion>
+		<IsTestVersion>false</IsTestVersion>
 		<BuildDate>$([System.DateTime]::Now.ToString('yyyyMMdd'))</BuildDate>
 	</PropertyGroup>
 	<PropertyGroup>
@@ -15,20 +14,7 @@
 		<OutputPath>..\out</OutputPath>
 		<UseWindowsForms>true</UseWindowsForms>
 	</PropertyGroup>
-	<ItemGroup>
-	  <Content Include="AlphaChannel.json" />
-	</ItemGroup>
-	<ItemGroup>
-	  <None Include="DalamudPackager.targets" />
-	</ItemGroup>
 	
-	<ItemGroup>
-		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3179.45" />
-		<PackageReference Include="NAudio.Core" Version="2.2.1" />
-		<PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
-		<PackageReference Include="System.Management" Version="9.0.4" />
-	</ItemGroup>
-
 	<Target Name="RemoveUnnecessaryWebView2References" AfterTargets="ResolvePackageDependenciesForBuild">
 		<ItemGroup>
 			<ReferenceToBeRemoved Include="@(Reference)" Condition="'%(Reference.FileName)' == 'Microsoft.Web.WebView2.WinForms' And '$(UseWindowsForms)' != 'true'" />
@@ -38,22 +24,29 @@
 	</Target>
 	
 	<ItemGroup>
-		<Reference Include="SharpDX">
-			<HintPath>$(DalamudLibPath)SharpDX.dll</HintPath>
-			<Private>False</Private>
-		</Reference>
-		<Reference Include="SharpDX.DXGI">
-			<HintPath>$(DalamudLibPath)SharpDX.DXGI.dll</HintPath>
-			<Private>False</Private>
-		</Reference>
-		<Reference Include="SharpDX.Direct3D11">
-			<HintPath>$(DalamudLibPath)SharpDX.Direct3D11.dll</HintPath>
-			<Private>False</Private>
-		</Reference>
+	  <Content Include="AlphaChannel.json" />
+	</ItemGroup>
+	<ItemGroup>
+	  <None Include="DalamudPackager.targets" />
 	</ItemGroup>
 	
 	<ItemGroup>
+		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3650.58" />
+		<PackageReference Include="NAudio.Core" Version="2.2.1" />
+		<PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+		<PackageReference Include="SharpDX" Version="4.2.0" />
+		<PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
+		<PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
+		<PackageReference Include="System.Management" Version="10.0.1" />
+	</ItemGroup>
+
+	<ItemGroup>
 	  <Compile Update="WebView2Client.cs" />
+	</ItemGroup>
+	
+	<ItemGroup>
+	  <PackageReference Update="DalamudPackager" Version="14.0.1" />
+	  <PackageReference Update="DotNet.ReproducibleBuilds" Version="1.2.39" />
 	</ItemGroup>
 
 	<Target Name="UpdateJsonWithBuildNumber" AfterTargets="Build">
@@ -68,6 +61,10 @@
 	<Target Name="UpdateForNormalVersion">
 		<Exec Condition=" '$(IsTestVersion)' == 'false'" Command="powershell -ExecutionPolicy Bypass -Command &quot;$j=Get-Content 'AlphaChannel.json' | ConvertFrom-Json; $v=$j.AssemblyVersion.Split('.'); $v[2]='$(BuildDate)'; $v[3]=([int]$v[3]+1); $j.AssemblyVersion=$v -join '.'; $j | ConvertTo-Json -Depth 10 | Set-Content 'AlphaChannel.json'&quot;" />
 	</Target>
+	
+	<PropertyGroup Label="Globals">
+	  <WebView2UseWinRT>False</WebView2UseWinRT>
+	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(IsTestVersion)' == 'true'">
 		<DefineConstants>IS_TEST</DefineConstants>

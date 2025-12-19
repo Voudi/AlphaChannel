@@ -12,7 +12,7 @@ internal static class DxHandler
 
 	public static void Initialise(IDalamudPluginInterface pluginInterface)
 	{
-		Device = pluginInterface.UiBuilder.Device;
+		Device = new D3D11.Device(pluginInterface.UiBuilder.DeviceHandle);
 		//Device = new D3D11.Device(SharpDX.Direct3D.DriverType.Hardware, D3D11.DeviceCreationFlags.BgraSupport | D3D11.DeviceCreationFlags.Debug);
 
 		// Grab the window handle, we'll use this for setting up our wndproc hook
