@@ -56,43 +56,54 @@ public class OTTApi
         _video = null;
         _videoURL = url;
 
-        var PreviewAdd = await Requests.PreviewAdd.Execute(_httpClient, url);
-        if (PreviewAdd != null && PreviewAdd.Success)
-        {
-            _video = PreviewAdd.Result.First();
-            Services.Log.Debug("Success! Video is " + _video.title);
+        try { 
+            var PreviewAdd = await Requests.PreviewAdd.Execute(_httpClient, url);
+            if (PreviewAdd != null && PreviewAdd.Success)
+            {
+                _video = PreviewAdd.Result.First();
+                Services.Log.Debug("Success! Video is " + _video.title);
+                _checkingURL = false;
+                return;
+            }
         }
-        else
-        {
-            Services.Log.Debug("Check failed...");
-            _checkFailed = true;
-            await Task.Delay(1000);
-        }
+        catch (Exception)
+        {}
+        Services.Log.Debug("Check failed...");
+        _checkFailed = true;
+        await Task.Delay(1000);
         _checkingURL = false;
     }
 
 	public async void Login()
 	{
-        var Auth = await Requests.Auth.Execute(_httpClient);
-		if (Auth != null) {
-            _token = Auth.Token;
+        try
+        {
+            var Auth = await Requests.Auth.Execute(_httpClient);
+            if (Auth != null)
+            {
+                _token = Auth.Token;
+            }
+            else
+            {
+                return;
+            }
+        
+            var GenerateRoom = await Requests.Generate.Execute(_httpClient, _token);
+            if (GenerateRoom != null && GenerateRoom.Success)
+            {
+                _room = GenerateRoom.Room;
+                Services.Log.Debug("OTT Room Generated: " + _room);
+            }
+            else
+            {
+                return;
+            }
         }
-		else
-		{
-			//Throw Exception!
-		}
+        catch (Exception)
+        {
+            return;
+        }
         initialized = true;
-
-        var GenerateRoom = await Requests.Generate.Execute(_httpClient, _token);
-        if (GenerateRoom != null && GenerateRoom.Success)
-        {
-            _room = GenerateRoom.Room;
-            Services.Log.Debug("OTT Room Generated: " + _room);
-        }
-        else
-        {
-            //Throw Exception!
-        }
 
         _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _token);
 
@@ -216,13 +227,13 @@ public class OTTApi
 
             public static async Task<Auth?> Execute(HttpClient client)
             {
-				var result = await client.GetAsync(OTTApi.URL + URL);
+                var result = await client.GetAsync(OTTApi.URL + URL);
 
-				if (result.IsSuccessStatusCode)
-				{
+                if (result.IsSuccessStatusCode)
+                {
                     return await result.Content.ReadFromJsonAsync<Auth>();
-				}
-
+                }
+				
 				return null;
             }
         }
