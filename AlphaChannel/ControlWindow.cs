@@ -118,6 +118,7 @@ public class ControlWindow : Window, IDisposable
 		_getResourceSyncHook.Enable();
 
         // Retrieve whitelist
+		/*
         HttpClient client = new HttpClient();
         client.DefaultRequestHeaders.Add("Authorization", "Bot MTM5NTg5NjIzMzk5MzcwMzYzNg.GmAEen.SPgodjzUP_wPQhZ5wnlJWIudMNPuhV--7lVCDI");
         var apiTask = Task.Run(() => {
@@ -149,6 +150,7 @@ public class ControlWindow : Window, IDisposable
                 whitelistedNames = ((JsonArray)jsonResult).Select(message => message?["content"]?.ToString()).ToList();
             }
         }
+		*/
 
         _ = CheckTVMod();
 
@@ -156,8 +158,8 @@ public class ControlWindow : Window, IDisposable
             _OTTApi.Login();
     }
 
-    private bool _canHost = false;
-    private bool _checkedCanHost = false;
+    private bool _canHost = true;
+    private bool _checkedCanHost = true;
     private async void CheckIfCanHost(string? name, string? world)
 	{
 		if (_checkedCanHost)
