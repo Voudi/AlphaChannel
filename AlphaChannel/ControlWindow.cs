@@ -499,6 +499,10 @@ public class ControlWindow : Window, IDisposable
             {
                 InstallTVMod();
             }
+            if (ImGui.Button("Ignore this error (for custom configurations)"))
+            {
+				_modexists = true;
+            }
             return;
         }
         if (!_modenabled && _installedmod)
