@@ -1,4 +1,5 @@
-﻿using System;
+﻿#if WINDOWS
+using System;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
 
@@ -198,7 +199,7 @@ namespace AlphaChannel.GraphicsCapture
                 BitmapOptions.Target);
 
             using var targetBitmap = new Bitmap1(d2dContext, targetSurface, sourceBitmapProperties);
-            using var sourceBitmap = new Bitmap1(d2dContext, sourceSurface, sourceBitmapProperties);
+            using var sourGraphicsCaptureceBitmap = new Bitmap1(d2dContext, sourceSurface, sourceBitmapProperties);
 
             d2dContext.Target = targetBitmap;
 
@@ -215,3 +216,4 @@ namespace AlphaChannel.GraphicsCapture
         }
     }
 }
+#endif

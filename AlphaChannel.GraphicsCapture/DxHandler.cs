@@ -1,4 +1,5 @@
-﻿using SharpDX.DXGI;
+﻿#if WINDOWS
+using SharpDX.DXGI;
 using System;
 using System.Linq;
 using D3D11 = SharpDX.Direct3D11;
@@ -61,3 +62,4 @@ internal static class DxHandler
 		Device?.Dispose();
 	}
 }
+#endif
