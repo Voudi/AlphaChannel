@@ -8,7 +8,6 @@ cp pluginmaster.json $GIST/pluginmaster.json
 cd $GIST
 git show-ref 
 git add pluginmaster.json
-
 git commit -m "Adding Zip to Gist"
  
 git push origin main
@@ -19,12 +18,14 @@ git clone https://gist.github.com/Voudi/$GISTTEST.git
 
 cp AlphaChannel.zip $GISTTEST/AlphaChannel.zip
 cd $GISTTEST
+NEW_COMMIT=$(git commit-tree HEAD^{tree} -m "Reset Gist to latest state")
+git reset --hard $NEW_COMMIT
 git show-ref 
 git add AlphaChannel.zip
 
 git commit -m "Adding Zip to Gist"
  
-git push origin main
+git push --force origin main
 
 cd ..
 
