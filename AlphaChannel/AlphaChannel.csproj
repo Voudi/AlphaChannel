@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Dalamud.NET.Sdk/14.0.0">
 	<PropertyGroup>
-		<IsTestVersion>false</IsTestVersion>
+		<IsTestVersion>true</IsTestVersion>
 		<BuildDate>$([System.DateTime]::Now.ToString('yyyyMMdd'))</BuildDate>
 	</PropertyGroup>
 	<PropertyGroup>
@@ -59,7 +59,7 @@
 			<!-- Windows -->
 			<Exec Condition=" '$(IsTestVersion)' == 'true' and '$(OS)' == 'Windows_NT'" Command="powershell -ExecutionPolicy Bypass -Command &quot;$j=Get-Content 'AlphaChannel.json' | ConvertFrom-Json; $v=$j.TestingAssemblyVersion.Split('.'); $v[2]='$(BuildDate)'; $v[3]=([int]$v[3]+1); $j.TestingAssemblyVersion=$v -join '.'; $j | ConvertTo-Json -Depth 10 | Set-Content 'AlphaChannel.json'&quot;" />
 			<!-- Linux -->
-			<Exec Condition=" '$(IsTestVersion)' == 'false' and '$(OS)' != 'Windows_NT'" Command="pwsh -NoProfile -ExecutionPolicy Bypass -Command &quot;\$j=Get-Content 'AlphaChannel.json' | ConvertFrom-Json; \$v=\$j.TestingAssemblyVersion.Split('.'); \$v[2]='$(BuildDate)'; \$v[3]=([int]\$v[3]+1); \$j.TestingAssemblyVersion=\$v -join '.'; \$j | ConvertTo-Json -Depth 10 | Set-Content 'AlphaChannel.json'&quot;" />
+			<Exec Condition=" '$(IsTestVersion)' == 'true' and '$(OS)' != 'Windows_NT'" Command="pwsh -NoProfile -ExecutionPolicy Bypass -Command &quot;\$j=Get-Content 'AlphaChannel.json' | ConvertFrom-Json; \$v=\$j.TestingAssemblyVersion.Split('.'); \$v[2]='$(BuildDate)'; \$v[3]=([int]\$v[3]+1); \$j.TestingAssemblyVersion=\$v -join '.'; \$j | ConvertTo-Json -Depth 10 | Set-Content 'AlphaChannel.json'&quot;" />
 	</Target>
 	
 	<Target Name="UpdateForNormalVersion">
