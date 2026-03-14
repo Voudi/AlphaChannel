@@ -6,7 +6,6 @@ namespace AlphaChannel.GraphicsCapture
 {
     public class Program
     {
-		#if WINDOWS
 		private static Thread _parentWatchThread;
 		private static EventWaitHandle _waitHandle;
 		private static GraphicsCapture _capture;
@@ -17,11 +16,9 @@ namespace AlphaChannel.GraphicsCapture
 		{
 			_frameWaitHandle?.Set();
 		}
-		#endif
 		[STAThread]
         public static void Main(string[] rawArgs)
         {
-			#if WINDOWS
 			if (!long.TryParse(rawArgs[0], System.Globalization.NumberStyles.HexNumber, null, out var luid) || !long.TryParse(rawArgs[1], System.Globalization.NumberStyles.HexNumber, null, out var wHandle) || !Int32.TryParse(rawArgs[2], out var pid) || !ulong.TryParse(rawArgs[4], out var tHandle))
 			{
 				Console.Out.WriteLine("CANNOT CAPTURE WINDOW, TERMINATING!");
@@ -53,9 +50,7 @@ namespace AlphaChannel.GraphicsCapture
 					return;
 				}
 			}
-			#endif
 		}
-		#if WINDOWS
 		private static void WatchParentStatus(object pid)
 		{
 			if(pid == null)
@@ -79,6 +74,5 @@ namespace AlphaChannel.GraphicsCapture
 				}
 			}
 		}
-		#endif
 	}
 }

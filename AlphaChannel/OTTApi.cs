@@ -2,6 +2,7 @@ using AlphaChannel;
 using Newtonsoft.Json.Bson;
 using System.Net.Http.Json;
 using System.Net.WebSockets;
+using System.Runtime.Remoting;
 using System.Security.Policy;
 using System.Text;
 using System.Text.Json;
@@ -149,7 +150,7 @@ public class OTTApi
         {
             var result = await _wsocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
             string response = Encoding.UTF8.GetString(buffer, 0, result.Count);
-            Services.Log.Debug("RECEIVED: " + response);
+            Services.Log.Debug("OTT API RECEIVED: " + response);
             if (response != null)
                 OnQueueReceived(response);
         }
@@ -167,7 +168,7 @@ public class OTTApi
             {
                 queue.Clear();
                 queue.AddRange(message.queue);
-                Services.Log.Debug("Received Queue with " + message.queue.Count + " videos!");
+                Services.Log.Debug("Received OTT Queue with " + message.queue.Count + " videos!");
             }
 
             //Ignore Received Msg
@@ -180,7 +181,7 @@ public class OTTApi
 
                 if (message?.action == "sync" && message?.isPlaying == false)
                 {
-                    Services.Log.Debug("Received Stop!");
+                    Services.Log.Debug("Received OTT API Stop Signal!");
                 }
 
                 //Ignore Received Msg
@@ -233,7 +234,11 @@ public class OTTApi
                 {
                     return await result.Content.ReadFromJsonAsync<Auth>();
                 }
-				
+				else
+                {
+                    Services.Log.Error("Failed Generating OTT API Grant!");
+                }
+
 				return null;
             }
         }
@@ -252,6 +257,10 @@ public class OTTApi
                     var x = await result.Content.ReadFromJsonAsync<Generate>();
                     return x;
                 }
+                else
+                {
+                    Services.Log.Error("Failed Generating OTT API Room!");
+                }
 
                 return null;
             }
@@ -264,12 +273,16 @@ public class OTTApi
             public static async Task<PreviewAdd?> Execute(HttpClient client, string url)
             {
                 url = Uri.EscapeDataString(url);
-
+                Services.Log.Debug("Preview OTT API: " + OTTApi.URL + URL + "?input=" + url);
                 var result = await client.GetAsync(OTTApi.URL + URL + "?input=" + url);
 
                 if (result.IsSuccessStatusCode)
                 {
                     return await result.Content.ReadFromJsonAsync<PreviewAdd>();
+                }
+                else
+                {
+                    Services.Log.Error("Failed Adding Preview to OTT API Room!");
                 }
 
                 return null;
@@ -300,6 +313,10 @@ public class OTTApi
                 {
                     return await result.Content.ReadFromJsonAsync<RemoveVideo>();
                 }
+                else
+                {
+                    Services.Log.Error("Failed Removing Video from OTT API Room!");
+                }
 
                 return null;
             }
@@ -328,6 +345,10 @@ public class OTTApi
                 if (result.IsSuccessStatusCode)
                 {
                     return await result.Content.ReadFromJsonAsync<AddVideo>();
+                }
+                else
+                {
+                    Services.Log.Error("Failed Adding Video from OTT API Room!");
                 }
 
                 return null;
