@@ -21,6 +21,7 @@ using SharpDX.Mathematics.Interop;
 using System.Text.Json;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Drawing.Design;
 
 public class ControlWindow : Window, IDisposable
 {
@@ -91,6 +92,10 @@ public class ControlWindow : Window, IDisposable
 	public bool HasAdBlock => _adBlockToggle;
 
 	private readonly OTTApi _OTTApi;
+
+	private bool hasWebViewRuntime;
+	private bool toggleInstallWebViewRuntime = false;
+
     public unsafe ControlWindow(Plugin plugin, string title)
         : base(title, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
@@ -156,6 +161,10 @@ public class ControlWindow : Window, IDisposable
 
         if (!_OTTApi.initialized)
             _OTTApi.Login();
+
+		Services.Log.Debug("Is running under Wine? " + Compatibility.IsRunningUnderWine());
+		Services.Log.Debug("Webview2 Installed? " + Compatibility.IsWebView2Installed());
+		hasWebViewRuntime = !Compatibility.IsRunningUnderWine() || Compatibility.IsWebView2Installed();
     }
 
     private bool _canHost = true;
@@ -518,6 +527,16 @@ public class ControlWindow : Window, IDisposable
             }
             return;
         }
+		if (!hasWebViewRuntime)
+		{
+			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please install the Webview2 runtime before continuing:");
+			if (ImGui.Button("Step 3 - Install"))
+            {
+				toggleInstallWebViewRuntime = true;
+				hasWebViewRuntime = true;
+            }
+			return;
+		}
         ImGui.Text(" Host Settings:");
 
         Vector4 textColor = !_canHost ? new Vector4(0.5f, 0.5f, 0.5f, 1.0f) : (_signalToggleShare ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
@@ -1002,6 +1021,12 @@ public class ControlWindow : Window, IDisposable
 			_plugin.PollWebviewWindow();
 
             _plugin.CheckURLHook();
+
+			if (toggleInstallWebViewRuntime)
+			{
+				toggleInstallWebViewRuntime = false;
+                Compatibility.InstallWebView2();
+			}
         }
 	}
 

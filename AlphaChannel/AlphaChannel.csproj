@@ -1,6 +1,6 @@
-﻿<Project Sdk="Dalamud.NET.Sdk/14.0.0">
+﻿<Project Sdk="Dalamud.NET.Sdk/15.0.0">
 	<PropertyGroup>
-		<IsTestVersion>true</IsTestVersion>
+		<IsTestVersion>false</IsTestVersion>
 		<BuildDate>$([System.DateTime]::Now.ToString('yyyyMMdd'))</BuildDate>
 	</PropertyGroup>
 	<PropertyGroup>
@@ -32,13 +32,13 @@
 	</ItemGroup>
 	
 	<ItemGroup>
-		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3650.58" />
-		<PackageReference Include="NAudio.Core" Version="2.2.1" />
-		<PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3912.50" />
+		<PackageReference Include="NAudio.Core" Version="2.3.0" />
+		<PackageReference Include="NAudio.Wasapi" Version="2.3.0" />
 		<PackageReference Include="SharpDX" Version="4.2.0" />
 		<PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
 		<PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
-		<PackageReference Include="System.Management" Version="10.0.1" />
+		<PackageReference Include="System.Management" Version="10.0.7" />
 	</ItemGroup>
 
 	<ItemGroup>
