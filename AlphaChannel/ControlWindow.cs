@@ -933,19 +933,19 @@ public class ControlWindow : Window, IDisposable
 	private Hook<Texture.Delegates.InitializeContents> _textureOnLoadHook;
 
 	private const string TEXPath = "chara/monster/m7002/obj/body/b0001/vfx/texture/screentex.atex";
-	private unsafe ResourceHandle* GetResourceSyncDetour(ResourceManager* thisPtr, ResourceCategory* category, uint* type, uint* hash, CStringPointer path, void* unknown)
+	private unsafe ResourceHandle* GetResourceSyncDetour(ResourceManager* thisPtr, ResourceCategory* category, uint* type, uint* hash, CStringPointer path, void* unknown, void* unkDebugPtr, uint unkDebugInt)
 	{
 		if(path.ToString().Contains(TEXPath))
 		{
 			_textureOnLoadHook.Enable();
-			var ret = _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown);
+			var ret = _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown, unkDebugPtr, unkDebugInt);
 			_textureOnLoadHook.Disable();
 			
 			return ret;
 		}
 		else
 		{
-			return _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown);
+			return _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown, unkDebugPtr, unkDebugInt);
 		}
 	}
 

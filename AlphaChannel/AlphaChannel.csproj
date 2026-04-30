@@ -44,11 +44,6 @@
 	<ItemGroup>
 	  <Compile Update="WebView2Client.cs" />
 	</ItemGroup>
-	
-	<ItemGroup>
-	  <PackageReference Update="DalamudPackager" Version="14.0.1" />
-	  <PackageReference Update="DotNet.ReproducibleBuilds" Version="1.2.39" />
-	</ItemGroup>
 
 	<Target Name="UpdateJsonWithBuildNumber" AfterTargets="Build">
 		<CallTarget Targets="UpdateForTestVersion" Condition="'$(IsTestVersion)' == 'true'" />
