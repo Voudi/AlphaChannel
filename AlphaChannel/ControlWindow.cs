@@ -20,13 +20,9 @@ using System.Numerics;
 using SharpDX.Mathematics.Interop;
 using System.Text.Json;
 using System.Text;
-using System.Text.Json.Nodes;
-using System.Drawing.Design;
 
 public class ControlWindow : Window, IDisposable
 {
-   
-    private const string URL_WHITELIST = "https://pastebin.com/raw/iBatAtHg";
 	List<string?> whitelistedNames = new List<string?>();
     private readonly Dictionary<uint, IntPtr> _currentOwners = []; //Playerpointer, CompanionDrawpointer
 	private readonly Dictionary<uint, String> _currentURLs = []; //Playerpointer, URL
@@ -93,7 +89,10 @@ public class ControlWindow : Window, IDisposable
 
 	private readonly OTTApi _OTTApi;
 
+	private bool isRunningUnderWine;
 	private bool hasWebViewRuntime;
+	private bool hasMPVInstalled;
+	private bool hasYTDLPInstalled;
 	private bool toggleInstallWebViewRuntime = false;
 
     public unsafe ControlWindow(Plugin plugin, string title)
@@ -164,21 +163,10 @@ public class ControlWindow : Window, IDisposable
 
 		Services.Log.Debug("Is running under Wine? " + Compatibility.IsRunningUnderWine());
 		Services.Log.Debug("Webview2 Installed? " + Compatibility.IsWebView2Installed());
-		hasWebViewRuntime = !Compatibility.IsRunningUnderWine() || Compatibility.IsWebView2Installed();
-    }
-
-    private bool _canHost = true;
-    private bool _checkedCanHost = true;
-    private async void CheckIfCanHost(string? name, string? world)
-	{
-		if (_checkedCanHost)
-			return;
-        try
-        {
-			_canHost = whitelistedNames.Contains(name + " " + world);
-        }
-		catch (Exception) { }
-        _checkedCanHost = true;
+		isRunningUnderWine = Compatibility.IsRunningUnderWine();
+		hasWebViewRuntime = !isRunningUnderWine || Compatibility.IsWebView2Installed();
+		hasMPVInstalled = Compatibility.MPVExists();
+		hasYTDLPInstalled = Compatibility.YTDLPExists();
     }
 
     public void ClearTexture()
@@ -230,8 +218,6 @@ public class ControlWindow : Window, IDisposable
 							{
 								var tvDraw = (CharacterBase*)character->DrawObject;
 								var ownerId = character->CompanionOwnerId;
-								if (playerId == ownerId)
-									CheckIfCanHost(Services.Objects.LocalPlayer?.Name.TextValue, Services.Objects.LocalPlayer?.HomeWorld.Value.Name.ToString());
 								if (tvDraw->Models[0] is not null)
 									if (tvDraw->Models[0]->MaterialCount >= 1)
 										if (tvDraw->Models[0]->Materials[0] is not null)
@@ -272,10 +258,6 @@ public class ControlWindow : Window, IDisposable
 					if(playerId == ownerId)
 						Services.CommandManager?.ProcessCommand("/honorific force clear"); //In case Players EntityId changed due to sudden teleport
 					TurnOffTV();
-				}
-				if (playerId == ownerId && !_canHost)
-				{
-					_checkedCanHost = false; //Retry
 				}
 				_currentOwners.Remove(ownerId);
 			});
@@ -527,41 +509,59 @@ public class ControlWindow : Window, IDisposable
             }
             return;
         }
-		if (!hasWebViewRuntime)
+		if (!hasWebViewRuntime && !isRunningUnderWine)
 		{
 			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please install the Webview2 runtime before continuing:");
 			if (ImGui.Button("Step 3 - Install"))
             {
+				Compatibility.InstallWebView2();
 				toggleInstallWebViewRuntime = true;
+				hasWebViewRuntime = true;
+            }
+			if (ImGui.Button("Ignore this error (for custom configurations)"))
+            {
 				hasWebViewRuntime = true;
             }
 			return;
 		}
+		if(isRunningUnderWine && !hasMPVInstalled)
+		{
+			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " MPV is required to use AlphaChannel under Wine.");
+			if (ImGui.Button("Ignore this error (for custom configurations)"))
+            {
+				hasMPVInstalled = true;
+            }
+		}
+		if(isRunningUnderWine && !hasYTDLPInstalled)
+		{
+			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " YTDLP is required to use AlphaChannel under Wine.");
+			if (ImGui.Button("Ignore this error (for custom configurations)"))
+            {
+				hasYTDLPInstalled = true;
+            }
+		}
         ImGui.Text(" Host Settings:");
 
-        Vector4 textColor = !_canHost ? new Vector4(0.5f, 0.5f, 0.5f, 1.0f) : (_signalToggleShare ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
+        Vector4 textColor = _signalToggleShare ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
         ImGui.PushStyleColor(ImGuiCol.Text, textColor);
 
         ImGui.PushFont(UiBuilder.IconFont);
         if (ImGui.Button((_signalToggleShare ? FontAwesomeIcon.EyeSlash.ToIconString() : FontAwesomeIcon.Eye.ToIconString()) + "##eye"))
         {
-            if (_canHost)
-            {
-                _signalToggleShare = !_signalToggleShare;
-				if(playerIsRunningTV)
+			_signalToggleShare = !_signalToggleShare;
+			if(playerIsRunningTV)
+			{
+				if (_signalToggleShare)
 				{
-                    if (_signalToggleShare)
-                    {
-                        //Reapply sharing
-                        _signalShareTitle = true;
-                    }
-                    else
-                    {
-                        _signalShareTitle = false;
-                        Services.CommandManager?.ProcessCommand("/honorific force clear");
-                    }
-                }
-            }
+					//Reapply sharing
+					_signalShareTitle = true;
+				}
+				else
+				{
+					_signalShareTitle = false;
+					Services.CommandManager?.ProcessCommand("/honorific force clear");
+				}
+			}
         }
         ImGui.PopFont();
 
@@ -570,11 +570,10 @@ public class ControlWindow : Window, IDisposable
         if (ImGui.IsItemHovered())
         {
             ImGui.BeginTooltip();
-            ImGui.Text(!_canHost && _checkedCanHost ? "Unable to share TV. You have not been whitelisted." : (!_canHost ? "Please summon your TV first."  : (_signalToggleShare ? "Currently sharing TV with others, press to stop sharing URL." : "Currently not sharing TV with others, press to share URL.")));
+            ImGui.Text(_signalToggleShare ? "Currently sharing URL with others, press to stop sharing." : "Currently not sharing URL with others, press to share URL.");
             ImGui.EndTooltip();
         }
 
-        
         ImGui.SameLine();
 
         textColor = _syncPlayToggle ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
@@ -907,13 +906,6 @@ public class ControlWindow : Window, IDisposable
 				if(isPlayer)
 					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: You have not summoned your standard blue carbuncle.");
             }
-        }
-        if (!_canHost && _checkedCanHost)
-        {
-            ImGui.Text("");
-            ImGui.Text(" Notice:");
-			ImGui.Text("  You have not been whitelisted to share your URL.");
-            ImGui.Text("  Other Players won't be able to view your TV.");
         }
     }
 

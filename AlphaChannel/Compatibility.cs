@@ -131,4 +131,61 @@ class Compatibility
         string msg = "{\"action\":\"load\",\"url\":\"https://example.com\"}";
         client.Send(Encoding.UTF8.GetBytes(msg));
     }
+
+    private static string[] mpvCandidates = {
+        "mpv",                                    // PATH (pacman, apt, etc.)
+        "/usr/bin/mpv",
+        "/usr/local/bin/mpv",
+        "/bin/mpv",
+        "flatpak run io.mpv.Mpv",                // Flatpak
+        "/var/lib/flatpak/exports/bin/io.mpv.Mpv",
+        $"{Environment.GetEnvironmentVariable("HOME")}/.local/share/flatpak/exports/bin/io.mpv.Mpv", // Flatpak user-install
+        "/snap/bin/mpv",                         // Snap
+    };
+
+    private static string[] ytdlpCandidates = {
+        "yt-dlp",                                // PATH (pacman, pip install --system)
+        "/usr/bin/yt-dlp",
+        "/usr/local/bin/yt-dlp",
+        "/bin/yt-dlp",
+        $"{Environment.GetEnvironmentVariable("HOME")}/.local/bin/yt-dlp", // pip install --user
+        $"{Environment.GetEnvironmentVariable("HOME")}/.local/pipx/venvs/yt-dlp/bin/yt-dlp", // pipx
+        "flatpak run io.github.yt_dlp.yt-dlp",
+        "/snap/bin/yt-dlp",
+    };
+
+    public static bool MPVExists()
+    {
+        return FindCommand(mpvCandidates);
+    }
+    public static bool YTDLPExists()
+    {
+        return FindCommand(ytdlpCandidates);
+    }
+    private static bool FindCommand(string[] candidates)
+    {
+        foreach (var cmd in candidates)
+        {
+            try
+            {
+                var parts = cmd.Split(' ', 2);
+                var proc = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = parts[0],
+                        Arguments = parts.Length > 1 ? parts[1] + " --version" : "--version",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false
+                    }
+                };
+                proc.Start();
+                proc.WaitForExit();
+                if (proc.ExitCode == 0) return true;
+            }
+            catch { }
+        }
+        return false;
+    }
 }
