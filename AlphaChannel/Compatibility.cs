@@ -75,9 +75,6 @@ class Compatibility
         Services.Log.Debug($"Installer finished with code {proc.ExitCode}");
     }
 
-    [DllImport("ntdll.dll", EntryPoint = "wine_get_version", CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr wine_get_version();
-
     public static bool IsRunningUnderWine()
     {
         // Wine sets this registry key
@@ -92,16 +89,6 @@ class Compatibility
         {
             return false;
         }
-    }
-
-    public static void LaunchLinuxWebKit(string url)
-    {
-        var p = new Process();
-        p.StartInfo.FileName = "webkitgtk-helper"; // native binary
-        p.StartInfo.Arguments = url;
-        p.StartInfo.UseShellExecute = false;
-
-        p.Start();
     }
     
     public static bool BinaryExists(string name)
@@ -132,60 +119,35 @@ class Compatibility
         client.Send(Encoding.UTF8.GetBytes(msg));
     }
 
+/*
     private static string[] mpvCandidates = {
-        "mpv",                                    // PATH (pacman, apt, etc.)
+        "mpv",
         "/usr/bin/mpv",
         "/usr/local/bin/mpv",
         "/bin/mpv",
-        "flatpak run io.mpv.Mpv",                // Flatpak
+        "flatpak run io.mpv.Mpv",
         "/var/lib/flatpak/exports/bin/io.mpv.Mpv",
-        $"{Environment.GetEnvironmentVariable("HOME")}/.local/share/flatpak/exports/bin/io.mpv.Mpv", // Flatpak user-install
-        "/snap/bin/mpv",                         // Snap
+        $"{Environment.GetEnvironmentVariable("HOME")}/.local/share/flatpak/exports/bin/io.mpv.Mpv",
+        "/snap/bin/mpv",
     };
 
     private static string[] ytdlpCandidates = {
-        "yt-dlp",                                // PATH (pacman, pip install --system)
+        "yt-dlp",
         "/usr/bin/yt-dlp",
         "/usr/local/bin/yt-dlp",
         "/bin/yt-dlp",
-        $"{Environment.GetEnvironmentVariable("HOME")}/.local/bin/yt-dlp", // pip install --user
-        $"{Environment.GetEnvironmentVariable("HOME")}/.local/pipx/venvs/yt-dlp/bin/yt-dlp", // pipx
+        $"{Environment.GetEnvironmentVariable("HOME")}/.local/bin/yt-dlp",
+        $"{Environment.GetEnvironmentVariable("HOME")}/.local/pipx/venvs/yt-dlp/bin/yt-dlp",
         "flatpak run io.github.yt_dlp.yt-dlp",
         "/snap/bin/yt-dlp",
     };
-
+*/
     public static bool MPVExists()
     {
-        return FindCommand(mpvCandidates);
+        return BinaryExists("mpv");
     }
     public static bool YTDLPExists()
     {
-        return FindCommand(ytdlpCandidates);
-    }
-    private static bool FindCommand(string[] candidates)
-    {
-        foreach (var cmd in candidates)
-        {
-            try
-            {
-                var parts = cmd.Split(' ', 2);
-                var proc = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = parts[0],
-                        Arguments = parts.Length > 1 ? parts[1] + " --version" : "--version",
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false
-                    }
-                };
-                proc.Start();
-                proc.WaitForExit();
-                if (proc.ExitCode == 0) return true;
-            }
-            catch { }
-        }
-        return false;
+        return BinaryExists("yt-dlp");
     }
 }

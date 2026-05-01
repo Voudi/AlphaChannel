@@ -531,6 +531,7 @@ public class ControlWindow : Window, IDisposable
             {
 				hasMPVInstalled = true;
             }
+			return;
 		}
 		if(isRunningUnderWine && !hasYTDLPInstalled)
 		{
@@ -539,6 +540,7 @@ public class ControlWindow : Window, IDisposable
             {
 				hasYTDLPInstalled = true;
             }
+			return;
 		}
         ImGui.Text(" Host Settings:");
 
