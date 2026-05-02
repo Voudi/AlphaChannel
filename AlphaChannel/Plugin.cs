@@ -85,6 +85,15 @@ public class Plugin : IDalamudPlugin
 	public bool _webViewInitialized = false;
 	private void InitializeWebView(string url, string handle)
 	{
+		if (Compatibility.IsRunningUnderWine())
+		{
+			/*
+			var mpv = new Mpv.NET.Player.MpvPlayer();
+			mpv.Load(url);
+			*/
+			// Compatibility.StartBinary("mpv", "--vo=offscreen "+url);
+			//return;
+		}
 		if (_webViewInitialized)
 		{
 			_webView2Client?.Navigate(url);

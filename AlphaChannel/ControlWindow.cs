@@ -90,9 +90,11 @@ public class ControlWindow : Window, IDisposable
 	private readonly OTTApi _OTTApi;
 
 	private bool isRunningUnderWine;
+	private bool isRunningInsideFlatpak;
 	private bool hasWebViewRuntime;
-	private bool hasMPVInstalled;
-	private bool hasYTDLPInstalled;
+	private bool hasFlatpakSpawn = false;
+	private bool hasMPVInstalled = false;
+	private bool hasYTDLPInstalled = false;
 	private bool toggleInstallWebViewRuntime = false;
 
     public unsafe ControlWindow(Plugin plugin, string title)
@@ -107,6 +109,21 @@ public class ControlWindow : Window, IDisposable
 		};
 
 		this._plugin = plugin;
+
+		//INIT COMPATIBILITY
+		//flatpak override --user --filesystem=/usr/bin:ro dev.goats.xivlauncher
+		Services.Log.Debug("Is running under Wine? " + Compatibility.IsRunningUnderWine());
+		Services.Log.Debug("Webview2 Installed? " + Compatibility.IsWebView2Installed());
+		Services.Log.Debug("Is running inside Flatpak? " + Compatibility.IsRunningInFlatpak());
+		isRunningUnderWine = Compatibility.IsRunningUnderWine();
+		isRunningInsideFlatpak = Compatibility.IsRunningInFlatpak();
+		hasWebViewRuntime = !isRunningUnderWine || Compatibility.IsWebView2Installed();
+		if (isRunningUnderWine)
+		{
+			hasMPVInstalled = isRunningInsideFlatpak || Compatibility.MPVExists();
+			hasYTDLPInstalled = isRunningInsideFlatpak || Compatibility.YTDLPExists();
+			hasFlatpakSpawn = Compatibility.FlatpakSpawnExists();
+		}
 
 		//INIT TEXTURE
 		_currentSharedTexture = new Texture2D(DxHandler.Device, _texture2dDescription);
@@ -160,13 +177,6 @@ public class ControlWindow : Window, IDisposable
 
         if (!_OTTApi.initialized)
             _OTTApi.Login();
-
-		Services.Log.Debug("Is running under Wine? " + Compatibility.IsRunningUnderWine());
-		Services.Log.Debug("Webview2 Installed? " + Compatibility.IsWebView2Installed());
-		isRunningUnderWine = Compatibility.IsRunningUnderWine();
-		hasWebViewRuntime = !isRunningUnderWine || Compatibility.IsWebView2Installed();
-		hasMPVInstalled = Compatibility.MPVExists();
-		hasYTDLPInstalled = Compatibility.YTDLPExists();
     }
 
     public void ClearTexture()
@@ -524,7 +534,7 @@ public class ControlWindow : Window, IDisposable
             }
 			return;
 		}
-		if(isRunningUnderWine && !hasMPVInstalled)
+		if(isRunningUnderWine && !isRunningInsideFlatpak && !hasMPVInstalled)
 		{
 			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " MPV is required to use AlphaChannel under Wine.");
 			if (ImGui.Button("Ignore this error (for custom configurations)"))
@@ -533,12 +543,23 @@ public class ControlWindow : Window, IDisposable
             }
 			return;
 		}
-		if(isRunningUnderWine && !hasYTDLPInstalled)
+		if(isRunningUnderWine && !isRunningInsideFlatpak && !hasYTDLPInstalled)
 		{
 			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " YTDLP is required to use AlphaChannel under Wine.");
 			if (ImGui.Button("Ignore this error (for custom configurations)"))
             {
 				hasYTDLPInstalled = true;
+            }
+			return;
+		}
+		if(isRunningUnderWine && isRunningInsideFlatpak && !hasFlatpakSpawn)
+		{
+			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Flatpak-Spawn is required to use AlphaChannel inside Flatpak under Wine.");
+			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " To use flatpak-spawn, you need to give the following permission to the game via the terminal, then restart the game: ");
+			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " flatpak override --user --talk-name=org.freedesktop.Flatpak dev.goats.xivlauncher");
+			if (ImGui.Button("Ignore this error (for custom configurations)"))
+            {
+				hasFlatpakSpawn = true;
             }
 			return;
 		}

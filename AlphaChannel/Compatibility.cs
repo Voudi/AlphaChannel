@@ -9,6 +9,14 @@ using AlphaChannel;
 
 class Compatibility
 {
+    private static bool? _isFlatpak;
+    private static string? _flatpakPath;
+
+    public static bool IsRunningInFlatpak()
+    {
+        return File.Exists("/.flatpak-info");
+    }
+
     public static bool IsWebView2Installed()
     {
         try
@@ -91,63 +99,115 @@ class Compatibility
         }
     }
     
+    public static Process? StartBinary(string name, string arguments)
+    {
+        string? path = FindBinary(name);
+        string args = $"/c start /unix "+name+" "+arguments;
+        if (_isFlatpak.HasValue && _isFlatpak.Value && _flatpakPath != null)
+        {
+            args = $"/c start /unix {_flatpakPath} --host {name} {arguments}";
+        }
+        
+        try
+        {
+
+            var proc = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = @"C:\windows\system32\cmd.exe",
+                    Arguments = args,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false
+                }
+            };
+            
+            proc.Start();
+            
+            Services.Log.Debug($"Started {name} (pid {proc.Id}) from {path}");
+            return proc;
+        }
+        catch (Exception e)
+        {
+            Services.Log.Error($"Failed to start {name}: {e.Message}");
+            return null;
+        }
+    }
+   public static string? FindBinary(string name)
+    {
+        if(name != "flatpak-spawn" && !_isFlatpak.HasValue)
+        {
+            _flatpakPath = FindBinary("flatpak-spawn");
+            _isFlatpak = _flatpakPath != null;
+        }
+
+        var paths = new[] {
+                @"Z:/run/host/usr/bin",
+                @"Z:/run/host/usr/local/bin",
+                @"Z:/run/host/bin",
+                @"Z:/usr/bin",
+                @"Z:/usr/local/bin",
+                @"Z:/bin",
+                @"/run/host/usr/bin",
+                @"/run/host/usr/local/bin",
+                @"/run/host/bin",
+                @"/usr/bin",
+                @"/usr/local/bin",
+                @"/bin",
+                @"/snap/bin",
+                @"Z:\run\host\usr\bin",
+                @"Z:\run\host\usr\local\bin",
+                @"Z:\run\host\bin",
+                @"Z:\usr\bin",
+                @"Z:\usr\local\bin",
+                @"Z:\bin",
+                @"\run\host\usr\bin",
+                @"\run\host\usr\local\bin",
+                @"\run\host\bin",
+                @"\usr\bin",
+                @"\usr\local\bin",
+                @"\bin",
+                @"\snap\bin"
+            };
+            
+        foreach (var dir in paths)
+        {
+            string path = Path.Combine(dir, name);
+            
+            if (dir.Contains("\\"))
+            {
+                path = path.Replace('/', '\\');
+            }
+            else
+            {
+                path = path.Replace('\\', '/');
+            }
+            
+            if (File.Exists(path))
+                return path;
+        }
+        return null;
+    }
+
     public static bool BinaryExists(string name)
     {
-        var p = new Process();
-        p.StartInfo.FileName = "/bin/sh";
-        p.StartInfo.Arguments = $"-c \"command -v {name}\"";
-        p.StartInfo.RedirectStandardOutput = true;
-        p.StartInfo.RedirectStandardError = true;
-        p.StartInfo.UseShellExecute = false;
 
-        p.Start();
-        string result = p.StandardOutput.ReadToEnd();
-        p.WaitForExit();
-
-        return !string.IsNullOrWhiteSpace(result);
+        return FindBinary(name) != null;
     }
 
-    public static void ConnectToWebkit()
-    {
-        
-        var client = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-        var endPoint = new UnixDomainSocketEndPoint("/tmp/webkit_helper.sock");
-        // Use Wine path mapping: Z:\tmp\webkit_helper.sock → /tmp/webkit_helper.sock
-        client.Connect(endPoint);
-
-        string msg = "{\"action\":\"load\",\"url\":\"https://example.com\"}";
-        client.Send(Encoding.UTF8.GetBytes(msg));
-    }
-
-/*
-    private static string[] mpvCandidates = {
-        "mpv",
-        "/usr/bin/mpv",
-        "/usr/local/bin/mpv",
-        "/bin/mpv",
-        "flatpak run io.mpv.Mpv",
-        "/var/lib/flatpak/exports/bin/io.mpv.Mpv",
-        $"{Environment.GetEnvironmentVariable("HOME")}/.local/share/flatpak/exports/bin/io.mpv.Mpv",
-        "/snap/bin/mpv",
-    };
-
-    private static string[] ytdlpCandidates = {
-        "yt-dlp",
-        "/usr/bin/yt-dlp",
-        "/usr/local/bin/yt-dlp",
-        "/bin/yt-dlp",
-        $"{Environment.GetEnvironmentVariable("HOME")}/.local/bin/yt-dlp",
-        $"{Environment.GetEnvironmentVariable("HOME")}/.local/pipx/venvs/yt-dlp/bin/yt-dlp",
-        "flatpak run io.github.yt_dlp.yt-dlp",
-        "/snap/bin/yt-dlp",
-    };
-*/
     public static bool MPVExists()
     {
         return BinaryExists("mpv");
     }
+
     public static bool YTDLPExists()
     {
         return BinaryExists("yt-dlp");
+    }
+
+    public static bool FlatpakSpawnExists()
+    {
+        return (_isFlatpak.HasValue && _isFlatpak.Value && _flatpakPath != null) || BinaryExists("flatpak-spawn");
     }
 }
