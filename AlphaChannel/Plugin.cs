@@ -2,26 +2,30 @@
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Bindings.ImGui;
-using AlphaChannel.Renderer;
-using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
-using Microsoft.Web.WebView2.WinForms;
+using System.Runtime.InteropServices;
+using SharpDX.Direct3D11;
+using System.Text.RegularExpressions;
 
 namespace AlphaChannel;
 
 public class Plugin : IDalamudPlugin
 {
-	public readonly WindowSystem WindowSystem = new("AlphaChannel");
-	private ControlWindow _mainWindow;
+	// Required for LivePluginLoader support
+	public string AssemblyLocation { get; } = Assembly.GetExecutingAssembly().Location;
+	// Required for LivePluginLoader support
+	public string Name => "AlphaChannel";
 
+	public readonly WindowSystem WindowSystem = new("AlphaChannel");
 	private const string _commandRemote = "/aremote";
 
+	public static readonly int _resolutionWidth = 1280;
+	public static readonly int _resolutionHeight = 720;
+	private ControlWindow _mainWindow;
 	private readonly string _pluginConfigDir;
 	private readonly string _pluginDir;
-
-	private CaptureProcess? _capture;
-	private WebView2Client? _webView2Client;
+	private CancellationTokenSource _RenderCancellation = new CancellationTokenSource();
 
 	public Plugin(IDalamudPluginInterface pluginInterface)
 	{
@@ -52,7 +56,9 @@ public class Plugin : IDalamudPlugin
 		// Hook up render hook
 		pluginInterface.UiBuilder.Draw += Render;
 
-		IpcProvider.Init(this);
+		//IpcProvider.Init(this);
+
+		MpvRenderer.Setup(_pluginDir);
 
 		// Create Main Window
 		_mainWindow = new ControlWindow(this, title);
@@ -63,11 +69,6 @@ public class Plugin : IDalamudPlugin
 
         Services.CommandManager.AddHandler(_commandRemote, new CommandInfo(HandleCommand) { HelpMessage = "Toggles the Remote Window", ShowInHelp = true });
     }
-
-
-	// Required for LivePluginLoader support
-	public string AssemblyLocation { get; } = Assembly.GetExecutingAssembly().Location;
-	public string Name => "AlphaChannel";
 
 	public void Dispose()
 	{
@@ -82,61 +83,9 @@ public class Plugin : IDalamudPlugin
 		DxHandler.Shutdown();
 	}
 
-	public bool _webViewInitialized = false;
-	private void InitializeWebView(string url, string handle)
-	{
-		if (Compatibility.IsRunningUnderWine())
-		{
-			/*
-			var mpv = new Mpv.NET.Player.MpvPlayer();
-			mpv.Load(url);
-			*/
-			// Compatibility.StartBinary("mpv", "--vo=offscreen "+url);
-			//return;
-		}
-		if (_webViewInitialized)
-		{
-			_webView2Client?.Navigate(url);
-			return;
-		}
-		_webViewInitialized = true;
-
-		Thread capturestaThread = new Thread(() =>
-		{
-			int pid = Process.GetCurrentProcess().Id;
-			try
-			{
-				var webViewHandle = _webView2Client?.handle;
-				if (webViewHandle.HasValue)
-				{
-					_capture = new CaptureProcess(pid, _pluginDir, webViewHandle.Value, handle);
-					_capture.Start();
-				}
-			}
-			catch { }
-		});
-
-		capturestaThread.SetApartmentState(ApartmentState.STA);
-
-		Thread staThread = new(() => {
-			Application.EnableVisualStyles();
-			Application.SetCompatibleTextRenderingDefault(false);
-			var adBlocknames = new Dictionary<string, string>();
-
-            _webView2Client = new WebView2Client(_mainWindow, adBlocknames, Path.Combine(_pluginConfigDir, "webview-cache"), url);
-			capturestaThread.Start();
-			Application.Run(_webView2Client);
-		});
-
-		staThread.SetApartmentState(ApartmentState.STA);
-		staThread.Start();
-	}
-
 	private void Render()
 	{
 		ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(5, 5));
-
-		_capture?.EnsureRenderProcessIsAlive();
 
 		_mainWindow?.Refresh();
 
@@ -157,38 +106,65 @@ public class Plugin : IDalamudPlugin
 
 	public void TerminateAlphaWindow()
 	{
-		_webViewInitialized = false;
-        Task.Run(() =>
-        {
-            _webView2Client?.RemoveWindow();
-
-            _capture?.Dispose();
-        });
+		_RenderCancellation.Cancel();
 	}
 
-	public void NavigateAlphaWindow(string url, string sharedHandle)
+	private DateTime _lastLoadYT = DateTime.MinValue;
+	private static readonly Regex _YTRegex = new Regex(@"^\w+://[^/]*youtube\.\w+/|^\w+://youtu\.be/", RegexOptions.Compiled);
+	private static bool IsYTURL(string url) => _YTRegex.IsMatch(url);
+	public int StartMPV(string url, Texture2D sharedTexture)
 	{
-		InitializeWebView(url, sharedHandle);
-	}
+		int sleepTime = 0;
+		if(IsYTURL(url))
+		{
+			var elapsed = DateTime.Now - _lastLoadYT;
+			if (elapsed.TotalSeconds < 10)
+				sleepTime = Math.Min(Math.Max((int)(10000 - elapsed.TotalMilliseconds), 0), 10000);
+			
+			_lastLoadYT = DateTime.Now;
+		}
 
-	public void ToggleExpandAlphaWindow()
-	{
-		_webView2Client?.ToggleResize();
+		new Thread(() =>
+		{
+			Thread.Sleep(sleepTime);
+			if (Compatibility.IsRunningUnderWine() || true) //For now, just always use the MPV player, even on native Windows
+			{
+				try
+				{
+						var mpvRenderer = new MpvRenderer();
+						mpvRenderer.Initialize(_resolutionWidth, _resolutionHeight, url, sharedTexture);
+						_RenderCancellation.Cancel();
+						_RenderCancellation = new CancellationTokenSource();
+						new Thread(() =>
+						{
+							Services.Log.Debug("Video Player started");
+							while(!_RenderCancellation.Token.IsCancellationRequested)
+							{
+								if (!mpvRenderer.RenderFrame(_RenderCancellation.Token))
+									break;
+							}
+							Services.Log.Debug("Video Player stopped");
+							mpvRenderer.StopRender();
+						}){IsBackground = true}.Start();
+				}
+				catch (Exception e)
+				{
+					Services.Log.Error($"Error: {e.Message} {e.StackTrace}");
+				}
+				return;
+			}
+			else
+			{
+				//TODO: Implement MPV player for non-Wine environments, potentially using a native DirectX rendering approach
+			}
+		}) { IsBackground = true }.Start();
+		
+		return sleepTime;
 	}
-
-    public void PollWebviewWindow()
-    {
-        _webView2Client?.PollMainwindow();
-    }
 
     public void Play()
     {
-        _webView2Client?.TryPlay();
-    }
-
-    public void Fullscreen()
-    {
-        _webView2Client?.TryFullscreen();
+        //TODO: Implement play/pause functionality for the mpv player
     }
 
     internal void UpdateTitle(uint entityId, TitleData titleData)

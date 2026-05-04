@@ -7,7 +7,6 @@ using Dalamud.Bindings.ImGui;
 using SharpDX.Direct3D11;
 using SharpDX.Direct3D;
 using Dalamud.Game.ClientState.Objects.Types;
-using NAudio.CoreAudioApi;
 using Dalamud.Interface;
 using System.Runtime.InteropServices;
 using SharpDX.DXGI;
@@ -29,13 +28,9 @@ public class ControlWindow : Window, IDisposable
 	private readonly Dictionary<uint, String> _currentTitles = []; //Playerpointer, Title
 	private Texture2D _currentSharedTexture;
 	private bool _textureLoaded = false;
-	private bool _domContentloaded = false;
     public string currentSharedTextureResourceHandle;
 	private uint _currentToggle; //Playerpointer (whether TV toggled or not)
 	private uint _currentActivatedTV = 0; //Playerpointer (whether TV toggled or not)
-	private uint _currentAudioProcess;
-	private uint _currentSubProcess;
-	private bool _refreshAudio = false;
 	private Dictionary<IntPtr, bool> _currentVFXTextures = new Dictionary<IntPtr, bool>(); //Texturepointer, Flag (whether overridden once)
     private bool _signalShareTitle = false;
 	private bool _signalToggleShare = false;
@@ -57,13 +52,10 @@ public class ControlWindow : Window, IDisposable
     private String _inputURL = "";
     private String _shortenedURL = "";
     private String _lastURL = "";
-    float volume = 0.5f;
-    private bool volumeEnabled = false;
-
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
 	{
-		Width = 1920,
-		Height = 1080,
+		Width = Plugin._resolutionWidth,
+		Height = Plugin._resolutionHeight,
 		MipLevels = 1,
 		ArraySize = 1,
 		Format = Format.B8G8R8A8_UNorm,
@@ -138,41 +130,6 @@ public class ControlWindow : Window, IDisposable
 		ActorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
 		_getResourceSyncHook.Enable();
 
-        // Retrieve whitelist
-		/*
-        HttpClient client = new HttpClient();
-        client.DefaultRequestHeaders.Add("Authorization", "Bot MTM5NTg5NjIzMzk5MzcwMzYzNg.GmAEen.SPgodjzUP_wPQhZ5wnlJWIudMNPuhV--7lVCDI");
-        var apiTask = Task.Run(() => {
-            try
-            {
-                var getTask = client.GetAsync("https://discord.com/api/channels/1395896063629463645/messages");
-				getTask.Wait();
-                return getTask.Result.Content.ReadAsStringAsync();
-            }
-            catch (Exception ex)
-            {
-                Services.Log.Debug("An exception has occured while trying to call discord API for whitelist : " + ex.Message);
-                return null;
-            }
-        });
-        apiTask.Wait();
-        // Request completed (if not null, if null, already handled by the catch above)
-        if (apiTask.Result != null)
-        {
-            JsonNode? jsonResult = JsonSerializer.Deserialize<JsonNode>(apiTask.Result);
-            if (jsonResult?.GetType() != typeof(JsonArray))
-            {
-                // This is not the result we are expecting, most likely an API error (Triggered with editing the key and making it fail on purpose
-                Services.Log.Error("Mismatched result from Discord API while retrieving the whitelist. Content : " + jsonResult?.ToString());
-            }
-            else
-            {
-                // We have the list
-                whitelistedNames = ((JsonArray)jsonResult).Select(message => message?["content"]?.ToString()).ToList();
-            }
-        }
-		*/
-
         _ = CheckTVMod();
 
         if (!_OTTApi.initialized)
@@ -205,8 +162,6 @@ public class ControlWindow : Window, IDisposable
         bool hookEnabled = _getResourceSyncHook.IsEnabled && !_getResourceSyncHook.IsDisposed;
         if (hookEnabled) //Only check for stuff while the hook is activated, which is outside from duties
 		{
-			RefreshVolume();
-
 			CheckTitles();
 		
 			List<uint> visitedTvs = new List<uint>();
@@ -347,7 +302,7 @@ public class ControlWindow : Window, IDisposable
 				if (isSyncRefresh && isSyncPlay(url))
 					ForceSyncPlay(); //Just send a sync play signal if sync is on, no need to refresh webpage
 				else
-					_plugin.NavigateAlphaWindow(url.ToString(), currentSharedTextureResourceHandle);
+					_plugin.StartMPV(url.ToString(), _currentSharedTexture);
 
 				ShareTitle(url.ToString());
 			}
@@ -361,7 +316,7 @@ public class ControlWindow : Window, IDisposable
 			if (_currentURLs.TryGetValue(entityId, out var url))
 			{
 				_currentToggle = entityId;
-				_plugin.NavigateAlphaWindow(url, currentSharedTextureResourceHandle);
+				_plugin.StartMPV(url, _currentSharedTexture);
 			}
             else
             {
@@ -371,20 +326,12 @@ public class ControlWindow : Window, IDisposable
 
 		//Assume no TV is running
 		_currentActivatedTV = 0;
-        //Reset audio counter to try to fetch the process for the first 5 seconds only
-        _secondsCounter = 0;
-        //Assume site hasnt been loaded up
-        _domContentloaded = false;
     }
 
 	private void TurnOffTV()
 	{
 		ClearTexture();
-		volumeEnabled = false;
-		VisitedAudioProcesses.Clear();
 		_plugin.TerminateAlphaWindow();
-		_currentSubProcess = 0;
-		_currentAudioProcess = 0;
 		_currentActivatedTV = 0;
 		_currentToggle = 0;
 	}
@@ -480,18 +427,11 @@ public class ControlWindow : Window, IDisposable
             ImGui.Text("AlphaChannel is deactivated during a duty.");
 			return;
         }
-        if (_currentToggle != 0 && !_textureLoaded && _domContentloaded)
+        if (_currentToggle != 0 && !_textureLoaded)
         {
             ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " Unable to fetch the TV screen! Has the plugin been deactivated during play? Please make sure to: ");
             ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 1. Restart the game client with the plugin turned on");
             ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 2. Make sure the AlphaChannelTV Penumbra mod is enabled");
-        }
-        if (_currentActivatedTV != 0 && volumeEnabled)
-		{
-			if(ImGui.SliderFloat("Volume", ref volume, 0.0f, 1.0f))
-			{
-				SetVolume(volume);
-            }
         }
         if (!_modexists)
         {
@@ -814,41 +754,6 @@ public class ControlWindow : Window, IDisposable
 
                 ImGui.SameLine();
 
-                if (isTheRunningTV)
-                {
-                    ImGui.PushFont(UiBuilder.IconFont);
-                    if (ImGui.Button(FontAwesomeIcon.ExpandArrowsAlt.ToIconString() + "##expand" + item.EntityId))
-                    {
-                        _plugin.Fullscreen();
-                    }
-                    ImGui.PopFont();
-                    if (ImGui.IsItemHovered())
-                    {
-                        ImGui.BeginTooltip();
-                        ImGui.Text("Toggle Fullscreen - BETA");
-                        ImGui.EndTooltip();
-                    }
-                }
-
-                ImGui.SameLine();
-
-				if (isTheRunningTV) {
-					ImGui.PushFont(UiBuilder.IconFont);
-					if (ImGui.Button(FontAwesomeIcon.WindowRestore.ToIconString() + "##restore" + item.EntityId))
-					{
-						_plugin.ToggleExpandAlphaWindow();
-					}
-					ImGui.PopFont();
-                    if (ImGui.IsItemHovered())
-                    {
-                        ImGui.BeginTooltip();
-                        ImGui.Text("Take control of the underlying browser window");
-                        ImGui.EndTooltip();
-                    }
-                }
-
-                ImGui.SameLine();
-
 				if (urlExists || isPlayer)
 				{
                     ImGui.PushFont(UiBuilder.IconFont);
@@ -1015,13 +920,12 @@ public class ControlWindow : Window, IDisposable
 					Services.Log.Debug("New URL: " + url);
 					_currentURLs[entityId] = response;
 					if (_currentToggle == entityId)
-						_plugin.NavigateAlphaWindow(response, currentSharedTextureResourceHandle);
+						_plugin.StartMPV(response, _currentSharedTexture);
 				});
 			}
 		}
 	}
 
-	private int _secondsCounter = 0;
 	private long _lastMilliSecond = 0;
 	public void Refresh()
 	{
@@ -1029,13 +933,10 @@ public class ControlWindow : Window, IDisposable
 		if (_lastMilliSecond + 1000 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 		{
 			_lastMilliSecond = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-			_secondsCounter++;
 
 			CheckAllTVs();
 
-			_plugin.PollWebviewWindow();
-
-            _plugin.CheckURLHook();
+            //_plugin.CheckURLHook();
 
 			if (toggleInstallWebViewRuntime)
 			{
@@ -1111,110 +1012,6 @@ public class ControlWindow : Window, IDisposable
             Services.Log.Debug("Request exception: " + e.Message + e.StackTrace);
         }
 	}
-
-	private List<uint> VisitedAudioProcesses = new List<uint>();
-	private void RefreshVolume()
-	{
-		try {
-            _ = Task.Run(() =>
-            {
-                if (!volumeEnabled && _refreshAudio && 0 < _secondsCounter && _secondsCounter < 30 && _secondsCounter % 4 == 0)
-                {
-                    var enumerator = new MMDeviceEnumerator();
-                    var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                    var sessionManager = device.AudioSessionManager;
-                    var sessionsCount = sessionManager.Sessions.Count;
-
-                    if (sessionManager == null) return;
-
-                    Dictionary<uint, AudioSessionControl> sessionPIDs = [];
-                    for (int i = 0; i < sessionManager.Sessions.Count; i++)
-                    {
-                        var session = sessionManager.Sessions[i];
-                        sessionPIDs.Add(session.GetProcessID, session);
-                    }
-                    var parents = GetProcessParentMapFiltered(sessionPIDs.Keys);
-                    var unvisitedAudioProcesses = sessionPIDs.Where(pid => !VisitedAudioProcesses.Contains(pid.Key));
-                    foreach (var pid in unvisitedAudioProcesses)
-                    {
-                        var parent = parents[pid.Key];
-                        if (_currentSubProcess == parent && _currentSubProcess != 0 && parent != 0)
-                        {
-                            _currentAudioProcess = pid.Key;
-                            volume = pid.Value.SimpleAudioVolume.Volume;
-                            volumeEnabled = true;
-                            _refreshAudio = false;
-                            return;
-                        }
-                    }
-                }
-            });
-		}
-		catch {  }
-	}
-
-	private void SetVolume(float volumeLevel)
-	{
-		var enumerator = new MMDeviceEnumerator();
-		var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-		var sessionManager = device.AudioSessionManager;
-		var sessionsCount = sessionManager.Sessions.Count;
-
-		for (int i = 0; i < sessionsCount; i++)
-		{
-			var session = sessionManager.Sessions[i];
-			if (_currentAudioProcess == (int) session.GetProcessID)
-			{
-				session.SimpleAudioVolume.Volume = volumeLevel;
-			}
-		}
-	}
-
-	public void AddSubProcess(uint processId)
-	{
-		_currentSubProcess = processId;
-		_refreshAudio = true;
-    }
-
-    private static Dictionary<uint, uint> GetProcessParentMapFiltered(IEnumerable<uint> pids)
-    {
-        var pidList = pids.ToList();
-        if (pidList.Count == 0)
-            return new Dictionary<uint, uint>();
-
-        // Construct the WHERE clause
-        var filter = string.Join(" OR ", pidList.Select(pid => $"ProcessId = {pid}"));
-        var query = $"SELECT ProcessId, ParentProcessId FROM Win32_Process WHERE {filter}";
-
-        var result = new Dictionary<uint, uint>();
-
-        try
-        {
-            var searcher = new System.Management.ManagementObjectSearcher(query);
-            foreach (var obj in searcher.Get().Cast<System.Management.ManagementObject>())
-            {
-                if (obj["ProcessId"] != null && obj["ParentProcessId"] != null)
-                {
-                    uint pid = Convert.ToUInt32(obj["ProcessId"]);
-                    uint ppid = Convert.ToUInt32(obj["ParentProcessId"]);
-                    result[pid] = ppid;
-                }
-            }
-        }
-        catch
-        {
-            // Handle exceptions as needed
-        }
-
-        return result;
-    }
-
-    public void OnDOMContentLoaded()
-    {
-		_domContentloaded = true;
-        Task.Delay(1000);
-        ForceSyncPlay();
-    }
 
     private void ForceSyncPlay()
     {

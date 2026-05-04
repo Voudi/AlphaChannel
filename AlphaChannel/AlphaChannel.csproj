@@ -1,10 +1,15 @@
 ﻿<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+	
 	<PropertyGroup>
-		<IsTestVersion>false</IsTestVersion>
+		<TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+		<IsTestVersion>true</IsTestVersion>
 		<BuildDate>$([System.DateTime]::Now.ToString('yyyyMMdd'))</BuildDate>
 	</PropertyGroup>
 	<PropertyGroup>
 		<LangVersion>latest</LangVersion>
+	</PropertyGroup>
+	<PropertyGroup>
+		<UseWinRT>true</UseWinRT>
 	</PropertyGroup>
 	<PropertyGroup>
 		<ImplicitUsings>enable</ImplicitUsings>
@@ -30,17 +35,26 @@
 	<ItemGroup>
 	  <None Include="DalamudPackager.targets" />
 	</ItemGroup>
-	
 	<ItemGroup>
-		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3912.50" />
-		<PackageReference Include="NAudio.Core" Version="2.3.0" />
-		<PackageReference Include="NAudio.Wasapi" Version="2.3.0" />
 		<PackageReference Include="SharpDX" Version="4.2.0" />
 		<PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
 		<PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
 		<PackageReference Include="System.Management" Version="10.0.7" />
 	</ItemGroup>
-
+	<ItemGroup>
+		<Content Include="Content/libEGL.dll">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+		<Content Include="Content/libGLESv2.dll">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+		<Content Include="Content/libmpv-2.dll">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+		<Content Include="Content/yt-dlp.exe">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+	</ItemGroup>
 	<ItemGroup>
 	  <Compile Update="WebView2Client.cs" />
 	</ItemGroup>
