@@ -36,6 +36,7 @@
 	  <None Include="DalamudPackager.targets" />
 	</ItemGroup>
 	<ItemGroup>
+		<PackageReference Include="SharpCompress" Version="0.47.4" />
 		<PackageReference Include="SharpDX" Version="4.2.0" />
 		<PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
 		<PackageReference Include="SharpDX.DXGI" Version="4.2.0" />

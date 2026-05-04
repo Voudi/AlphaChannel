@@ -3,10 +3,6 @@
 	<Target Name="PrepareOutput" AfterTargets="Build">
 		<RemoveDir Directories="$(OutputPath)\locales"/>
 		<Copy SourceFiles="$(OutputPath)..\AlphaChannel\AlphaChannel.json" DestinationFolder="$(OutputPath)"/>
-		<Delete Files="$(OutputPath)capture\SharpDX.pdb"/>
-		<Delete Files="$(OutputPath)capture\SharpDX.DXGI.pdb"/>
-		<Delete Files="$(OutputPath)capture\SharpDX.Direct3D11.pdb"/>
-		<Delete Files="$(OutputPath)capture\SharpDX.Direct2D1.pdb"/>
 	</Target>
 	<Target Name="PackagePlugin" AfterTargets="PrepareOutput" Condition="'$(Configuration)' == 'Release'">
 		<DalamudPackager

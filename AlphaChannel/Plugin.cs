@@ -114,6 +114,9 @@ public class Plugin : IDalamudPlugin
 	private static bool IsYTURL(string url) => _YTRegex.IsMatch(url);
 	public int StartMPV(string url, Texture2D sharedTexture)
 	{
+		_RenderCancellation.Cancel();
+		_RenderCancellation = new CancellationTokenSource();
+		
 		int sleepTime = 0;
 		if(IsYTURL(url))
 		{
@@ -127,14 +130,13 @@ public class Plugin : IDalamudPlugin
 		new Thread(() =>
 		{
 			Thread.Sleep(sleepTime);
-			if (Compatibility.IsRunningUnderWine() || true) //For now, just always use the MPV player, even on native Windows
+			if (!_RenderCancellation.Token.IsCancellationRequested &&(Compatibility.IsRunningUnderWine() || true)) //For now, just always use the MPV player, even on native Windows
 			{
 				try
 				{
 						var mpvRenderer = new MpvRenderer();
 						mpvRenderer.Initialize(_resolutionWidth, _resolutionHeight, url, sharedTexture);
-						_RenderCancellation.Cancel();
-						_RenderCancellation = new CancellationTokenSource();
+
 						new Thread(() =>
 						{
 							Services.Log.Debug("Video Player started");

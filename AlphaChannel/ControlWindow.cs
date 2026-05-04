@@ -22,16 +22,14 @@ using System.Text;
 
 public class ControlWindow : Window, IDisposable
 {
-	List<string?> whitelistedNames = new List<string?>();
     private readonly Dictionary<uint, IntPtr> _currentOwners = []; //Playerpointer, CompanionDrawpointer
-	private readonly Dictionary<uint, String> _currentURLs = []; //Playerpointer, URL
-	private readonly Dictionary<uint, String> _currentTitles = []; //Playerpointer, Title
-	private Texture2D _currentSharedTexture;
+	private readonly Dictionary<uint, string> _currentURLs = []; //Playerpointer, URL
+	private readonly Dictionary<uint, string> _currentTitles = []; //Playerpointer, Title
+	private readonly Texture2D _currentSharedTexture;
 	private bool _textureLoaded = false;
     public string currentSharedTextureResourceHandle;
 	private uint _currentToggle; //Playerpointer (whether TV toggled or not)
 	private uint _currentActivatedTV = 0; //Playerpointer (whether TV toggled or not)
-	private Dictionary<IntPtr, bool> _currentVFXTextures = new Dictionary<IntPtr, bool>(); //Texturepointer, Flag (whether overridden once)
     private bool _signalShareTitle = false;
 	private bool _signalToggleShare = false;
     private bool _modexists = false;
@@ -46,7 +44,6 @@ public class ControlWindow : Window, IDisposable
 					 && !string.Equals(url.Host, "opentogethertube.com", StringComparison.OrdinalIgnoreCase);
 		else return false;
 	}
-	private bool _adBlockToggle = true;
 
     //Render Vars
     private String _inputURL = "";
@@ -77,17 +74,10 @@ public class ControlWindow : Window, IDisposable
     public static readonly HttpClient NOREDIRECTHTTPCLIENT = new HttpClient(
 		new HttpClientHandler { AllowAutoRedirect = false }
 	);
-	public bool HasAdBlock => _adBlockToggle;
 
 	private readonly OTTApi _OTTApi;
 
-	private bool isRunningUnderWine;
-	private bool isRunningInsideFlatpak;
-	private bool hasWebViewRuntime;
-	private bool hasFlatpakSpawn = false;
-	private bool hasMPVInstalled = false;
-	private bool hasYTDLPInstalled = false;
-	private bool toggleInstallWebViewRuntime = false;
+	private readonly bool isRunningUnderWine;
 
     public unsafe ControlWindow(Plugin plugin, string title)
         : base(title, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
@@ -103,19 +93,8 @@ public class ControlWindow : Window, IDisposable
 		this._plugin = plugin;
 
 		//INIT COMPATIBILITY
-		//flatpak override --user --filesystem=/usr/bin:ro dev.goats.xivlauncher
 		Services.Log.Debug("Is running under Wine? " + Compatibility.IsRunningUnderWine());
-		Services.Log.Debug("Webview2 Installed? " + Compatibility.IsWebView2Installed());
-		Services.Log.Debug("Is running inside Flatpak? " + Compatibility.IsRunningInFlatpak());
 		isRunningUnderWine = Compatibility.IsRunningUnderWine();
-		isRunningInsideFlatpak = Compatibility.IsRunningInFlatpak();
-		hasWebViewRuntime = !isRunningUnderWine || Compatibility.IsWebView2Installed();
-		if (isRunningUnderWine)
-		{
-			hasMPVInstalled = isRunningInsideFlatpak || Compatibility.MPVExists();
-			hasYTDLPInstalled = isRunningInsideFlatpak || Compatibility.YTDLPExists();
-			hasFlatpakSpawn = Compatibility.FlatpakSpawnExists();
-		}
 
 		//INIT TEXTURE
 		_currentSharedTexture = new Texture2D(DxHandler.Device, _texture2dDescription);
@@ -459,50 +438,6 @@ public class ControlWindow : Window, IDisposable
             }
             return;
         }
-		if (!hasWebViewRuntime && !isRunningUnderWine)
-		{
-			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please install the Webview2 runtime before continuing:");
-			if (ImGui.Button("Step 3 - Install"))
-            {
-				Compatibility.InstallWebView2();
-				toggleInstallWebViewRuntime = true;
-				hasWebViewRuntime = true;
-            }
-			if (ImGui.Button("Ignore this error (for custom configurations)"))
-            {
-				hasWebViewRuntime = true;
-            }
-			return;
-		}
-		if(isRunningUnderWine && !isRunningInsideFlatpak && !hasMPVInstalled)
-		{
-			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " MPV is required to use AlphaChannel under Wine.");
-			if (ImGui.Button("Ignore this error (for custom configurations)"))
-            {
-				hasMPVInstalled = true;
-            }
-			return;
-		}
-		if(isRunningUnderWine && !isRunningInsideFlatpak && !hasYTDLPInstalled)
-		{
-			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " YTDLP is required to use AlphaChannel under Wine.");
-			if (ImGui.Button("Ignore this error (for custom configurations)"))
-            {
-				hasYTDLPInstalled = true;
-            }
-			return;
-		}
-		if(isRunningUnderWine && isRunningInsideFlatpak && !hasFlatpakSpawn)
-		{
-			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Flatpak-Spawn is required to use AlphaChannel inside Flatpak under Wine.");
-			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " To use flatpak-spawn, you need to give the following permission to the game via the terminal, then restart the game: ");
-			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " flatpak override --user --talk-name=org.freedesktop.Flatpak dev.goats.xivlauncher");
-			if (ImGui.Button("Ignore this error (for custom configurations)"))
-            {
-				hasFlatpakSpawn = true;
-            }
-			return;
-		}
         ImGui.Text(" Host Settings:");
 
         Vector4 textColor = _signalToggleShare ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
@@ -929,20 +864,11 @@ public class ControlWindow : Window, IDisposable
 	private long _lastMilliSecond = 0;
 	public void Refresh()
 	{
-		//Check for Updates once per sec
 		if (_lastMilliSecond + 1000 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 		{
 			_lastMilliSecond = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 			CheckAllTVs();
-
-            //_plugin.CheckURLHook();
-
-			if (toggleInstallWebViewRuntime)
-			{
-				toggleInstallWebViewRuntime = false;
-                Compatibility.InstallWebView2();
-			}
         }
 	}
 
