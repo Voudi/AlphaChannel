@@ -4,7 +4,6 @@ using Dalamud.Plugin;
 using Dalamud.Bindings.ImGui;
 using System.Numerics;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using SharpDX.Direct3D11;
 using System.Text.RegularExpressions;
 
@@ -116,7 +115,7 @@ public class Plugin : IDalamudPlugin
 	{
 		_RenderCancellation.Cancel();
 		_RenderCancellation = new CancellationTokenSource();
-		
+
 		int sleepTime = 0;
 		if(IsYTURL(url))
 		{

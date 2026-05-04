@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
 using SharpDX.Direct3D11;
 
 namespace AlphaChannel

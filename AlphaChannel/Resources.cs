@@ -1,5 +1,4 @@
 using System.Text.Json;
-using FFXIVClientStructs.FFXIV.Common.Lua;
 using SharpCompress.Archives;
 using SharpCompress.Common;
 
