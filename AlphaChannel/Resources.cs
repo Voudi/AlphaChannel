@@ -1,6 +1,7 @@
 using System.Text.Json;
 using SharpCompress.Archives;
 using SharpCompress.Common;
+using Windows.Media.Capture.Core;
 
 namespace AlphaChannel;
 
@@ -9,51 +10,66 @@ public class Resources
     private readonly HttpClient httpClient;
     private readonly string pluginDir;
     
+    public string[] mpvCheckResult = [string.Empty, string.Empty];
+    public string[] ytdlpCheckResult = [string.Empty, string.Empty];
     public Resources(string pluginDir)
     {
         httpClient = new HttpClient();
+        httpClient.DefaultRequestHeaders.Add("User-Agent", "AlphaChannelUpdater/1.0");
         this.pluginDir = pluginDir;
     }
 
-    public string GetDirectoryMPV()
+    public string? GetLocationMPV()
     {
         var filenameStart = "mpv-dev-lgpl-x86_64-";
-        return Directory.GetDirectories(pluginDir, $"{filenameStart}*").First();
+        var dir = Directory.GetDirectories(pluginDir, $"{filenameStart}*").FirstOrDefault();
+        if(dir != null)
+            return dir+"/libmpv-2.dll";
+        else
+            return null;
     }
-    public string GetDirectoryYTDLP()
+    public string? GetLocationYTDLP()
     {
-        var filenameStart = "yt-dlp.exe";
-        return Directory.GetDirectories(pluginDir, $"{filenameStart}*").First();
-    }
-    public async Task<bool> DownloadMPVAsync(string downloadURL, string folderName)
-    {
-        var filenameStart = "mpv-dev-lgpl-x86_64-";
-        var filenameEnd = ".7z";
-        return await UpdateAsync(pluginDir, filenameStart, filenameEnd, downloadURL, folderName);
-    }
-    public async Task<bool> DownloadYTDLPAsync(string downloadURL, string folderName)
-    {
-        var filenameStart = "yt-dlp.exe";
-        var filenameEnd = ".exe";
-        return await UpdateAsync(pluginDir, filenameStart, filenameEnd, downloadURL, folderName);
-    }
-    public async Task<string[]> CheckMPVAsync()
+        var filenameStart = "yt-dlp";
+        var dir = Directory.GetDirectories(pluginDir, $"{filenameStart}*").FirstOrDefault();
+        if(dir != null)
+            return dir+"/yt-dlp.exe";
+        else
+            return null;
+    }    
+    public async Task CheckMPVAsync()
     {
         var filenameStart = "mpv-dev-lgpl-x86_64-";
         var filenameEnd = ".7z";
         var url = "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest";
-        return await CheckForUpdateAsync(pluginDir, filenameStart, filenameEnd, url);
+        mpvCheckResult = await CheckForUpdateAsync(pluginDir, filenameStart, filenameEnd, url);
     }
-    public async Task<string[]> CheckYTDLPAsync()
+    public async Task CheckYTDLPAsync()
     {
         var filenameStart = "yt-dlp.exe";
         var filenameEnd = ".exe";
         var url = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest";
-        return await CheckForUpdateAsync(pluginDir, filenameStart, filenameEnd, url);
+        ytdlpCheckResult = await CheckForUpdateAsync(pluginDir, filenameStart, filenameEnd, url);
     }
-    private async Task<string[]> CheckForUpdateAsync(string pluginDir, string nameStartsWith, string nameEndsWith, string url)
+    public async Task<bool> DownloadMPVAsync()
     {
-        var json = await httpClient.GetStringAsync(url);
+        var filenameStart = "mpv-dev-lgpl-x86_64-";
+        var filenameEnd = ".7z";
+        var downloadURL = mpvCheckResult[0];
+        var folderName = mpvCheckResult[1];
+        return await UpdateAsync(pluginDir, filenameStart, filenameEnd, downloadURL, folderName);
+    }
+    public async Task<bool> DownloadYTDLPAsync()
+    {
+        var filenameStart = "yt-dlp";
+        var filenameEnd = ".exe";
+        var downloadURL = ytdlpCheckResult[0];
+        var folderName = ytdlpCheckResult[1];
+        return await UpdateAsync(pluginDir, filenameStart, filenameEnd, downloadURL, folderName);
+    }
+    private async Task<string[]> CheckForUpdateAsync(string pluginDir, string nameStartsWith, string nameEndsWith, string checkURL)
+    {
+        var json = await httpClient.GetStringAsync(checkURL);
         var doc = JsonDocument.Parse(json);
         var remoteId = doc.RootElement.GetProperty("id").GetInt64();
         var asset = doc.RootElement.GetProperty("assets")
@@ -76,29 +92,32 @@ public class Resources
         return [downloadURL, folderName];
     }
 
-    private async Task<bool> UpdateAsync(string pluginDir, string nameStartsWith, string nameEndsWith, string url, string folderName)
+    private async Task<bool> UpdateAsync(string pluginDir, string nameStartsWith, string nameEndsWith, string downloadURL, string folderName)
     {
         try
         {
             var tempFile = Path.GetTempFileName() + nameEndsWith;
-            var response = await httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-            await using var fs = File.OpenWrite(tempFile);
-            await response.Content.CopyToAsync(fs);
-
+            var response = await httpClient.GetAsync(downloadURL, HttpCompletionOption.ResponseHeadersRead);
+            await using (var fs = File.OpenWrite(tempFile))
+            {
+                await response.Content.CopyToAsync(fs);
+            }
             if(nameEndsWith == ".7z")
             {
                 var tempFolderName = Path.GetTempFileName();
                 File.Delete(tempFolderName);
                 var localFolder = Path.Combine(pluginDir, tempFolderName);
                 Directory.CreateDirectory(localFolder);
-                using var archive = ArchiveFactory.OpenArchive(tempFile);
-                foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
+                using (var archive = ArchiveFactory.OpenArchive(tempFile))
                 {
-                    entry.WriteToDirectory(localFolder, new ExtractionOptions
+                    foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
                     {
-                        ExtractFullPath = true,
-                        Overwrite = true
-                    });
+                        entry.WriteToDirectory(localFolder, new ExtractionOptions
+                        {
+                            ExtractFullPath = true,
+                            Overwrite = true
+                        });
+                    }
                 }
 
                 File.Delete(tempFile);

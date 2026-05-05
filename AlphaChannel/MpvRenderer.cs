@@ -6,21 +6,21 @@ namespace AlphaChannel
     public class MpvRenderer
     {
         private static string? _pluginDir;
-
-        public static void Setup(string pluginDir)
+        private static Plugin? _pluginInstance;
+        public static void Setup(Plugin plugin)
         {
-            _pluginDir = pluginDir;
+            _pluginInstance = plugin;
             NativeLibrary.SetDllImportResolver(typeof(MpvRenderer).Assembly, (name, assembly, path) =>
             {
                 if (name == "libmpv-2")
                 {
-                    if (NativeLibrary.TryLoad(Path.Combine(_pluginDir, "libmpv-2.dll"), out var handle))
+                    if (NativeLibrary.TryLoad(_pluginInstance.AssemblyLocationMPV, out var handle))
                     {
                         return handle;
                     }
                     else
                     {
-                        Services.Log.Error($"Failed to load libmpv from path: {Path.Combine(_pluginDir, "libmpv-2.dll")}");
+                        Services.Log.Error($"Failed to load libmpv from path: {_pluginInstance.AssemblyLocationMPV}");
                         return IntPtr.Zero;
                     }
                 }
@@ -73,7 +73,7 @@ namespace AlphaChannel
             mpv_set_option_string(_mpvCtx, "hwdec", "no");
             mpv_set_option_string(_mpvCtx, "profile", "sw-fast");
             mpv_set_option_string(_mpvCtx, "ytdl", "yes");
-            mpv_set_option_string(_mpvCtx, "script-opts", $"ytdl_hook-ytdl_path={Path.Combine(_pluginDir ?? "", "yt-dlp.exe")}");
+            mpv_set_option_string(_mpvCtx, "script-opts", $"ytdl_hook-ytdl_path={_pluginInstance?.AssemblyLocationYTDLP}");
             mpv_set_option_string(_mpvCtx, "ytdl-format", $"bestvideo[height<={Plugin._resolutionHeight}][ext=mp4]+bestaudio/best[height<={Plugin._resolutionHeight}]");
             mpv_set_option_string(_mpvCtx, "terminal", "yes");
             mpv_set_option_string(_mpvCtx, "msg-level", "all=trace");

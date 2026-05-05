@@ -37,18 +37,21 @@ public class ControlWindow : Window, IDisposable
     private bool _installWarningMessage = false;
     private bool _installedmod = false;
 	private bool _syncPlayToggle = true;
-	private bool isSyncPlay(Uri? url)
+	private bool IsSyncPlay(Uri? url)
 	{
 		if (url != null)
 			return _syncPlayToggle && !url.Host.EndsWith(".opentogethertube.com", StringComparison.OrdinalIgnoreCase)
 					 && !string.Equals(url.Host, "opentogethertube.com", StringComparison.OrdinalIgnoreCase);
 		else return false;
 	}
-
     //Render Vars
     private String _inputURL = "";
     private String _shortenedURL = "";
     private String _lastURL = "";
+	private bool _assembliesLoaded = false;
+	private bool _assembliesChecked = false;
+	private bool _assemblyUpdateChecked = false;
+	private bool _updatingAssemblies = false;
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
 	{
 		Width = Plugin._resolutionWidth,
@@ -61,7 +64,6 @@ public class ControlWindow : Window, IDisposable
 		SampleDescription = new SampleDescription(1, 0),
 		Usage = ResourceUsage.Default,
 		OptionFlags = ResourceOptionFlags.Shared
-
 	};
 
 	private Plugin _plugin;
@@ -82,6 +84,8 @@ public class ControlWindow : Window, IDisposable
     public unsafe ControlWindow(Plugin plugin, string title)
         : base(title, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
+		_plugin = plugin;
+
         _OTTApi = new OTTApi(this);
 
         SizeConstraints = new WindowSizeConstraints
@@ -89,8 +93,6 @@ public class ControlWindow : Window, IDisposable
 			MinimumSize = new Vector2(325, 200),
 			MaximumSize = new Vector2(1800, 900)
 		};
-
-		this._plugin = plugin;
 
 		//INIT COMPATIBILITY
 		Services.Log.Debug("Is running under Wine? " + Compatibility.IsRunningUnderWine());
@@ -278,7 +280,7 @@ public class ControlWindow : Window, IDisposable
 			{
 				_currentToggle = entityId;
 
-				if (isSyncRefresh && isSyncPlay(url))
+				if (isSyncRefresh && IsSyncPlay(url))
 					ForceSyncPlay(); //Just send a sync play signal if sync is on, no need to refresh webpage
 				else
 					_plugin.StartMPV(url.ToString(), _currentSharedTexture);
@@ -327,7 +329,7 @@ public class ControlWindow : Window, IDisposable
 		if (!result)
 			return false;
 
-		if (isSyncPlay(url))
+		if (IsSyncPlay(url))
 		{
             _OTTApi.CheckURL(formattedUrl);
 
@@ -406,9 +408,63 @@ public class ControlWindow : Window, IDisposable
             ImGui.Text("AlphaChannel is deactivated during a duty.");
 			return;
         }
+		if(!_assembliesChecked)
+		{
+			ImGui.Text("Fatal error while checking assemblies in plugin folder.");
+		}
+		if(!_assembliesLoaded && _assembliesChecked)
+		{
+			bool needsFirstInstall = _plugin.AssemblyLocationMPV == null || _plugin.AssemblyLocationYTDLP == null;
+			bool updatesAvailable = (_plugin.LibResources.mpvCheckResult[0] != string.Empty) || (_plugin.LibResources.ytdlpCheckResult[0] != string.Empty);
+			if (needsFirstInstall)
+			{
+				if(_updatingAssemblies)
+				{
+					ImGui.Text("Downloading dependencies...");
+					return;
+				}
+				ImGui.Text("Please download the required dependencies to use AlphaChannel:");
+				if(!updatesAvailable)
+					ImGui.BeginDisabled();
+				if (ImGui.Button(updatesAvailable ? "Install dependencies" : "Checking for updates..."))
+				{
+					_updatingAssemblies = true;
+					if(_plugin.AssemblyLocationMPV == null)
+						_plugin.LibResources.DownloadMPVAsync().ContinueWith(async task =>
+						{
+							if (task.Result)
+							{
+								Services.Log.Debug("MPV downloaded successfully.");
+								_plugin.AssemblyLocationMPV = _plugin.LibResources.GetLocationMPV()!;
+							}
+							else
+							{
+								Services.Log.Error("Failed to download MPV.");
+							}
+						});
+					if(_plugin.AssemblyLocationYTDLP == null)
+						_plugin.LibResources.DownloadYTDLPAsync().ContinueWith(async task =>
+						{
+							if (task.Result)
+							{
+								Services.Log.Debug("YTDLP downloaded successfully.");
+								_plugin.AssemblyLocationYTDLP = _plugin.LibResources.GetLocationYTDLP()!;
+							}
+							else
+							{
+								Services.Log.Error("Failed to download YTDLP.");
+							}
+						});
+				}
+				if(!updatesAvailable)
+					ImGui.EndDisabled();
+				return;
+			}
+			_assembliesLoaded = !needsFirstInstall;
+		}
         if (_currentToggle != 0 && !_textureLoaded)
         {
-            ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " Unable to fetch the TV screen! Has the plugin been deactivated during play? Please make sure to: ");
+            ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " Trying to fetch the TV screen... Has the plugin been deactivated during play? If this persists, please make sure to: ");
             ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 1. Restart the game client with the plugin turned on");
             ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 2. Make sure the AlphaChannelTV Penumbra mod is enabled");
         }
@@ -869,6 +925,48 @@ public class ControlWindow : Window, IDisposable
 			_lastMilliSecond = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 			CheckAllTVs();
+
+			if (!_assembliesChecked)
+			{
+				var mpvLocation = _plugin.LibResources.GetLocationMPV();
+				if(mpvLocation != null)
+				{
+					_plugin.AssemblyLocationMPV = mpvLocation;
+				}
+				var ytdlpLocation = _plugin.LibResources.GetLocationYTDLP();
+				if(ytdlpLocation != null)
+				{
+					_plugin.AssemblyLocationYTDLP = ytdlpLocation;
+				}
+
+				_assembliesChecked = true;
+			}
+			else if (!_assemblyUpdateChecked)
+			{
+				_plugin.LibResources.CheckMPVAsync().ContinueWith(task =>
+				{
+					if (task.IsCompletedSuccessfully)
+					{
+						Services.Log.Debug("Success checking for updates.");
+					}
+					else
+					{
+						Services.Log.Error("Failed to check for updates: " + task.Exception?.ToString());
+					}
+				});
+				_plugin.LibResources.CheckYTDLPAsync().ContinueWith(task =>
+				{
+					if (task.IsCompletedSuccessfully)
+					{
+						Services.Log.Debug("Success checking for updates.");
+					}
+					else
+					{
+						Services.Log.Error("Failed to check for updates: " + task.Exception?.ToString());
+					}
+				});
+				_assemblyUpdateChecked = true;
+			}
         }
 	}
 

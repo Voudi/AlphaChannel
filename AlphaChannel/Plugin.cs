@@ -12,7 +12,8 @@ namespace AlphaChannel;
 public class Plugin : IDalamudPlugin
 {
 	// Required for LivePluginLoader support
-	public string AssemblyLocation { get; } = Assembly.GetExecutingAssembly().Location;
+	public string AssemblyLocationMPV { get; set; }
+	public string AssemblyLocationYTDLP { get; set; }
 	// Required for LivePluginLoader support
 	public string Name => "AlphaChannel";
 
@@ -26,6 +27,8 @@ public class Plugin : IDalamudPlugin
 	private readonly string _pluginDir;
 	private CancellationTokenSource _RenderCancellation = new CancellationTokenSource();
 
+	public Resources LibResources { get; }
+
 	public Plugin(IDalamudPluginInterface pluginInterface)
 	{
 		Application.EnableVisualStyles();
@@ -36,7 +39,6 @@ public class Plugin : IDalamudPlugin
 		#if IS_TEST
 			title += pluginInterface.Manifest.TestingAssemblyVersion + " (Test Version)";
 		#endif
-
 
         // init services
         pluginInterface.Create<Services>();
@@ -49,6 +51,8 @@ public class Plugin : IDalamudPlugin
 
 		_pluginConfigDir = pluginInterface.GetPluginConfigDirectory();
 
+		LibResources = new Resources(_pluginDir);
+
         // Spin up DX handling from the plugin interface
         DxHandler.Initialise(Services.PluginInterface);
 
@@ -57,7 +61,7 @@ public class Plugin : IDalamudPlugin
 
 		//IpcProvider.Init(this);
 
-		MpvRenderer.Setup(_pluginDir);
+		MpvRenderer.Setup(this);
 
 		// Create Main Window
 		_mainWindow = new ControlWindow(this, title);

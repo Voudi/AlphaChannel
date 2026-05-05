@@ -43,20 +43,6 @@
 		<PackageReference Include="System.Management" Version="10.0.7" />
 	</ItemGroup>
 	<ItemGroup>
-		<Content Include="Content/libEGL.dll">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</Content>
-		<Content Include="Content/libGLESv2.dll">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</Content>
-		<Content Include="Content/libmpv-2.dll">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</Content>
-		<Content Include="Content/yt-dlp.exe">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</Content>
-	</ItemGroup>
-	<ItemGroup>
 	  <Compile Update="WebView2Client.cs" />
 	</ItemGroup>
 
