@@ -20,12 +20,13 @@ public class Plugin : IDalamudPlugin
 	public readonly WindowSystem WindowSystem = new("AlphaChannel");
 	private const string _commandRemote = "/aremote";
 
-	public static readonly int _resolutionWidth = 1280;
-	public static readonly int _resolutionHeight = 720;
+	public static readonly int _resolutionWidth = 1920;
+	public static readonly int _resolutionHeight = 1080;
 	private ControlWindow _mainWindow;
 	private readonly string _pluginConfigDir;
 	private readonly string _pluginDir;
 	private CancellationTokenSource _RenderCancellation = new CancellationTokenSource();
+	private MpvRenderer? _currentMpvRenderer;
 
 	public Resources LibResources { get; }
 
@@ -83,6 +84,8 @@ public class Plugin : IDalamudPlugin
 
 		_mainWindow?.Dispose();
 
+		_currentMpvRenderer?.StopRender();
+
 		DxHandler.Shutdown();
 	}
 
@@ -105,19 +108,17 @@ public class Plugin : IDalamudPlugin
 
 	private void DrawUI() => WindowSystem.Draw();
 	public void ToggleMainUI() => _mainWindow?.Toggle();
-
-
-	public void TerminateAlphaWindow()
-	{
-		_RenderCancellation.Cancel();
-	}
-
 	private DateTime _lastLoadYT = DateTime.MinValue;
 	private static readonly Regex _YTRegex = new Regex(@"^\w+://[^/]*youtube\.\w+/|^\w+://youtu\.be/", RegexOptions.Compiled);
 	private static bool IsYTURL(string url) => _YTRegex.IsMatch(url);
 	public int StartMPV(string url, Texture2D sharedTexture)
 	{
-		_RenderCancellation.Cancel();
+		if(!_RenderCancellation.Token.IsCancellationRequested)
+		{
+			_currentMpvRenderer?.StopRender();
+			_RenderCancellation.Cancel();
+		}
+		
 		_RenderCancellation = new CancellationTokenSource();
 
 		int sleepTime = 0;
@@ -137,19 +138,19 @@ public class Plugin : IDalamudPlugin
 			{
 				try
 				{
-						var mpvRenderer = new MpvRenderer();
-						mpvRenderer.Initialize(_resolutionWidth, _resolutionHeight, url, sharedTexture);
+						_currentMpvRenderer = new MpvRenderer();
+						_currentMpvRenderer.Initialize(_resolutionWidth, _resolutionHeight, url, sharedTexture);
 
 						new Thread(() =>
 						{
 							Services.Log.Debug("Video Player started");
 							while(!_RenderCancellation.Token.IsCancellationRequested)
 							{
-								if (!mpvRenderer.RenderFrame(_RenderCancellation.Token))
+								if (!_currentMpvRenderer.RenderFrame(_RenderCancellation.Token))
 									break;
 							}
 							Services.Log.Debug("Video Player stopped");
-							mpvRenderer.StopRender();
+							_currentMpvRenderer.StopRender();
 						}){IsBackground = true}.Start();
 				}
 				catch (Exception e)
@@ -167,7 +168,21 @@ public class Plugin : IDalamudPlugin
 		return sleepTime;
 	}
 
-    public void Play()
+	public void TerminateAlphaWindow()
+	{
+		_RenderCancellation.Cancel();
+	}
+
+    public void TogglePause()
+    {
+		if(!_RenderCancellation.Token.IsCancellationRequested)
+		{
+			_currentMpvRenderer?.TogglePause();
+		}
+        //TODO: Implement play/pause functionality for the mpv player
+    }
+
+	public void Resume()
     {
         //TODO: Implement play/pause functionality for the mpv player
     }

@@ -208,5 +208,11 @@ namespace AlphaChannel
             
             _targetTexture?.Dispose();
         }
+
+        public void TogglePause()
+        {
+            if(!_stopping)
+                mpv_command(_mpvCtx, new[] { "cycle", "pause", null });
+        }
     }
 }

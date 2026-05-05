@@ -37,6 +37,7 @@ public class ControlWindow : Window, IDisposable
     private bool _installWarningMessage = false;
     private bool _installedmod = false;
 	private bool _syncPlayToggle = true;
+	private bool _pauseToggle = false;
 	private bool IsSyncPlay(Uri? url)
 	{
 		if (url != null)
@@ -279,9 +280,10 @@ public class ControlWindow : Window, IDisposable
 			if(ValidateURL(out Uri? url) && url != null)
 			{
 				_currentToggle = entityId;
-
-				if (isSyncRefresh && IsSyncPlay(url))
-					ForceSyncPlay(); //Just send a sync play signal if sync is on, no need to refresh webpage
+				_pauseToggle = false;
+				if (isSyncRefresh && IsSyncPlay(url)){}
+					//ForceSyncPlay(); //Just send a sync play signal if sync is on, no need to refresh webpage
+					//TODO: IMPLEMENT SYNC PLAY PROPERLY
 				else
 					_plugin.StartMPV(url.ToString(), _currentSharedTexture);
 
@@ -297,6 +299,7 @@ public class ControlWindow : Window, IDisposable
 			if (_currentURLs.TryGetValue(entityId, out var url))
 			{
 				_currentToggle = entityId;
+				_pauseToggle = false;
 				_plugin.StartMPV(url, _currentSharedTexture);
 			}
             else
@@ -311,6 +314,7 @@ public class ControlWindow : Window, IDisposable
 
 	private void TurnOffTV()
 	{
+		_pauseToggle = false;
 		ClearTexture();
 		_plugin.TerminateAlphaWindow();
 		_currentActivatedTV = 0;
@@ -464,9 +468,9 @@ public class ControlWindow : Window, IDisposable
 		}
         if (_currentToggle != 0 && !_textureLoaded)
         {
-            ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " Trying to fetch the TV screen... Has the plugin been deactivated during play? If this persists, please make sure to: ");
-            ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 1. Restart the game client with the plugin turned on");
-            ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 2. Make sure the AlphaChannelTV Penumbra mod is enabled");
+            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Trying to fetch the TV screen... Has the plugin been deactivated during play? If this persists, please make sure to: ");
+            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " 1. Restart the game client with the plugin turned on");
+            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " 2. Make sure the AlphaChannelTV Penumbra mod is enabled");
         }
         if (!_modexists)
         {
@@ -724,21 +728,19 @@ public class ControlWindow : Window, IDisposable
 
                 ImGui.SameLine();
 
-                if (isTheRunningTV)
+                if (isTheRunningTV && isPlayer)
                 {
                     ImGui.PushFont(UiBuilder.IconFont);
-                    if (ImGui.Button(FontAwesomeIcon.PlayCircle.ToIconString() + "##forceplay" + item.EntityId))
+                    if (ImGui.Button(_pauseToggle ? FontAwesomeIcon.Play.ToIconString() : FontAwesomeIcon.Pause.ToIconString() + "##forceplay" + item.EntityId))
                     {
-						if (_syncPlayToggle && isPlayer)
-							ForceSyncPlay();
-						else
-							_plugin.Play();
+						_plugin.TogglePause();
+						_pauseToggle = !_pauseToggle;
                     }
                     ImGui.PopFont();
                     if (ImGui.IsItemHovered())
                     {
                         ImGui.BeginTooltip();
-                        ImGui.Text("Force-Play Video - BETA");
+                        ImGui.Text("Pause/Resume");
                         ImGui.EndTooltip();
                     }
                 }
@@ -1036,14 +1038,4 @@ public class ControlWindow : Window, IDisposable
             Services.Log.Debug("Request exception: " + e.Message + e.StackTrace);
         }
 	}
-
-    private void ForceSyncPlay()
-    {
-        if (_syncPlayToggle)
-        {
-            _OTTApi.ForcePlayVideo();
-			Task.Delay(1000);
-            _plugin.Play();
-        }
-    }
 }
