@@ -36,7 +36,7 @@ public class ControlWindow : Window, IDisposable
     private bool _modenabled = false;
     private bool _installWarningMessage = false;
     private bool _installedmod = false;
-	private bool _syncPlayToggle = true;
+	private bool _syncPlayToggle = false;
 	private bool _pauseToggle = false;
 	private bool IsSyncPlay(Uri? url)
 	{
@@ -46,13 +46,16 @@ public class ControlWindow : Window, IDisposable
 		else return false;
 	}
     //Render Vars
-    private String _inputURL = "";
-    private String _shortenedURL = "";
-    private String _lastURL = "";
-	private bool _assembliesLoaded = false;
-	private bool _assembliesChecked = false;
-	private bool _assemblyUpdateChecked = false;
-	private bool _updatingAssemblies = false;
+    private string _inputURL = "";
+    private string _shortenedURL = "";
+    private string _lastURL = "";
+	private float _volume = 110;
+	private float _seeker = 0;
+	private bool _libsLoaded = false;
+	private bool _libsChecked = false;
+	private bool _libsUpdateChecked = false;
+	private bool _updatingLibs = false;
+	private DateTime _lastTVTurnOn= DateTime.MinValue;
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
 	{
 		Width = Plugin._resolutionWidth,
@@ -91,8 +94,8 @@ public class ControlWindow : Window, IDisposable
 
         SizeConstraints = new WindowSizeConstraints
 		{
-			MinimumSize = new Vector2(325, 200),
-			MaximumSize = new Vector2(1800, 900)
+			MinimumSize = new Vector2(275, 489),
+			MaximumSize = new Vector2(275, 1080)
 		};
 
 		//INIT COMPATIBILITY
@@ -281,6 +284,7 @@ public class ControlWindow : Window, IDisposable
 			{
 				_currentToggle = entityId;
 				_pauseToggle = false;
+				_lastTVTurnOn = DateTime.Now;
 				if (isSyncRefresh && IsSyncPlay(url)){}
 					//ForceSyncPlay(); //Just send a sync play signal if sync is on, no need to refresh webpage
 					//TODO: IMPLEMENT SYNC PLAY PROPERLY
@@ -300,6 +304,7 @@ public class ControlWindow : Window, IDisposable
 			{
 				_currentToggle = entityId;
 				_pauseToggle = false;
+				_lastTVTurnOn = DateTime.Now;
 				_plugin.StartMPV(url, _currentSharedTexture);
 			}
             else
@@ -405,24 +410,27 @@ public class ControlWindow : Window, IDisposable
 	private IEnumerable<IGameObject> _playerList = [];
 	public override void Draw()
 	{
+		Vector4 textColor;
 		var playerIsRunningTV = _currentToggle == Services.Objects.LocalPlayer?.EntityId;
 
         if (Services.DutyState.IsDutyStarted)
 		{
-            ImGui.Text("AlphaChannel is deactivated during a duty.");
+            ImGui.Text("AlphaChannel is deactivated");
+			ImGui.Text("while in duties.");
 			return;
         }
-		if(!_assembliesChecked)
+		if(!_libsChecked)
 		{
-			ImGui.Text("Fatal error while checking assemblies in plugin folder.");
+			ImGui.Text("FATAL ERROR while checking");
+			ImGui.Text("resources in plugin folder.");
 		}
-		if(!_assembliesLoaded && _assembliesChecked)
+		if(!_libsLoaded && _libsChecked)
 		{
 			bool needsFirstInstall = _plugin.AssemblyLocationMPV == null || _plugin.AssemblyLocationYTDLP == null;
 			bool updatesAvailable = (_plugin.LibResources.mpvCheckResult[0] != string.Empty) || (_plugin.LibResources.ytdlpCheckResult[0] != string.Empty);
 			if (needsFirstInstall)
 			{
-				if(_updatingAssemblies)
+				if(_updatingLibs)
 				{
 					ImGui.Text("Downloading dependencies...");
 					return;
@@ -432,7 +440,7 @@ public class ControlWindow : Window, IDisposable
 					ImGui.BeginDisabled();
 				if (ImGui.Button(updatesAvailable ? "Install dependencies" : "Checking for updates..."))
 				{
-					_updatingAssemblies = true;
+					_updatingLibs = true;
 					if(_plugin.AssemblyLocationMPV == null)
 						_plugin.LibResources.DownloadMPVAsync().ContinueWith(async task =>
 						{
@@ -464,17 +472,19 @@ public class ControlWindow : Window, IDisposable
 					ImGui.EndDisabled();
 				return;
 			}
-			_assembliesLoaded = !needsFirstInstall;
+			_libsLoaded = !needsFirstInstall;
 		}
-        if (_currentToggle != 0 && !_textureLoaded)
+        if (_currentToggle != 0 && !_textureLoaded && _lastTVTurnOn.AddSeconds(5) < DateTime.Now)
         {
-            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Trying to fetch the TV screen... Has the plugin been deactivated during play? If this persists, please make sure to: ");
-            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " 1. Restart the game client with the plugin turned on");
-            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " 2. Make sure the AlphaChannelTV Penumbra mod is enabled");
+            ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " Error: Cannot Fetch Screen Texture");
+            ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 1. Keep the plugin activated");
+            ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 2. Restart the game client, or");
+			ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 3. Teleport to another zone");
         }
         if (!_modexists)
         {
-            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please install the AlphaChannelTV Penumbra mod before continuing:");
+            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please install the AlphaChannelTV");
+			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Penumbra mod before continuing:");
             if (ImGui.Button("Step 1 - Install"))
             {
                 InstallTVMod();
@@ -487,7 +497,8 @@ public class ControlWindow : Window, IDisposable
         }
         if (!_modenabled && _installedmod)
         {
-            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please enable the AlphaChannelTV Penumbra mod before continuing:");
+            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please enable the AlphaChannelTV");
+			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Penumbra mod before continuing:");
             if (ImGui.Button("Step 2 - Enable"))
             {
                 Services.CommandManager?.ProcessCommand("/penumbra reload");
@@ -498,98 +509,8 @@ public class ControlWindow : Window, IDisposable
             }
             return;
         }
-        ImGui.Text(" Host Settings:");
 
-        Vector4 textColor = _signalToggleShare ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
-        ImGui.PushStyleColor(ImGuiCol.Text, textColor);
-
-        ImGui.PushFont(UiBuilder.IconFont);
-        if (ImGui.Button((_signalToggleShare ? FontAwesomeIcon.EyeSlash.ToIconString() : FontAwesomeIcon.Eye.ToIconString()) + "##eye"))
-        {
-			_signalToggleShare = !_signalToggleShare;
-			if(playerIsRunningTV)
-			{
-				if (_signalToggleShare)
-				{
-					//Reapply sharing
-					_signalShareTitle = true;
-				}
-				else
-				{
-					_signalShareTitle = false;
-					Services.CommandManager?.ProcessCommand("/honorific force clear");
-				}
-			}
-        }
-        ImGui.PopFont();
-
-        ImGui.PopStyleColor();
-
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.BeginTooltip();
-            ImGui.Text(_signalToggleShare ? "Currently sharing URL with others, press to stop sharing." : "Currently not sharing URL with others, press to share URL.");
-            ImGui.EndTooltip();
-        }
-
-        ImGui.SameLine();
-
-        textColor = _syncPlayToggle ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
-        ImGui.PushStyleColor(ImGuiCol.Text, textColor);
-
-        ImGui.PushFont(UiBuilder.IconFont);
-        if (ImGui.Button(FontAwesomeIcon.Link.ToIconString() + "##sync"))
-        {
-            if (!_OTTApi.initialized)
-                _OTTApi.Login();
-
-            _syncPlayToggle = !_syncPlayToggle;
-
-            if (playerIsRunningTV) //If currently hosting, turn it off, no matter what
-			{
-                Services.CommandManager?.ProcessCommand("/honorific force clear");
-                TurnOffTV();
-                if (string.IsNullOrEmpty(_inputURL))
-                {
-                    _inputURL = _placeHolderURL;
-                }
-            }
-        }
-        ImGui.PopFont();
-
-        ImGui.PopStyleColor();
-
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.BeginTooltip();
-            ImGui.Text(_syncPlayToggle ? "Currently using video sync. Click to deactivate." : "Currently not using video sync. Click to activate.");
-            ImGui.EndTooltip();
-        }
-
-		/*
-        ImGui.SameLine();
-
-        textColor = _adBlockToggle ? new Vector4(0.8f, 0.8f, 0.3f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
-        ImGui.PushStyleColor(ImGuiCol.Text, textColor);
-
-        ImGui.PushFont(UiBuilder.IconFont);
-        if (ImGui.Button(FontAwesomeIcon.ShieldCat.ToIconString() + "##adblock"))
-        {
-            _adBlockToggle = !_adBlockToggle;
-        }
-        ImGui.PopFont();
-
-        ImGui.PopStyleColor();
-
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.BeginTooltip();
-            ImGui.Text(_adBlockToggle ? "Deactivate Adblock" : "Activate Adblock");
-            ImGui.EndTooltip();
-        }
-		*/
-
-        ImGui.Text(" Available TVs:");
+        ImGui.Text(" Available TV List:");
 
         foreach (var item in _playerList)
 		{
@@ -597,15 +518,16 @@ public class ControlWindow : Window, IDisposable
             
 			if(isPlayer && _installWarningMessage && _modenabled)
 			{
-                ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Searching for TV...");
-                ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please enable the AlphaChannelTV Penumbra mod and make sure it has the highest priority.");
+                ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please enable the AlphaChannelTV");
+				ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Penumbra mod and make sure");
+				ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " it has the highest priority.");
 			}
             if ((isPlayer && _installWarningMessage) || _currentOwners.TryGetValue(item.EntityId, out _)) //Checks if players carbuncle exists OR other players TV exists
 			{
 				var isTheRunningTV = _currentToggle == item.EntityId;
-                var url = String.Empty;
+                var url = string.Empty;
 				bool urlExists = false;
-
+				bool urlEmpty = string.IsNullOrEmpty(_inputURL);
 				
 				if (isPlayer)
 				{
@@ -623,8 +545,9 @@ public class ControlWindow : Window, IDisposable
 
                 ImGui.Text(isPlayer ? "YOU" : " " + item.Name.TextValue);
 
-                ImGui.SameLine();
-				
+				ImGui.SameLine();
+
+
 				if (isTheRunningTV)
 				{
 					textColor = isPlayer ? new Vector4(1.0f, 0.0f, 0.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f); ;
@@ -638,8 +561,6 @@ public class ControlWindow : Window, IDisposable
 				{
 					ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1.0f));
 				}
-
-
 				ImGui.PushFont(UiBuilder.IconFont);
 				if (ImGui.Button((isTheRunningTV ?
 					(!string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists ?
@@ -726,10 +647,10 @@ public class ControlWindow : Window, IDisposable
                     ImGui.EndTooltip();
                 }
 
-                ImGui.SameLine();
-
                 if (isTheRunningTV && isPlayer)
                 {
+					ImGui.SameLine();
+
                     ImGui.PushFont(UiBuilder.IconFont);
                     if (ImGui.Button(_pauseToggle ? FontAwesomeIcon.Play.ToIconString() : FontAwesomeIcon.Pause.ToIconString() + "##forceplay" + item.EntityId))
                     {
@@ -743,40 +664,96 @@ public class ControlWindow : Window, IDisposable
                         ImGui.Text("Pause/Resume");
                         ImGui.EndTooltip();
                     }
-                }
 
-                ImGui.SameLine();
+					ImGui.SameLine();
 
-				if (urlExists || isPlayer)
-				{
-                    ImGui.PushFont(UiBuilder.IconFont);
-                    if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##clipboard" + item.EntityId))
-                    {
-                        ImGui.SetClipboardText(isPlayer ? (string.IsNullOrEmpty(_inputURL) && isTheRunningTV ? _placeHolderURL : _inputURL) : (url ?? String.Empty));
-                    }
-                    ImGui.PopFont();
-                    if (ImGui.IsItemHovered())
-                    {
-                        ImGui.BeginTooltip();
-                        ImGui.Text("Copy URL to clipboard");
-                        ImGui.EndTooltip();
-                    }
+					ImGui.PushFont(UiBuilder.IconFont);
+					ImGui.SetNextItemWidth(100);
+					ImGui.SliderFloat("##volumebar" + item.EntityId, ref _volume, 0, 110, _volume <= 10 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
+					ImGui.PopFont();
 
-                    ImGui.SameLine();
-                }
+					ImGui.SameLine();
+		
+					textColor = _signalToggleShare ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
+					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
+
+					ImGui.PushFont(UiBuilder.IconFont);
+					if (ImGui.Button((_signalToggleShare ? FontAwesomeIcon.EyeSlash.ToIconString() : FontAwesomeIcon.Eye.ToIconString()) + "##eye"))
+					{
+						_signalToggleShare = !_signalToggleShare;
+						if(playerIsRunningTV)
+						{
+							if (_signalToggleShare)
+							{
+								//Reapply sharing
+								_signalShareTitle = true;
+							}
+							else
+							{
+								_signalShareTitle = false;
+								Services.CommandManager?.ProcessCommand("/honorific force clear");
+							}
+						}
+					}
+					ImGui.PopFont();
+
+					ImGui.PopStyleColor();
+
+					if (ImGui.IsItemHovered())
+					{
+						ImGui.BeginTooltip();
+						ImGui.Text(_signalToggleShare ? "Currently sharing URL with others, press to stop sharing." : "Currently not sharing URL with others, press to share URL.");
+						ImGui.EndTooltip();
+					}
+
+					ImGui.SameLine();
+
+					textColor = _syncPlayToggle ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
+					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
+
+					ImGui.PushFont(UiBuilder.IconFont);
+					if (ImGui.Button(FontAwesomeIcon.Link.ToIconString() + "##sync"))
+					{
+						if (!_OTTApi.initialized)
+							_OTTApi.Login();
+
+						_syncPlayToggle = !_syncPlayToggle;
+
+						if (playerIsRunningTV) //If currently hosting, turn it off, no matter what
+						{
+							Services.CommandManager?.ProcessCommand("/honorific force clear");
+							TurnOffTV();
+							if (string.IsNullOrEmpty(_inputURL))
+							{
+								_inputURL = _placeHolderURL;
+							}
+						}
+					}
+					ImGui.PopFont();
+
+					ImGui.PopStyleColor();
+
+					if (ImGui.IsItemHovered())
+					{
+						ImGui.BeginTooltip();
+						ImGui.Text(_syncPlayToggle ? "Currently using video sync. Click to deactivate." : "Currently not using video sync. Click to activate.");
+						ImGui.EndTooltip();
+					}
+				}
 
 				if (isPlayer)
 				{
 					textColor = _syncPlayToggle ? 
-						(_OTTApi.IsChecking ? new Vector4(0.7f, 0.7f, 0.2f, 1f) 
-							: (urlExists || (isTheRunningTV && string.IsNullOrEmpty(_inputURL)) ? new Vector4(0.2f, 0.7f, 0.2f, 1f) 
-								: new Vector4(0.7f, 0.2f, 0.2f, 1f))) 
-						: (urlExists ? new Vector4(0.2f, 0.7f, 0.2f, 1f) 
-							: new Vector4(0.7f, 0.2f, 0.2f, 1f));
+
+						(_OTTApi.IsChecking ? new Vector4(0.8f, 0.8f, 0.3f, 1f) 
+							: (urlExists || (isTheRunningTV && urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f))) 
+
+						: (urlExists || (isTheRunningTV && urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f));
 
 					ImGui.PushStyleColor(ImGuiCol.Border, textColor); // red border
                     ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 1.0f);
                     
+					ImGui.SetNextItemWidth(235);
 					ImGui.InputText("##URL", ref _inputURL, 1000, ImGuiInputTextFlags.NoHorizontalScroll);
 
 					ImGui.PopStyleVar();
@@ -821,11 +798,36 @@ public class ControlWindow : Window, IDisposable
                     else
 						ImGui.Text(url);
                 }
+
+				if (urlExists || isPlayer)
+				{
+					ImGui.SameLine();
+
+                    ImGui.PushFont(UiBuilder.IconFont);
+                    if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##clipboard" + item.EntityId))
+                    {
+                        ImGui.SetClipboardText(isPlayer ? (string.IsNullOrEmpty(_inputURL) && isTheRunningTV ? _placeHolderURL : _inputURL) : (url ?? String.Empty));
+                    }
+                    ImGui.PopFont();
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text("Copy URL to clipboard");
+                        ImGui.EndTooltip();
+                    }
+                }
+				
+				ImGui.SetNextItemWidth(270);
+				ImGui.SliderFloat("##seeker" + item.EntityId, ref _seeker, 0, 100, "Seeker: %.0f%%");
 			}
 			else
 			{
 				if(isPlayer)
-					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: You have not summoned your standard blue carbuncle.");
+				{
+					
+					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: You have not summoned");
+					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " your standard blue carbuncle.");
+				}
             }
         }
     }
@@ -928,7 +930,7 @@ public class ControlWindow : Window, IDisposable
 
 			CheckAllTVs();
 
-			if (!_assembliesChecked)
+			if (!_libsChecked)
 			{
 				var mpvLocation = _plugin.LibResources.GetLocationMPV();
 				if(mpvLocation != null)
@@ -941,9 +943,9 @@ public class ControlWindow : Window, IDisposable
 					_plugin.AssemblyLocationYTDLP = ytdlpLocation;
 				}
 
-				_assembliesChecked = true;
+				_libsChecked = true;
 			}
-			else if (!_assemblyUpdateChecked)
+			else if (!_libsUpdateChecked)
 			{
 				_plugin.LibResources.CheckMPVAsync().ContinueWith(task =>
 				{
@@ -967,7 +969,7 @@ public class ControlWindow : Window, IDisposable
 						Services.Log.Error("Failed to check for updates: " + task.Exception?.ToString());
 					}
 				});
-				_assemblyUpdateChecked = true;
+				_libsUpdateChecked = true;
 			}
         }
 	}

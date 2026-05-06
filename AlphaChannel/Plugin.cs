@@ -12,8 +12,8 @@ namespace AlphaChannel;
 public class Plugin : IDalamudPlugin
 {
 	// Required for LivePluginLoader support
-	public string AssemblyLocationMPV { get; set; }
-	public string AssemblyLocationYTDLP { get; set; }
+	public string? AssemblyLocationMPV { get; set; }
+	public string? AssemblyLocationYTDLP { get; set; }
 	// Required for LivePluginLoader support
 	public string Name => "AlphaChannel";
 
@@ -38,7 +38,7 @@ public class Plugin : IDalamudPlugin
 		string title = "AlphaChannel Remote ";
 
 		#if IS_TEST
-			title += pluginInterface.Manifest.TestingAssemblyVersion + " (Test Version)";
+			title += " (Test)";
 		#endif
 
         // init services

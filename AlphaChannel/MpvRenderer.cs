@@ -5,7 +5,6 @@ namespace AlphaChannel
 {
     public class MpvRenderer
     {
-        private static string? _pluginDir;
         private static Plugin? _pluginInstance;
         public static void Setup(Plugin plugin)
         {
@@ -14,7 +13,7 @@ namespace AlphaChannel
             {
                 if (name == "libmpv-2")
                 {
-                    if (NativeLibrary.TryLoad(_pluginInstance.AssemblyLocationMPV, out var handle))
+                    if (_pluginInstance.AssemblyLocationMPV != null && NativeLibrary.TryLoad(_pluginInstance.AssemblyLocationMPV, out var handle))
                     {
                         return handle;
                     }
