@@ -187,6 +187,39 @@ public class Plugin : IDalamudPlugin
         //TODO: Implement play/pause functionality for the mpv player
     }
 
+	public bool GetPaused()
+	{
+		if (!_RenderCancellation.Token.IsCancellationRequested)
+		{
+			return _currentMpvRenderer?.GetPaused() ?? false;
+		}
+		return false;
+	}
+	public double[] GetPlayerInfos()
+	{
+		if (!_RenderCancellation.Token.IsCancellationRequested)
+		{
+			return _currentMpvRenderer?.GetProperties() ?? [0, 0, 0];
+		}
+		return [0, 0, 0];
+	}
+
+    public void SeekPlayer(int seconds)
+    {
+		if (!_RenderCancellation.Token.IsCancellationRequested)
+		{
+			_currentMpvRenderer?.Seek(seconds);
+		}
+    }
+
+    public void VolumePlayer(int vol)
+    {
+		if (!_RenderCancellation.Token.IsCancellationRequested)
+		{
+			_currentMpvRenderer?.SetVolume(vol);
+		}
+    }
+
     internal void UpdateTitle(uint entityId, TitleData titleData)
 	{
 		if (titleData?.Title != null)

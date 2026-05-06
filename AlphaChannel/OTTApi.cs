@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 public class OTTApi
 {
@@ -28,9 +29,11 @@ public class OTTApi
     private bool _checkFailed = false;
     public bool LastCheckSuccessful => !_checkingURL && _video is not null && !_checkFailed;
     public bool IsChecking => _checkingURL && !_checkFailed;
+    private JsonSerializerOptions _jsonOptions;
     public OTTApi(ControlWindow controlWindow)
 	{
         _controlWindow = controlWindow;
+        _jsonOptions = new JsonSerializerOptions{ PropertyNameCaseInsensitive = true };
     }
 
 	public void Dispose()
@@ -152,42 +155,52 @@ public class OTTApi
         }
     }
 
-    private record Queue(string action, List<Requests.Video> queue);
-    private record Stop(string action, bool isPlaying, int playbackPosition, string? currentSource, int playbackSpeed);
+    private record PlayNextEvent([property: JsonRequired] string action, List<Requests.Video> queue, [property: JsonRequired] Requests.Video currentSource, [property: JsonRequired] double playbackPosition);
+    private record QueueEvent([property: JsonRequired] string action, [property: JsonRequired] List<Requests.Video> queue);
+    private record PauseEvent([property: JsonRequired] string action, [property: JsonRequired] double playbackPosition, [property: JsonRequired] bool isPlaying);
+    private record PlayEvent([property: JsonRequired] string action, [property: JsonRequired] bool isPlaying);
     private void OnQueueReceived(string response)
     {
-        try
+        using var doc = JsonDocument.Parse(response);
         {
-            var message = JsonSerializer.Deserialize<Queue>(response, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-            if (message?.action == "sync")
-            {
-                queue.Clear();
-                queue.AddRange(message.queue);
-                Services.Log.Debug("Received OTT Queue with " + message.queue.Count + " videos!");
-            }
-
-            //Ignore Received Msg
-        }
-        catch (Exception)
-        {
-            try
-            {
-                var message = JsonSerializer.Deserialize<Stop>(response, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (message?.action == "sync" && message?.isPlaying == false)
+            if(doc.RootElement.TryGetProperty("action", out _)){
+                if(doc.RootElement.TryGetProperty("currentSource", out _) && doc.RootElement.TryGetProperty("playbackPosition", out _))
                 {
-                    Services.Log.Debug("Received OTT API Stop Signal!");
+                    PlayNextEvent message = JsonSerializer.Deserialize<PlayNextEvent>(response, _jsonOptions)!;
+                    if (message.action == "sync")
+                    {
+                        queue.Clear();
+                        queue.AddRange(message.queue);
+                        Services.Log.Debug("[OTT] Received Play Signal and Queue with " + message.queue.Count + " videos.");
+                    }
                 }
-
-                //Ignore Received Msg
+                else if(doc.RootElement.TryGetProperty("queue", out _))
+                {
+                    QueueEvent message = JsonSerializer.Deserialize<QueueEvent>(response, _jsonOptions)!;
+                    if (message.action == "sync")
+                    {
+                        queue.Clear();
+                        queue.AddRange(message.queue);
+                        Services.Log.Debug("[OTT] Received Queue with " + message.queue.Count + " videos.");
+                    }
+                }
+                else if(doc.RootElement.TryGetProperty("playbackPosition", out _) && doc.RootElement.TryGetProperty("isPlaying", out _))
+                {
+                    PauseEvent message = JsonSerializer.Deserialize<PauseEvent>(response, _jsonOptions)!;
+                    if (message.action == "sync" && !message.isPlaying)
+                    {
+                        Services.Log.Debug("[OTT] Received Pause signal at " + message.playbackPosition + " seconds.");
+                    }
+                }
+                else if(doc.RootElement.TryGetProperty("isPlaying", out _))
+                {
+                    PauseEvent message = JsonSerializer.Deserialize<PauseEvent>(response, _jsonOptions)!;
+                    if (message.action == "sync" && message.isPlaying)
+                    {
+                        Services.Log.Debug("[OTT] Received Play signal.");
+                    }
+                }
             }
-            catch (Exception)
-            {
-
-                //Ignore Received Msg
-            }
-            //Ignore Received Msg
         }
     }
 

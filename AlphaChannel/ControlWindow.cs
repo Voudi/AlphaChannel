@@ -49,12 +49,17 @@ public class ControlWindow : Window, IDisposable
     private string _inputURL = "";
     private string _shortenedURL = "";
     private string _lastURL = "";
-	private float _volume = 110;
+	private float _volume = 100;
 	private float _seeker = 0;
+	private int _seekerTimeSeconds = 0;
+	private int _seekerTimeMinutes = 0;
+	private int _seekerDurationSeconds = 0;
+	private int _seekerDurationMinutes = 0;
+	private int _seekerMaxSeconds = 0;
 	private bool _libsLoaded = false;
-	private bool _libsChecked = false;
-	private bool _libsUpdateChecked = false;
 	private bool _updatingLibs = false;
+
+	private bool _UIElementActive = false;
 	private DateTime _lastTVTurnOn= DateTime.MinValue;
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
 	{
@@ -94,7 +99,7 @@ public class ControlWindow : Window, IDisposable
 
         SizeConstraints = new WindowSizeConstraints
 		{
-			MinimumSize = new Vector2(275, 489),
+			MinimumSize = new Vector2(275, 235),
 			MaximumSize = new Vector2(275, 1080)
 		};
 
@@ -119,6 +124,8 @@ public class ControlWindow : Window, IDisposable
 
         if (!_OTTApi.initialized)
             _OTTApi.Login();
+		
+		CheckForUpdates();
     }
 
     public void ClearTexture()
@@ -130,7 +137,44 @@ public class ControlWindow : Window, IDisposable
 		DxHandler.Device?.ImmediateContext.ClearRenderTargetView(rtv, clearColor);
     }
 
-	private void CheckTitles()
+	private void CheckForUpdates()
+	{
+		var mpvLocation = _plugin.LibResources.GetLocationMPV();
+		if(mpvLocation != null)
+		{
+			_plugin.AssemblyLocationMPV = mpvLocation;
+		}
+		var ytdlpLocation = _plugin.LibResources.GetLocationYTDLP();
+		if(ytdlpLocation != null)
+		{
+			_plugin.AssemblyLocationYTDLP = ytdlpLocation;
+		}
+
+		_plugin.LibResources.CheckMPVAsync().ContinueWith(task =>
+		{
+			if (task.IsCompletedSuccessfully)
+			{
+				Services.Log.Debug("Success checking for MPV updates.");
+			}
+			else
+			{
+				Services.Log.Error("Failed to check for MPV updates: " + task.Exception?.ToString());
+			}
+		});
+		_plugin.LibResources.CheckYTDLPAsync().ContinueWith(task =>
+		{
+			if (task.IsCompletedSuccessfully)
+			{
+				Services.Log.Debug("Success checking for YTDLP updates.");
+			}
+			else
+			{
+				Services.Log.Error("Failed to check for YTDLP updates: " + task.Exception?.ToString());
+			}
+		});
+	}
+
+	private void ProcessURLShare()
 	{
 		if (_signalShareTitle &&  _signalToggleShare)
 		{
@@ -139,16 +183,13 @@ public class ControlWindow : Window, IDisposable
 		}
 	}
 
-	private unsafe void CheckAllTVs()
+	private unsafe void ScanTVs()
 	{
-		
         var playerId = Services.Objects.LocalPlayer?.EntityId;
 
         bool hookEnabled = _getResourceSyncHook.IsEnabled && !_getResourceSyncHook.IsDisposed;
         if (hookEnabled) //Only check for stuff while the hook is activated, which is outside from duties
 		{
-			CheckTitles();
-		
 			List<uint> visitedTvs = new List<uint>();
 			_playerList = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => (x.EntityId == Services.Objects.LocalPlayer?.EntityId) ? "@" : x.Name.TextValue);
 
@@ -182,7 +223,7 @@ public class ControlWindow : Window, IDisposable
 																_modenabled = false;
 
                                                             visitedTvs.Add(ownerId);
-															CheckOutPossibleTV((IntPtr)tvDraw, ownerId, item.Address);
+															DetectTV((IntPtr)tvDraw, ownerId, item.Address);
 															continue;
 														}
 													}
@@ -233,7 +274,7 @@ public class ControlWindow : Window, IDisposable
 		}
 	}
 
-	private void CheckOutPossibleTV(IntPtr tvDraw, uint ownerId, nint address)
+	private void DetectTV(IntPtr tvDraw, uint ownerId, nint address)
 	{
 		IntPtr ptr = tvDraw;
 		var tvAddrFound = _currentOwners.TryGetValue(ownerId, out var tvAddr);
@@ -419,12 +460,7 @@ public class ControlWindow : Window, IDisposable
 			ImGui.Text("while in duties.");
 			return;
         }
-		if(!_libsChecked)
-		{
-			ImGui.Text("FATAL ERROR while checking");
-			ImGui.Text("resources in plugin folder.");
-		}
-		if(!_libsLoaded && _libsChecked)
+		if(!_libsLoaded)
 		{
 			bool needsFirstInstall = _plugin.AssemblyLocationMPV == null || _plugin.AssemblyLocationYTDLP == null;
 			bool updatesAvailable = (_plugin.LibResources.mpvCheckResult[0] != string.Empty) || (_plugin.LibResources.ytdlpCheckResult[0] != string.Empty);
@@ -511,7 +547,7 @@ public class ControlWindow : Window, IDisposable
         }
 
         ImGui.Text(" Available TV List:");
-
+		ImGui.Separator();
         foreach (var item in _playerList)
 		{
             var isPlayer = item.EntityId == Services.Objects.LocalPlayer?.EntityId;
@@ -669,7 +705,13 @@ public class ControlWindow : Window, IDisposable
 
 					ImGui.PushFont(UiBuilder.IconFont);
 					ImGui.SetNextItemWidth(100);
-					ImGui.SliderFloat("##volumebar" + item.EntityId, ref _volume, 0, 110, _volume <= 10 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
+					ImGui.SliderFloat("##volumebar" + item.EntityId, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
+					if (ImGui.IsItemActive()) _UIElementActive = true;
+					if(ImGui.IsItemDeactivatedAfterEdit())
+					{
+						VolumePlayer(_volume);
+						_UIElementActive = false;
+					}
 					ImGui.PopFont();
 
 					ImGui.SameLine();
@@ -817,14 +859,27 @@ public class ControlWindow : Window, IDisposable
                     }
                 }
 				
-				ImGui.SetNextItemWidth(270);
-				ImGui.SliderFloat("##seeker" + item.EntityId, ref _seeker, 0, 100, "Seeker: %.0f%%");
+				ImGui.SetNextItemWidth(268);
+
+				ImGui.PushStyleColor(ImGuiCol.SliderGrab, new System.Numerics.Vector4(0.8f, 0.3f, 0.3f, 1));
+				ImGui.SliderFloat("##seeker" + item.EntityId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
+				if (ImGui.IsItemActive()) _UIElementActive = true;
+				if(ImGui.IsItemDeactivatedAfterEdit())
+				{
+					SeekPlayer(_seeker);
+					_UIElementActive = false;
+				}
+				ImGui.PopStyleColor(1);
+
+				if(!_playerList.Last().Equals(item))
+				{
+					ImGui.Separator();
+				}
 			}
 			else
 			{
 				if(isPlayer)
 				{
-					
 					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: You have not summoned");
 					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " your standard blue carbuncle.");
 				}
@@ -922,59 +977,67 @@ public class ControlWindow : Window, IDisposable
 	}
 
 	private long _lastMilliSecond = 0;
+	private long _lastMilliSecond144fps = 0;
 	public void Refresh()
 	{
+		if (_lastMilliSecond144fps + 6 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+		{
+			_lastMilliSecond144fps = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+			RefreshPlayer();
+		}
 		if (_lastMilliSecond + 1000 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 		{
 			_lastMilliSecond = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-			CheckAllTVs();
+			ProcessURLShare();
 
-			if (!_libsChecked)
-			{
-				var mpvLocation = _plugin.LibResources.GetLocationMPV();
-				if(mpvLocation != null)
-				{
-					_plugin.AssemblyLocationMPV = mpvLocation;
-				}
-				var ytdlpLocation = _plugin.LibResources.GetLocationYTDLP();
-				if(ytdlpLocation != null)
-				{
-					_plugin.AssemblyLocationYTDLP = ytdlpLocation;
-				}
-
-				_libsChecked = true;
-			}
-			else if (!_libsUpdateChecked)
-			{
-				_plugin.LibResources.CheckMPVAsync().ContinueWith(task =>
-				{
-					if (task.IsCompletedSuccessfully)
-					{
-						Services.Log.Debug("Success checking for updates.");
-					}
-					else
-					{
-						Services.Log.Error("Failed to check for updates: " + task.Exception?.ToString());
-					}
-				});
-				_plugin.LibResources.CheckYTDLPAsync().ContinueWith(task =>
-				{
-					if (task.IsCompletedSuccessfully)
-					{
-						Services.Log.Debug("Success checking for updates.");
-					}
-					else
-					{
-						Services.Log.Error("Failed to check for updates: " + task.Exception?.ToString());
-					}
-				});
-				_libsUpdateChecked = true;
-			}
+			ScanTVs();
         }
 	}
 
-	private async void ShareTitle(string url)
+
+	private void VolumePlayer(float volume)
+	{
+		var vol = (int)((float)Math.Sqrt(volume) * 10f); //Quadratic Slider Valuess
+		Services.Log.Debug("Setting volume to " + vol + "%");
+		_plugin.VolumePlayer(vol);
+	}
+	private void SeekPlayer(double percentage)
+	{
+		int seconds = (int)(_seekerMaxSeconds * (percentage/100));
+		Services.Log.Debug("Seeking to " + seconds + " seconds");
+		_plugin.SeekPlayer(seconds);
+	}
+    private void RefreshPlayer()
+    {
+		if(_currentToggle != 0)
+		{
+			var info = _plugin.GetPlayerInfos();
+
+			double time = info[0];
+			_seekerTimeMinutes = (int)(time / 60);
+			_seekerTimeSeconds = (int)(time % 60);
+			double duration = info[1];
+			if(duration > 0){
+				_seekerMaxSeconds = (int) duration;
+				_seekerDurationMinutes = (int)(duration / 60);
+				_seekerDurationSeconds = (int)(duration % 60);
+			}
+
+			if(!_UIElementActive)
+			{
+				if(duration > 0)
+				_seeker = (float) (duration > 0 ? time / duration * 100 : 100);
+
+				double volume = info[2];
+				_volume =  (float) volume / 100f * ((float)volume / 100f) * 100f; //Quadratic Slider Values
+			}
+		}
+		_pauseToggle = _plugin.GetPaused();
+    }
+
+    private async void ShareTitle(string url)
 	{
 		if (url == _lastURL)
 		{
