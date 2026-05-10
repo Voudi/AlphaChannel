@@ -31,11 +31,11 @@ public class ControlWindow : Window, IDisposable
 	private uint _currentToggle; //Playerpointer (whether TV toggled or not)
 	private uint _currentActivatedTV = 0; //Playerpointer (whether TV toggled or not)
     private bool _signalShareTitle = false;
-	private bool _signalToggleShare = false;
     private bool _modexists = false;
     private bool _modenabled = false;
     private bool _installWarningMessage = false;
     private bool _installedmod = false;
+	private bool _shareURLToggle = false;
 	private bool _syncPlayToggle = false;
 	private bool _pauseToggle = false;
 	private bool IsSyncPlay(Uri? url)
@@ -58,8 +58,11 @@ public class ControlWindow : Window, IDisposable
 	private int _seekerMaxSeconds = 0;
 	private bool _libsLoaded = false;
 	private bool _updatingLibs = false;
-
+	private bool _mvpIsPlaying = false;
 	private bool _UIElementActive = false;
+	private string _mediaTitle = string.Empty;
+	private bool _sharingTitle = false;
+	private bool _mpvIsIdle = true;
 	private DateTime _lastTVTurnOn= DateTime.MinValue;
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
 	{
@@ -130,7 +133,7 @@ public class ControlWindow : Window, IDisposable
 
     public void ClearTexture()
 	{
-		if (_currentSharedTexture == null)
+		if (_currentSharedTexture == null || DxHandler.Device == null)
 			return;
 		var rtv = new RenderTargetView(DxHandler.Device, _currentSharedTexture);
 		var clearColor = new RawColor4(0.3f, 0.3f, 0.3f, 1);
@@ -154,7 +157,7 @@ public class ControlWindow : Window, IDisposable
 		{
 			if (task.IsCompletedSuccessfully)
 			{
-				Services.Log.Debug("Success checking for MPV updates.");
+				Services.Log.Debug("Success checking for MPV updates");
 			}
 			else
 			{
@@ -165,7 +168,7 @@ public class ControlWindow : Window, IDisposable
 		{
 			if (task.IsCompletedSuccessfully)
 			{
-				Services.Log.Debug("Success checking for YTDLP updates.");
+				Services.Log.Debug("Success checking for YTDLP updates");
 			}
 			else
 			{
@@ -176,10 +179,16 @@ public class ControlWindow : Window, IDisposable
 
 	private void ProcessURLShare()
 	{
-		if (_signalShareTitle &&  _signalToggleShare)
+		if (_signalShareTitle &&  _shareURLToggle)
 		{
 			Services.CommandManager.ProcessCommand("/honorific force set alpha:" + _shortenedURL + "|silent");
+			_sharingTitle = true;
 			_signalShareTitle = false;
+		}
+		else if (_currentToggle == 0 && _sharingTitle)
+		{
+			Services.CommandManager?.ProcessCommand("/honorific force clear");
+			_sharingTitle = false;
 		}
 	}
 
@@ -246,8 +255,6 @@ public class ControlWindow : Window, IDisposable
 			{;
 				if (_currentToggle == ownerId)
 				{
-					if(playerId == ownerId)
-						Services.CommandManager?.ProcessCommand("/honorific force clear"); //In case Players EntityId changed due to sudden teleport
 					TurnOffTV();
 				}
 				_currentOwners.Remove(ownerId);
@@ -259,9 +266,6 @@ public class ControlWindow : Window, IDisposable
         if (dutyStarted && hookEnabled)
 		{
 			if(_currentToggle != 0) {
-				if(playerId == _currentToggle)
-					Services.CommandManager?.ProcessCommand("/honorific force clear"); //In case Player vanishes into duty
-			
 				TurnOffTV();
             }
             if(!_getResourceSyncHook.IsDisposed)
@@ -315,7 +319,7 @@ public class ControlWindow : Window, IDisposable
 		Services.CommandManager.ProcessCommand("/honorific force clear");
 	}
 
-	private void TurnOnTV(uint entityId, bool isSyncRefresh)
+	private void TurnOnTV(uint entityId, bool isRefresh)
 	{
 		var player = Services.Objects.LocalPlayer;
 		var isPlayer = entityId == player?.EntityId;
@@ -326,9 +330,12 @@ public class ControlWindow : Window, IDisposable
 				_currentToggle = entityId;
 				_pauseToggle = false;
 				_lastTVTurnOn = DateTime.Now;
-				if (isSyncRefresh && IsSyncPlay(url)){}
-					//ForceSyncPlay(); //Just send a sync play signal if sync is on, no need to refresh webpage
-					//TODO: IMPLEMENT SYNC PLAY PROPERLY
+
+				if (_syncPlayToggle)
+				{
+					_mvpIsPlaying = false;
+					_OTTApi.PushNextVideo();
+				}
 				else
 					_plugin.StartMPV(url.ToString(), _currentSharedTexture);
 
@@ -346,7 +353,13 @@ public class ControlWindow : Window, IDisposable
 				_currentToggle = entityId;
 				_pauseToggle = false;
 				_lastTVTurnOn = DateTime.Now;
-				_plugin.StartMPV(url, _currentSharedTexture);
+
+				/*if("isOTTLink" == "")
+					//_plugin.StartMPV(_OTTApiOther._videoURL, _currentSharedTexture);
+					TODO: NEUE OTTAPI ALS GAST OEFFNEN
+				else*/
+					_plugin.StartMPV(url, _currentSharedTexture);
+				
 			}
             else
             {
@@ -358,13 +371,18 @@ public class ControlWindow : Window, IDisposable
 		_currentActivatedTV = 0;
     }
 
-	private void TurnOffTV()
+	public void TurnOffTV()
 	{
 		_pauseToggle = false;
 		ClearTexture();
-		_plugin.TerminateAlphaWindow();
+		_plugin.StopPlayer();
 		_currentActivatedTV = 0;
 		_currentToggle = 0;
+		if (string.IsNullOrEmpty(_inputURL) && !string.IsNullOrEmpty(_placeHolderURL))
+		{
+			_inputURL = _placeHolderURL;
+			_placeHolderURL = string.Empty;
+		}
 	}
 
 	private bool ValidateURL(out Uri? url)
@@ -464,7 +482,9 @@ public class ControlWindow : Window, IDisposable
 		{
 			bool needsFirstInstall = _plugin.AssemblyLocationMPV == null || _plugin.AssemblyLocationYTDLP == null;
 			bool updatesAvailable = (_plugin.LibResources.mpvCheckResult[0] != string.Empty) || (_plugin.LibResources.ytdlpCheckResult[0] != string.Empty);
-			if (needsFirstInstall)
+
+			_libsLoaded = !needsFirstInstall && !updatesAvailable;
+			if (!_libsLoaded)
 			{
 				if(_updatingLibs)
 				{
@@ -474,41 +494,45 @@ public class ControlWindow : Window, IDisposable
 				ImGui.Text("Please download the required dependencies to use AlphaChannel:");
 				if(!updatesAvailable)
 					ImGui.BeginDisabled();
-				if (ImGui.Button(updatesAvailable ? "Install dependencies" : "Checking for updates..."))
+				if (ImGui.Button(updatesAvailable ? "Update dependencies" : "Checking for updates..."))
 				{
-					_updatingLibs = true;
-					if(_plugin.AssemblyLocationMPV == null)
+					Services.Log.Debug("Updating AlphaChannel Dependencies...");
+					if(_plugin.AssemblyLocationMPV == null || _plugin.LibResources.mpvCheckResult[0] != string.Empty)
 						_plugin.LibResources.DownloadMPVAsync().ContinueWith(async task =>
 						{
 							if (task.Result)
 							{
-								Services.Log.Debug("MPV downloaded successfully.");
+								Services.Log.Debug("MPV downloaded successfully");
 								_plugin.AssemblyLocationMPV = _plugin.LibResources.GetLocationMPV()!;
+								_plugin.LibResources.mpvCheckResult[0] = string.Empty;
 							}
 							else
 							{
-								Services.Log.Error("Failed to download MPV.");
+								Services.Log.Error("Failed to download MPV");
 							}
 						});
-					if(_plugin.AssemblyLocationYTDLP == null)
+					if(_plugin.AssemblyLocationYTDLP == null || _plugin.LibResources.ytdlpCheckResult[0] != string.Empty)
 						_plugin.LibResources.DownloadYTDLPAsync().ContinueWith(async task =>
 						{
 							if (task.Result)
 							{
-								Services.Log.Debug("YTDLP downloaded successfully.");
+								Services.Log.Debug("YTDLP downloaded successfully");
 								_plugin.AssemblyLocationYTDLP = _plugin.LibResources.GetLocationYTDLP()!;
+								_plugin.LibResources.ytdlpCheckResult[0] = string.Empty;
 							}
 							else
 							{
-								Services.Log.Error("Failed to download YTDLP.");
+								Services.Log.Error("Failed to download YTDLP");
 							}
 						});
+					_updatingLibs = true;
 				}
 				if(!updatesAvailable)
 					ImGui.EndDisabled();
+
 				return;
 			}
-			_libsLoaded = !needsFirstInstall;
+			
 		}
         if (_currentToggle != 0 && !_textureLoaded && _lastTVTurnOn.AddSeconds(5) < DateTime.Now)
         {
@@ -577,8 +601,6 @@ public class ControlWindow : Window, IDisposable
 					}
 				}
 
-                var refreshNeeded = isTheRunningTV && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists;
-
                 ImGui.Text(isPlayer ? "YOU" : " " + item.Name.TextValue);
 
 				ImGui.SameLine();
@@ -598,8 +620,11 @@ public class ControlWindow : Window, IDisposable
 					ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1.0f));
 				}
 				ImGui.PushFont(UiBuilder.IconFont);
+
+				var refreshNeeded = isTheRunningTV && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists;
+
 				if (ImGui.Button((isTheRunningTV ?
-					(!string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists ?
+					(refreshNeeded ?
 						FontAwesomeIcon.Repeat.ToIconString()
 						: FontAwesomeIcon.Stop.ToIconString()
 					)
@@ -610,55 +635,32 @@ public class ControlWindow : Window, IDisposable
 				{
 					try
 					{
-                        if ((isPlayer && _installWarningMessage))
-                        {
-                            if (!_installedmod)
-                            {
-								if (_modexists)
+						if (!isTheRunningTV || refreshNeeded)
+						{
+							if(urlExists)
+								TurnOnTV(item.EntityId, refreshNeeded);
+
+							if (refreshNeeded) 
+							{
+								//Update title share if player is changing url (only for non-sync mode)
+								if (_shareURLToggle && !_syncPlayToggle)
 								{
-                                    Services.CommandManager?.ProcessCommand("/penumbra reload");
-                                    Services.CommandManager?.ProcessCommand("/penumbra mod enable Default | AlphaChannelTV");
-                                    Services.CommandManager?.ProcessCommand("/penumbra redraw carbuncle");
-									_modenabled = true;
+									//Reapply sharing
+									_signalShareTitle = true;
 								}
-                            }
-                        }
+							}
+
+							if (isPlayer)
+							{
+								_placeHolderURL = _inputURL;
+								_inputURL = string.Empty;
+							}
+						}
 						else
 						{
-                            if (!isTheRunningTV || refreshNeeded)
-                            {
-								if(urlExists)
-									TurnOnTV(item.EntityId, refreshNeeded && _syncPlayToggle);
-
-								if (refreshNeeded) 
-								{
-									//Update title share if player is changing url
-                                    if (_signalToggleShare)
-                                    {
-                                        //Reapply sharing
-                                        _signalShareTitle = true;
-                                    }
-                                }
-
-                                if (isPlayer)
-                                {
-                                    _placeHolderURL = _inputURL;
-                                    _inputURL = String.Empty;
-                                }
-                            }
-                            else
-                            {
-                                if (isPlayer)
-                                {
-                                    Services.CommandManager?.ProcessCommand("/honorific force clear"); //When turning off the players TV
-                                }
-                                TurnOffTV();
-                                if (isPlayer && string.IsNullOrEmpty(_inputURL))
-                                {
-                                    _inputURL = _placeHolderURL;
-                                }
-                            }
-                        }
+							TurnOffTV();
+						}
+                        
 					}
 					catch (Exception ex)
 					{
@@ -674,11 +676,11 @@ public class ControlWindow : Window, IDisposable
                     ImGui.BeginTooltip();
                     ImGui.Text(
 
-                        (isTheRunningTV ?
+                        isTheRunningTV ?
 							(!string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists ? "Visit new URL"
 							 : "Stop"
                         )
-						: "Play")
+						: "Play"
 					);
                     ImGui.EndTooltip();
                 }
@@ -688,10 +690,30 @@ public class ControlWindow : Window, IDisposable
 					ImGui.SameLine();
 
                     ImGui.PushFont(UiBuilder.IconFont);
-                    if (ImGui.Button(_pauseToggle ? FontAwesomeIcon.Play.ToIconString() : FontAwesomeIcon.Pause.ToIconString() + "##forceplay" + item.EntityId))
+                    if (ImGui.Button(_mpvIsIdle ? FontAwesomeIcon.Repeat.ToIconString() : (_pauseToggle ? FontAwesomeIcon.Play.ToIconString() : FontAwesomeIcon.Pause.ToIconString()) + "##forceplay" + item.EntityId))
                     {
-						_plugin.TogglePause();
-						_pauseToggle = !_pauseToggle;
+						if (_mpvIsIdle)
+						{
+							_mvpIsPlaying = false;
+							if (_syncPlayToggle)
+							{
+								_OTTApi.PushNextVideo();
+							}
+							else
+							{
+								_plugin.StartMPV(_placeHolderURL, _currentSharedTexture);
+							}
+						}
+						else
+						{
+							if(_syncPlayToggle)
+							_OTTApi.PlayPauseVideo(_pauseToggle);
+							else
+							{
+								_plugin.TogglePause();
+								_pauseToggle = !_pauseToggle;
+							}
+						}
                     }
                     ImGui.PopFont();
                     if (ImGui.IsItemHovered())
@@ -713,19 +735,21 @@ public class ControlWindow : Window, IDisposable
 						_UIElementActive = false;
 					}
 					ImGui.PopFont();
-
+				}
+				if (isPlayer)
+				{
 					ImGui.SameLine();
 		
-					textColor = _signalToggleShare ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
+					textColor = _shareURLToggle ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
 					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
 
 					ImGui.PushFont(UiBuilder.IconFont);
-					if (ImGui.Button((_signalToggleShare ? FontAwesomeIcon.EyeSlash.ToIconString() : FontAwesomeIcon.Eye.ToIconString()) + "##eye"))
+					if (ImGui.Button((_shareURLToggle ? FontAwesomeIcon.EyeSlash.ToIconString() : FontAwesomeIcon.Eye.ToIconString()) + "##eye"))
 					{
-						_signalToggleShare = !_signalToggleShare;
+						_shareURLToggle = !_shareURLToggle;
 						if(playerIsRunningTV)
 						{
-							if (_signalToggleShare)
+							if (_shareURLToggle)
 							{
 								//Reapply sharing
 								_signalShareTitle = true;
@@ -744,7 +768,7 @@ public class ControlWindow : Window, IDisposable
 					if (ImGui.IsItemHovered())
 					{
 						ImGui.BeginTooltip();
-						ImGui.Text(_signalToggleShare ? "Currently sharing URL with others, press to stop sharing." : "Currently not sharing URL with others, press to share URL.");
+						ImGui.Text(_shareURLToggle ? "Currently sharing URL with others, press to stop sharing." : "Currently not sharing URL with others, press to share URL.");
 						ImGui.EndTooltip();
 					}
 
@@ -763,7 +787,6 @@ public class ControlWindow : Window, IDisposable
 
 						if (playerIsRunningTV) //If currently hosting, turn it off, no matter what
 						{
-							Services.CommandManager?.ProcessCommand("/honorific force clear");
 							TurnOffTV();
 							if (string.IsNullOrEmpty(_inputURL))
 							{
@@ -783,6 +806,28 @@ public class ControlWindow : Window, IDisposable
 					}
 				}
 
+				if(_mvpIsPlaying && isTheRunningTV)
+					DrawScrollingText(_mediaTitle, 250);
+
+				if (_mvpIsPlaying && isTheRunningTV)
+				{
+					ImGui.SetNextItemWidth(268);
+					ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1));
+					ImGui.SliderFloat("##seeker" + item.EntityId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
+					if (ImGui.IsItemActive()) _UIElementActive = true;
+					if(ImGui.IsItemDeactivatedAfterEdit())
+					{
+						SeekPlayer(_seeker);
+						_UIElementActive = false;
+					}
+					ImGui.PopStyleColor(1);
+				}
+
+				if(!_playerList.Last().Equals(item))
+				{
+					ImGui.Separator();
+				}
+
 				if (isPlayer)
 				{
 					textColor = _syncPlayToggle ? 
@@ -796,7 +841,7 @@ public class ControlWindow : Window, IDisposable
                     ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 1.0f);
                     
 					ImGui.SetNextItemWidth(235);
-					ImGui.InputText("##URL", ref _inputURL, 1000, ImGuiInputTextFlags.NoHorizontalScroll);
+					ImGui.InputText("##URL", ref _inputURL, 1000, ImGuiInputTextFlags.None);
 
 					ImGui.PopStyleVar();
 					ImGui.PopStyleColor();
@@ -829,7 +874,6 @@ public class ControlWindow : Window, IDisposable
 
 						ImGui.GetWindowDrawList().AddText(new Vector2(pos.X + 7, pos.Y), ImGui.GetColorU32(new Vector4(0.3f, 0.8f, 0.3f, 1.0f)), placeholder);
 					}
-					
 				}
 				else
 				{
@@ -858,23 +902,6 @@ public class ControlWindow : Window, IDisposable
                         ImGui.EndTooltip();
                     }
                 }
-				
-				ImGui.SetNextItemWidth(268);
-
-				ImGui.PushStyleColor(ImGuiCol.SliderGrab, new System.Numerics.Vector4(0.8f, 0.3f, 0.3f, 1));
-				ImGui.SliderFloat("##seeker" + item.EntityId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
-				if (ImGui.IsItemActive()) _UIElementActive = true;
-				if(ImGui.IsItemDeactivatedAfterEdit())
-				{
-					SeekPlayer(_seeker);
-					_UIElementActive = false;
-				}
-				ImGui.PopStyleColor(1);
-
-				if(!_playerList.Last().Equals(item))
-				{
-					ImGui.Separator();
-				}
 			}
 			else
 			{
@@ -970,6 +997,9 @@ public class ControlWindow : Window, IDisposable
 					Services.Log.Debug("New URL: " + url);
 					_currentURLs[entityId] = response;
 					if (_currentToggle == entityId)
+						/*if("ISOTTAPILINK" == "")
+						_plugin.StartMPV(_OTTApiOther._videoURL, _currentSharedTexture);
+						else*/
 						_plugin.StartMPV(response, _currentSharedTexture);
 				});
 			}
@@ -1007,15 +1037,30 @@ public class ControlWindow : Window, IDisposable
 	{
 		int seconds = (int)(_seekerMaxSeconds * (percentage/100));
 		Services.Log.Debug("Seeking to " + seconds + " seconds");
-		_plugin.SeekPlayer(seconds);
+		if(_syncPlayToggle)
+			_OTTApi.Seek(seconds);
+		else
+			_plugin.SeekPlayer(seconds);
 	}
     private void RefreshPlayer()
     {
 		if(_currentToggle != 0)
 		{
 			var info = _plugin.GetPlayerInfos();
+			var title = _plugin.GetMediaTitle();
+
+			_mediaTitle = title;
 
 			double time = info[0];
+			
+			if(!_mvpIsPlaying && time > 0)
+			{
+				_mvpIsPlaying = true;
+
+				if(_syncPlayToggle && _currentToggle == Services.Objects.LocalPlayer?.EntityId)
+					_OTTApi.PlayPauseVideo(true);
+			}
+
 			_seekerTimeMinutes = (int)(time / 60);
 			_seekerTimeSeconds = (int)(time % 60);
 			double duration = info[1];
@@ -1035,6 +1080,7 @@ public class ControlWindow : Window, IDisposable
 			}
 		}
 		_pauseToggle = _plugin.GetPaused();
+		_mpvIsIdle = _plugin.IsIdle() ?? true;
     }
 
     private async void ShareTitle(string url)
@@ -1052,6 +1098,7 @@ public class ControlWindow : Window, IDisposable
 				_signalShareTitle = true; //Shortened URL will be updated on main thread
 				
 			}, error => {
+				Services.Log.Debug("Request exception: Could not create Shortlink: " + error);
                 TurnOffTV(); //TODO: Proper Error Handling!
 			});
 		}
@@ -1067,17 +1114,16 @@ public class ControlWindow : Window, IDisposable
 
             if (responseBody.Contains("error") || responseBody.Contains("Error"))
             {
-                Services.Log.Debug("Request exception: Could not create Shortlink: " + responseBody);
-                error(String.Empty);
+                error(responseBody);
             }
             else
             {
                 callback(responseBody);
             }
         }
-        catch (HttpRequestException)
+        catch (Exception e)
         {
-            Services.Log.Debug("Request exception: Could not create Shortlink.");
+			error(e.Message);
         }
     }
 
@@ -1102,5 +1148,108 @@ public class ControlWindow : Window, IDisposable
         {
             Services.Log.Debug("Request exception: " + e.Message + e.StackTrace);
         }
+	}
+
+    public void OTTReceiveNewVideo() //Receive new Video from OTT
+    {
+		if (_currentToggle != 0) //TV is running
+		{
+			_plugin.StartMPV(_OTTApi._videoURL, _currentSharedTexture);
+		}
+    }
+
+    public void OTTReceiveSeek(double playbackPosition)
+    {
+		_plugin.SeekPlayer((int) playbackPosition);
+    }
+
+    public void OTTReceivePlayPause(bool playpause, double playbackPosition)
+    {
+		if (_currentToggle != 0) //TV is running
+		{
+			if(playpause == _pauseToggle)
+			{
+				_plugin.TogglePause();
+				_pauseToggle = !_pauseToggle;
+				if(playbackPosition > 0)
+				_plugin.SeekPlayer((int) playbackPosition);
+			}
+		}
+    }
+
+	private float _scrollOffset = 0f;
+	private float _pauseTimer = 0f;
+	private int _phase = 0; // 0 = Pause Anfang, 1 = scrollen, 2 = Pause Ende
+	private string? _lastText;
+	private double _lastTime = ImGui.GetTime();
+
+	private void DrawScrollingText(string text, float maxWidth)
+	{
+		var textSize = ImGui.CalcTextSize(text);
+
+		if (textSize.X <= maxWidth)
+		{
+			ImGui.Text(text);
+			return;
+		}
+
+		// Reset bei neuem Text
+		if (text != _lastText)
+		{
+			_lastText = text;
+			_scrollOffset = 0f;
+			_pauseTimer = 0f;
+			_phase = 0;
+		}
+
+		double now = ImGui.GetTime();
+		float dt = (float)(now - _lastTime);
+		_lastTime = now;
+
+		const float pauseDuration = 3f;
+		const float scrollSpeed = 50f;
+		float maxScroll = textSize.X - maxWidth;
+
+		switch (_phase)
+		{
+			case 0: // Pause am Anfang
+				_scrollOffset = 0f;
+				_pauseTimer += dt;
+				if (_pauseTimer >= pauseDuration)
+				{
+					_phase = 1;
+					_pauseTimer = 0f;
+				}
+				break;
+
+			case 1: // scrollen
+				_scrollOffset += dt * scrollSpeed;
+				if (_scrollOffset >= maxScroll)
+				{
+					_scrollOffset = maxScroll;
+					_phase = 2;
+				}
+				break;
+
+			case 2: // Pause am Ende
+				_scrollOffset = maxScroll;
+				_pauseTimer += dt;
+				if (_pauseTimer >= pauseDuration)
+				{
+					_phase = 0;
+					_pauseTimer = 0f;
+					_scrollOffset = 0f;
+				}
+				break;
+		}
+
+		var pos = ImGui.GetCursorScreenPos();
+		var drawList = ImGui.GetWindowDrawList();
+		drawList.PushClipRect(pos, new Vector2(pos.X + maxWidth, pos.Y + textSize.Y), true);
+		drawList.AddText(new Vector2(pos.X - _scrollOffset, pos.Y),
+						ImGui.GetColorU32(ImGuiCol.Text), text);
+		drawList.PopClipRect();
+
+		ImGui.Dummy(new Vector2(maxWidth, textSize.Y));
 	}
 }

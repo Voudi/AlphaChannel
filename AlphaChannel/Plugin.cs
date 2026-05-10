@@ -76,7 +76,7 @@ public class Plugin : IDalamudPlugin
 
 	public void Dispose()
 	{
-		TerminateAlphaWindow();
+		TerminatePlayer();
 
 		IpcProvider.DeInit();
 
@@ -111,16 +111,11 @@ public class Plugin : IDalamudPlugin
 	private DateTime _lastLoadYT = DateTime.MinValue;
 	private static readonly Regex _YTRegex = new Regex(@"^\w+://[^/]*youtube\.\w+/|^\w+://youtu\.be/", RegexOptions.Compiled);
 	private static bool IsYTURL(string url) => _YTRegex.IsMatch(url);
-	public int StartMPV(string url, Texture2D sharedTexture)
+	public void StartMPV(string url, Texture2D sharedTexture)
 	{
-		if(!_RenderCancellation.Token.IsCancellationRequested)
-		{
-			_currentMpvRenderer?.StopRender();
-			_RenderCancellation.Cancel();
-		}
-		
-		_RenderCancellation = new CancellationTokenSource();
-
+		if(_currentMpvRenderer != null && _currentMpvRenderer.GetCurrentUrl() == url && !_currentMpvRenderer.IsIdle())
+			return;
+			
 		int sleepTime = 0;
 		if(IsYTURL(url))
 		{
@@ -131,46 +126,53 @@ public class Plugin : IDalamudPlugin
 			_lastLoadYT = DateTime.Now;
 		}
 
-		new Thread(() =>
+		Task.Run(() =>
 		{
 			Thread.Sleep(sleepTime);
-			if (!_RenderCancellation.Token.IsCancellationRequested &&(Compatibility.IsRunningUnderWine() || true)) //For now, just always use the MPV player, even on native Windows
+			
+			if(_currentMpvRenderer != null)
+				StartURL(url);
+			try
 			{
-				try
+				if(_currentMpvRenderer == null)
 				{
-						_currentMpvRenderer = new MpvRenderer();
-						_currentMpvRenderer.Initialize(_resolutionWidth, _resolutionHeight, url, sharedTexture);
+					_currentMpvRenderer = new MpvRenderer();
+					_currentMpvRenderer.Initialize(_resolutionWidth, _resolutionHeight, url, sharedTexture, _RenderCancellation);
+					Services.Log.Debug("Video Player started");
+					
+					while(true)
+					{
+						if (!_currentMpvRenderer.RenderFrame())
+							break;
+					}
 
-						new Thread(() =>
-						{
-							Services.Log.Debug("Video Player started");
-							while(!_RenderCancellation.Token.IsCancellationRequested)
-							{
-								if (!_currentMpvRenderer.RenderFrame(_RenderCancellation.Token))
-									break;
-							}
-							Services.Log.Debug("Video Player stopped");
-							_currentMpvRenderer.StopRender();
-						}){IsBackground = true}.Start();
+					Services.Log.Debug("Video Player stopped");
+					_mainWindow.TurnOffTV();
 				}
-				catch (Exception e)
-				{
-					Services.Log.Error($"Error: {e.Message} {e.StackTrace}");
-				}
-				return;
 			}
-			else
+			catch (Exception e)
 			{
-				//TODO: Implement MPV player for non-Wine environments, potentially using a native DirectX rendering approach
+				Services.Log.Error($"Error: {e.Message} {e.StackTrace}");
 			}
-		}) { IsBackground = true }.Start();
+			return;
+		});
 		
-		return sleepTime;
+		return;
 	}
 
-	public void TerminateAlphaWindow()
+	public void StartURL(string url)
 	{
-		_RenderCancellation.Cancel();
+		_currentMpvRenderer?.Play(url);
+	}
+
+	public void StopPlayer()
+	{
+		_currentMpvRenderer?.Stop();
+	}
+
+	private void TerminatePlayer()
+	{
+		_currentMpvRenderer?.StopRender();
 	}
 
     public void TogglePause()
@@ -179,12 +181,15 @@ public class Plugin : IDalamudPlugin
 		{
 			_currentMpvRenderer?.TogglePause();
 		}
-        //TODO: Implement play/pause functionality for the mpv player
     }
 
-	public void Resume()
+	public bool? IsIdle()
     {
-        //TODO: Implement play/pause functionality for the mpv player
+		if(!_RenderCancellation.Token.IsCancellationRequested)
+		{
+			return _currentMpvRenderer?.IsIdle();
+		}
+		return true;
     }
 
 	public bool GetPaused()
@@ -239,4 +244,13 @@ public class Plugin : IDalamudPlugin
 			Services.Log.Error("Hook Initialization failed. Retrying...");
         }
 	}
+
+    internal string GetMediaTitle()
+    {
+		if (!_RenderCancellation.Token.IsCancellationRequested)
+		{
+			return _currentMpvRenderer?.GetMediaTitle() ?? "";
+		}
+		return "";
+    }
 }

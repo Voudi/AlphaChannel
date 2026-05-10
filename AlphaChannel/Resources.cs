@@ -96,12 +96,14 @@ public class Resources
     {
         try
         {
+            Services.Log.Debug("Downloading Update: " + downloadURL);
             var tempFile = Path.GetTempFileName() + nameEndsWith;
             var response = await httpClient.GetAsync(downloadURL, HttpCompletionOption.ResponseHeadersRead);
             await using (var fs = File.OpenWrite(tempFile))
             {
                 await response.Content.CopyToAsync(fs);
             }
+            Services.Log.Debug("Finished Downloading " + downloadURL);
             if(nameEndsWith == ".7z")
             {
                 var tempFolderName = Path.GetTempFileName();

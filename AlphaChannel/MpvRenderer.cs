@@ -40,7 +40,9 @@ namespace AlphaChannel
         [DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] static extern int mpv_request_log_messages(IntPtr ctx, string min_level);
         [DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] static extern void mpv_terminate_destroy(IntPtr ctx);
         [DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] static extern int mpv_get_property(IntPtr ctx, string name, int format, out double data);
-        [DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] static extern int mpv_get_property_int(IntPtr ctx, string name, int format, IntPtr data);
+        [DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] static extern int mpv_get_property(IntPtr ctx, string name, int format, IntPtr data);
+        [DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr mpv_get_property_string(IntPtr ctx, string name);
+        [DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] static extern void mpv_free(IntPtr data);
 
         [StructLayout(LayoutKind.Sequential)]
         struct MpvRenderParam { public int Type; public IntPtr Data; }
@@ -51,17 +53,20 @@ namespace AlphaChannel
         IntPtr _mpvRenderCtx;
         IntPtr _bufferPtr;
         int _width, _height;
+        CancellationTokenSource? _cancelToken;
         IntPtr _renderParamsPtr;
         IntPtr _sizePtr, _stridePtr, _formatPtr;
         Texture2D? _targetTexture;
         ManualResetEventSlim _frameReady = new ManualResetEventSlim(false);
         MpvRenderUpdateFn? _updateCallback;
         private bool _stopping = false;
+        private Thread? _eventThread;
 
-        public void Initialize(int width, int height, string url, Texture2D targetTexture)
+        public void Initialize(int width, int height, string url, Texture2D targetTexture, CancellationTokenSource cancelToken)
         {
             _width = width;
             _height = height;
+            _cancelToken = cancelToken;
             using(SharpDX.DXGI.Resource resource = targetTexture.QueryInterface<SharpDX.DXGI.Resource>())
             {
                 _targetTexture = DxHandler.DrawDevice?.OpenSharedResource<Texture2D>(resource.SharedHandle);
@@ -77,8 +82,10 @@ namespace AlphaChannel
             mpv_set_option_string(_mpvCtx, "script-opts", $"ytdl_hook-ytdl_path={_pluginInstance?.AssemblyLocationYTDLP}");
             mpv_set_option_string(_mpvCtx, "ytdl-format", $"bestvideo[height<={Plugin._resolutionHeight}][ext=mp4]+bestaudio/best[height<={Plugin._resolutionHeight}]");
             mpv_set_option_string(_mpvCtx, "terminal", "yes");
-            mpv_set_option_string(_mpvCtx, "msg-level", "all=trace");
-            mpv_set_option_string(_mpvCtx, "keep-open", "yes");
+            mpv_set_option_string(_mpvCtx, "msg-level", "all=warn,ffmpeg=error");
+            mpv_set_option_string(_mpvCtx, "ytdl-raw-options", "force-ipv4=");
+            mpv_set_option_string(_mpvCtx, "idle", "yes");
+            mpv_set_option_string(_mpvCtx, "keep-open", "no");
             mpv_request_log_messages(_mpvCtx, "debug");
             mpv_initialize(_mpvCtx);
 
@@ -114,81 +121,60 @@ namespace AlphaChannel
             _updateCallback = (ctx) => _frameReady.Set();
             mpv_render_context_set_update_callback(_mpvRenderCtx, _updateCallback, IntPtr.Zero);
 
+            _eventThread = new Thread(EventLoop)
+            {
+                IsBackground = true,
+                Name = "mpv-events"
+            };
+            
+            _eventThread.Start();
         }
 
-        public bool RenderFrame(CancellationToken cancellationToken)
+        public bool RenderFrame()
         {
             try
             {
-                _frameReady.Wait(cancellationToken);
+                _frameReady.Wait();
+                _frameReady.Reset();
             }
             catch 
             { 
                 return false; 
             }
-            
-            if (_stopping) return false;
-            _frameReady.Reset();
-            lock (_mpvRenderLock)
+            if (_stopping || _cancelToken!.Token.IsCancellationRequested) return false;
+            ulong flags = mpv_render_context_update(_mpvRenderCtx);
+            if ((flags & 1) == 0) return true;
+
+            try
             {
-                for(int i = 0; i<100;i++)
-                {
-                    var ev = mpv_wait_event(_mpvCtx, 0);
-                    int eventId = Marshal.ReadInt32(ev);
-                    if(eventId != 2 && eventId != 7) 
-                    {
-                        break; // No Event, break out of Loop
-                    }
-                    if (eventId == 7) // MPV_EVENT_END_FILE
-                    {
-                        return false;
-                    }
-                    else if (eventId == 2) // MPV_EVENT_LOG_MESSAGE
-                    {
-                        IntPtr dataPtr = Marshal.ReadIntPtr(ev + 16);
-                        if (dataPtr != IntPtr.Zero && dataPtr.ToInt64() > 65536)
-                        {
-                            var prefix = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr));
-                            var level = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr + 8));
-                            var text = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr + 16));
-                            Services.Log.Verbose($"[mpv/{prefix}/{level}] {text?.Trim()}");
-                        }
-                    }
-                }
+                int rc = mpv_render_context_render(_mpvRenderCtx, _renderParamsPtr);
 
-                ulong flags = mpv_render_context_update(_mpvRenderCtx);
-                if ((flags & 1) == 0) return true;
+                if (_stopping || _cancelToken!.Token.IsCancellationRequested ||  DxHandler.DrawDevice?.ImmediateContext == null) return false;
 
-                try
+                if (rc == 0 && _targetTexture != null)
                 {
-                    int rc = mpv_render_context_render(_mpvRenderCtx, _renderParamsPtr);
-
-                    if (rc == 0 && _targetTexture != null)
-                    {
-                        DxHandler.DrawDevice?.ImmediateContext.UpdateSubresource(_targetTexture, 0, null, _bufferPtr, _width * 4, 0);
-                        DxHandler.DrawDevice?.ImmediateContext.Flush();
-                        return true;
-                    }
-                    else
-                    {
-                        Services.Log.Error($"Error rendering frame: RC: {rc} Texture: {_targetTexture}");
-                    }
+                    DxHandler.DrawDevice?.ImmediateContext.UpdateSubresource(_targetTexture, 0, null, _bufferPtr, _width * 4, 0);
+                    DxHandler.DrawDevice?.ImmediateContext.Flush();
+                    return true;
                 }
-                catch (Exception e)
+                else
                 {
-                    Services.Log.Error($"Error rendering frame: {e.Message} {e.StackTrace}");
+                    Services.Log.Error($"Error rendering frame: RC: {rc} Texture: {_targetTexture}");
                 }
-                return false;
             }
+            catch (Exception e)
+            {
+                Services.Log.Error($"Error rendering frame: {e.Message} {e.StackTrace}");
+            }
+            return false;
         }
         private readonly Lock _mpvLock = new();
-        private readonly Lock _mpvRenderLock = new();
         public void StopRender()
         {
             _stopping = true;
-            lock (_mpvLock)
-            {
-                lock (_mpvRenderLock)
+            _cancelToken!.Cancel();
+            Task.Run(() => {
+                lock (_mpvLock)
                 {
                     if (_mpvRenderCtx != IntPtr.Zero)
                     {
@@ -215,6 +201,26 @@ namespace AlphaChannel
                     
                     _targetTexture?.Dispose();
                 }
+            });
+            
+            _eventThread?.Join(2000);
+        }
+
+        public void Play(string url)
+        {
+            if(!_stopping)
+            {
+                lock(_mpvLock)
+                    mpv_command(_mpvCtx, ["loadfile", url, "replace", null!]);
+            }
+        }
+
+        public void Stop()
+        {
+            if(!_stopping)
+            {
+                lock(_mpvLock)
+                    mpv_command(_mpvCtx, ["stop", null!]);
             }
         }
 
@@ -227,7 +233,7 @@ namespace AlphaChannel
                 IntPtr ptr = Marshal.AllocHGlobal(4);
                 try
                 {
-                    mpv_get_property_int(_mpvCtx, "pause", 3, ptr);
+                    mpv_get_property(_mpvCtx, "pause", 3, ptr);
                     return Marshal.ReadInt32(ptr) == 1;
                 }
                 finally
@@ -257,7 +263,6 @@ namespace AlphaChannel
                 lock(_mpvLock)
                     mpv_command(_mpvCtx, ["cycle", "pause", null!]);
             }
-                
         }
 
         public void SetVolume(int volume)
@@ -276,6 +281,145 @@ namespace AlphaChannel
                 lock(_mpvLock)
                     mpv_command(_mpvCtx, ["seek", seconds.ToString(), "absolute", null!]);
             }
+        }
+        public string? GetMediaTitle()
+        {
+            if (_stopping) return null;
+            lock (_mpvLock)
+            {
+                if (_mpvCtx == IntPtr.Zero) return null;
+                
+                IntPtr ptr = mpv_get_property_string(_mpvCtx, "media-title");
+                if (ptr != IntPtr.Zero)
+                {
+                    try{
+                        return Marshal.PtrToStringAnsi(ptr);
+                    }
+                    finally
+                    {
+                        mpv_free(ptr);
+                    }
+                }
+                return null;
+            }
+        }
+
+        public string? GetCurrentUrl()
+        {
+            if (_stopping) return null;
+            lock (_mpvLock)
+            {
+                if (_mpvCtx == IntPtr.Zero) return null;
+
+                IntPtr ptr = mpv_get_property_string(_mpvCtx, "path");
+                if (ptr == IntPtr.Zero) return null;
+
+                try
+                {
+                    return Marshal.PtrToStringAnsi(ptr);
+                }
+                finally
+                {
+                    mpv_free(ptr);
+                }
+            }
+        }
+        
+        public bool IsIdle()
+        {
+            if (_stopping) return true;
+            lock (_mpvLock)
+            {
+                if (_mpvCtx == IntPtr.Zero) return true;
+                
+                IntPtr ptr = Marshal.AllocHGlobal(4);
+                try
+                {
+                    int rc = mpv_get_property(_mpvCtx, "idle-active", 3, ptr);
+                    if (rc < 0) return true;
+                    return Marshal.ReadInt32(ptr) == 1;
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(ptr);
+                }
+            }
+        }
+
+        private void EventLoop()
+        {
+            /*
+            Services.Log.Debug("[mpv] event loop started");
+            try
+            {
+                while (!_stopping)
+                {
+                    // 100ms Timeout, damit wir _stopping regelmäßig prüfen können
+                    IntPtr ev = mpv_wait_event(_mpvCtx, 0.1);
+                    if (ev == IntPtr.Zero) continue;
+
+                    int eventId = Marshal.ReadInt32(ev);
+
+                    
+                    switch (eventId)
+                    {
+                        
+                        case 0: // MPV_EVENT_NONE (Timeout)
+                            continue;
+
+                        case 1: // MPV_EVENT_SHUTDOWN
+                            Services.Log.Debug("[mpv] SHUTDOWN");
+                            return;
+
+                        case 2: // MPV_EVENT_LOG_MESSAGE
+                            {
+                                IntPtr dataPtr = Marshal.ReadIntPtr(ev + 16);
+                                if (dataPtr != IntPtr.Zero && dataPtr.ToInt64() > 65536)
+                                {
+                                    var prefix = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr));
+                                    var level  = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr + 8));
+                                    var text   = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr + 16));
+                                    Services.Log.Verbose($"[mpv/{prefix}/{level}] {text?.Trim()}");
+                                }
+                                break;
+                            }
+
+                        case 3:  Services.Log.Debug("[mpv] GET_PROPERTY_REPLY"); break;
+                        case 4:  Services.Log.Debug("[mpv] SET_PROPERTY_REPLY"); break;
+                        case 5:  Services.Log.Debug("[mpv] COMMAND_REPLY");      break;
+                        case 6:  Services.Log.Debug("[mpv] START_FILE");         break;
+                        
+                        case 7: // MPV_EVENT_END_FILE
+                            _endOfFile = true;
+                            break;
+                        
+                        case 8:  Services.Log.Debug("[mpv] FILE_LOADED");      break;
+                        case 14: Services.Log.Debug("[mpv] CLIENT_MESSAGE");   break;
+                        case 15: Services.Log.Debug("[mpv] VIDEO_RECONFIG");   break;
+                        case 16: Services.Log.Debug("[mpv] AUDIO_RECONFIG");   break;
+                        case 17: Services.Log.Debug("[mpv] SEEK");             break;
+                        case 18: Services.Log.Debug("[mpv] PLAYBACK_RESTART"); break;
+                        case 19: Services.Log.Debug("[mpv] PROPERTY_CHANGE");  break;
+                        case 21: Services.Log.Warning("[mpv] QUEUE_OVERFLOW"); break;
+                        case 22: Services.Log.Debug("[mpv] HOOK");             break;
+
+                        default:
+                            Services.Log.Debug($"[mpv] Unknown event id={eventId}");
+                            break;
+                    }
+                    *
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Services.Log.Error($"[mpv] event loop crashed: {e.Message}\n{e.StackTrace}");
+            }
+            finally
+            {
+                Services.Log.Debug("[mpv] event loop ended");
+            }
+            */
         }
     }
 }

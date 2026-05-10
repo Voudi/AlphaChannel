@@ -9,31 +9,30 @@ public class OTTApi
 {
 	private static readonly string URL = "https://opentogethertube.com";
 	private static readonly string WSURL = "wss://opentogethertube.com";
-    private readonly HttpClient _httpClient = new HttpClient();
-    private readonly ClientWebSocket _wsocket = new ClientWebSocket();
+    private readonly HttpClient _httpClient = new();
+    private readonly ClientWebSocket _wsocket = new();
     private string _token = string.Empty;
 	private string _room = string.Empty;
     private bool _isDisposed = false;
-    private ControlWindow _controlWindow;
+    private readonly ControlWindow _controlWindow;
 
     public bool initialized = false;
     private readonly List<Requests.Video> queue = [];
     public List<Requests.Video> GetQueue => queue;
     public string GetRoomURL => URL + "/room/" + _room;
 
-
-
     private Requests.Video? _video;
-    private string _videoURL = string.Empty;
+    public string _videoURL { get; private set; }
     private bool _checkingURL = false;
     private bool _checkFailed = false;
     public bool LastCheckSuccessful => !_checkingURL && _video is not null && !_checkFailed;
     public bool IsChecking => _checkingURL && !_checkFailed;
-    private JsonSerializerOptions _jsonOptions;
+    private readonly JsonSerializerOptions _jsonOptions;
     public OTTApi(ControlWindow controlWindow)
 	{
         _controlWindow = controlWindow;
         _jsonOptions = new JsonSerializerOptions{ PropertyNameCaseInsensitive = true };
+        _videoURL = string.Empty;
     }
 
 	public void Dispose()
@@ -51,7 +50,6 @@ public class OTTApi
         if (url.Equals(_videoURL) || _checkingURL)
             return;
         _checkingURL = true;
-        Services.Log.Debug("Checking URL for sync..." + url);
         _checkFailed = false;
         _video = null;
         _videoURL = url;
@@ -60,15 +58,19 @@ public class OTTApi
             var PreviewAdd = await Requests.PreviewAdd.Execute(_httpClient, url);
             if (PreviewAdd != null && PreviewAdd.Success)
             {
-                _video = PreviewAdd.Result.First();
-                Services.Log.Debug("Success! Video is " + _video.title);
+                if(PreviewAdd.Highlighted != null)
+                    _video = PreviewAdd.Highlighted;
+                else
+                    _video = PreviewAdd.Result.First();
+                
+                Services.Log.Debug("URL Check succeeded: " + _video.title);
                 _checkingURL = false;
                 return;
             }
         }
         catch (Exception)
         {}
-        Services.Log.Debug("Check failed...");
+        Services.Log.Debug("URL check failed...");
         _checkFailed = true;
         await Task.Delay(1000);
         _checkingURL = false;
@@ -149,75 +151,47 @@ public class OTTApi
         {
             var result = await _wsocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
             string response = Encoding.UTF8.GetString(buffer, 0, result.Count);
-            Services.Log.Debug("OTT API RECEIVED: " + response);
-            if (response != null)
+            //Services.Log.Debug("OTT API RECEIVED: " + response);
+            if (response != null && response.Length > 5)
                 OnQueueReceived(response);
         }
     }
 
-    private record PlayNextEvent([property: JsonRequired] string action, List<Requests.Video> queue, [property: JsonRequired] Requests.Video currentSource, [property: JsonRequired] double playbackPosition);
-    private record QueueEvent([property: JsonRequired] string action, [property: JsonRequired] List<Requests.Video> queue);
-    private record PauseEvent([property: JsonRequired] string action, [property: JsonRequired] double playbackPosition, [property: JsonRequired] bool isPlaying);
-    private record PlayEvent([property: JsonRequired] string action, [property: JsonRequired] bool isPlaying);
-    private void OnQueueReceived(string response)
+    private record PushNextVideoRequest(int type, Requests.Video video);
+    public async void PushNextVideo()
     {
-        using var doc = JsonDocument.Parse(response);
-        {
-            if(doc.RootElement.TryGetProperty("action", out _)){
-                if(doc.RootElement.TryGetProperty("currentSource", out _) && doc.RootElement.TryGetProperty("playbackPosition", out _))
-                {
-                    PlayNextEvent message = JsonSerializer.Deserialize<PlayNextEvent>(response, _jsonOptions)!;
-                    if (message.action == "sync")
-                    {
-                        queue.Clear();
-                        queue.AddRange(message.queue);
-                        Services.Log.Debug("[OTT] Received Play Signal and Queue with " + message.queue.Count + " videos.");
-                    }
-                }
-                else if(doc.RootElement.TryGetProperty("queue", out _))
-                {
-                    QueueEvent message = JsonSerializer.Deserialize<QueueEvent>(response, _jsonOptions)!;
-                    if (message.action == "sync")
-                    {
-                        queue.Clear();
-                        queue.AddRange(message.queue);
-                        Services.Log.Debug("[OTT] Received Queue with " + message.queue.Count + " videos.");
-                    }
-                }
-                else if(doc.RootElement.TryGetProperty("playbackPosition", out _) && doc.RootElement.TryGetProperty("isPlaying", out _))
-                {
-                    PauseEvent message = JsonSerializer.Deserialize<PauseEvent>(response, _jsonOptions)!;
-                    if (message.action == "sync" && !message.isPlaying)
-                    {
-                        Services.Log.Debug("[OTT] Received Pause signal at " + message.playbackPosition + " seconds.");
-                    }
-                }
-                else if(doc.RootElement.TryGetProperty("isPlaying", out _))
-                {
-                    PauseEvent message = JsonSerializer.Deserialize<PauseEvent>(response, _jsonOptions)!;
-                    if (message.action == "sync" && message.isPlaying)
-                    {
-                        Services.Log.Debug("[OTT] Received Play signal.");
-                    }
-                }
-            }
-        }
-    }
-
-    private record PlayRequest(int type, Requests.Video video);
-    public async void ForcePlayVideo()
-    {
-        if(_wsocket.State == WebSocketState.Open && _video is not null)
-        {
-            var message = new
+        SendRequest(new
             {
                 action = "req",
-                request = new PlayRequest(14, _video)
-            };
+                request = new PushNextVideoRequest(14, _video!)
+            });
+    }
 
+    private record PlayPauseRequest(int type, bool state);
+    public async void PlayPauseVideo(bool play)
+    {
+        SendRequest(new
+            {
+                action = "req",
+                request = new PlayPauseRequest(2, play)
+            });
+    }
+    private record SeekRequest(int type, double value);
+    public async void Seek(int time)
+    {
+        SendRequest(new
+            {
+                action = "req",
+                request = new SeekRequest(4, time)
+            });
+    }
+
+    private async void SendRequest(object message)
+    {
+        if(_wsocket.State == WebSocketState.Open)
+        {
             string jsonMessage = JsonSerializer.Serialize(message);
             
-            Services.Log.Debug("SENDING: " + jsonMessage);
             byte[] bytes = Encoding.UTF8.GetBytes(jsonMessage);
 
             await _wsocket.SendAsync(
@@ -229,7 +203,99 @@ public class OTTApi
         }
     }
 
-	public static class Requests
+    private record PushNextVideoEvent([property: JsonRequired] string Action, List<Requests.Video> Queue, Requests.Video CurrentSource, [property: JsonRequired] double PlaybackPosition, string Hls_url);
+    private record QueueEvent([property: JsonRequired] string Action, [property: JsonRequired] List<Requests.Video> Queue);
+    private record PauseEvent([property: JsonRequired] string Action, [property: JsonRequired] double PlaybackPosition, [property: JsonRequired] bool IsPlaying);
+    private record PlayEvent([property: JsonRequired] string Action, [property: JsonRequired] bool IsPlaying);
+    private record SeekEvent([property: JsonRequired] string Action, [property: JsonRequired] double PlaybackPosition);
+    private void OnQueueReceived(string response)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(response);
+            {
+                if(doc.RootElement.TryGetProperty("action", out _)){
+                    if(doc.RootElement.TryGetProperty("currentSource", out _) && doc.RootElement.TryGetProperty("playbackPosition", out _))
+                    {
+                        PushNextVideoEvent message = JsonSerializer.Deserialize<PushNextVideoEvent>(response, _jsonOptions)!;
+                        if (message.Action == "sync")
+                        {
+                            queue.Clear();
+                            if(message.Queue != null)
+                            queue.AddRange(message.Queue);
+
+                            var url = "";
+                            if(message.CurrentSource != null && message.CurrentSource.service != null)
+                            switch (message.CurrentSource.service)
+                            {
+                                case "youtube":
+                                    url = $"https://youtu.be/{ message.CurrentSource.id }"; break;
+                                case "vimeo":
+                                    url = $"https://vimeo.com/{ message.CurrentSource.id }"; break;
+                                case "direct":
+                                    url = message.CurrentSource.id; break;
+                                case "hls":
+                                    url = message.CurrentSource.hls_url ?? message.CurrentSource.id; break;
+                                default: break;
+                            }
+                            if(string.IsNullOrEmpty(url))
+                                return;
+                            _video = message.CurrentSource;
+                            _videoURL = url;
+                            _controlWindow.OTTReceiveNewVideo();
+
+                            Services.Log.Debug("[OTT] Received new Video");
+                        }
+                    }
+                    else if(doc.RootElement.TryGetProperty("queue", out _))
+                    {
+                        QueueEvent message = JsonSerializer.Deserialize<QueueEvent>(response, _jsonOptions)!;
+                        if (message.Action == "sync")
+                        {
+                            queue.Clear();
+                            if(message.Queue != null)
+                                queue.AddRange(message.Queue);
+                            Services.Log.Debug("[OTT] Received Queue");
+                        }
+                    }
+                    else if(doc.RootElement.TryGetProperty("playbackPosition", out _) && doc.RootElement.TryGetProperty("isPlaying", out _))
+                    {
+                        PauseEvent message = JsonSerializer.Deserialize<PauseEvent>(response, _jsonOptions)!;
+                        if (message.Action == "sync" && !message.IsPlaying)
+                        {
+                            _controlWindow.OTTReceivePlayPause(false, message.PlaybackPosition);
+                            Services.Log.Debug("[OTT] Received Pause signal at " + message.PlaybackPosition + " seconds");
+                        }
+                        
+                    }
+                    else if(doc.RootElement.TryGetProperty("isPlaying", out _))
+                    {
+                        PlayEvent message = JsonSerializer.Deserialize<PlayEvent>(response, _jsonOptions)!;
+                        if (message.Action == "sync" && message.IsPlaying)
+                        {
+                            _controlWindow.OTTReceivePlayPause(true, -1);
+                            Services.Log.Debug("[OTT] Received Play signal");
+                        }
+                    }
+                    else if(doc.RootElement.TryGetProperty("playbackPosition", out _))
+                    {
+                        SeekEvent message = JsonSerializer.Deserialize<SeekEvent>(response, _jsonOptions)!;
+                        if (message.Action == "sync")
+                        {
+                            _controlWindow.OTTReceiveSeek(message.PlaybackPosition);
+                            Services.Log.Debug("[OTT] Received Seek signal");
+                        }
+                    }
+                }   
+            }
+        }
+        catch(Exception)
+        {
+            Services.Log.Debug("[OTT] Notice: Could not parse OTT Response");
+        }
+    }
+
+    public static class Requests
 	{
         public record Auth(string Token)
         {
@@ -274,8 +340,8 @@ public class OTTApi
                 return null;
             }
         }
-        public record Video(string service, string id, string title, string description, string? mime, string? thumbnail, int length);
-        public record PreviewAdd(bool Success, List<Video> Result)
+        public record Video(string service, string id, string title, string description, string? mime, string? thumbnail, int length, string hls_url);
+        public record PreviewAdd(bool Success, List<Video> Result, Video Highlighted)
         {
             public static string URL => "/api/data/previewAdd";
 
@@ -284,14 +350,16 @@ public class OTTApi
                 url = Uri.EscapeDataString(url);
                 Services.Log.Debug("Preview OTT API: " + OTTApi.URL + URL + "?input=" + url);
                 var result = await client.GetAsync(OTTApi.URL + URL + "?input=" + url);
-
+                
+                var resstring = await result.Content.ReadAsStringAsync();
+                Services.Log.Debug(resstring);
                 if (result.IsSuccessStatusCode)
                 {
                     return await result.Content.ReadFromJsonAsync<PreviewAdd>();
                 }
                 else
                 {
-                    Services.Log.Error("Failed Adding Preview to OTT API Room!");
+                    Services.Log.Debug("Failed Adding URL to OTT API Room!");
                 }
 
                 return null;
