@@ -740,11 +740,11 @@ public class ControlWindow : Window, IDisposable
 				{
 					ImGui.SameLine();
 		
-					textColor = _shareURLToggle ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
+					textColor = _shareURLToggle ? new Vector4(0.2f, 1.0f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
 					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
 
 					ImGui.PushFont(UiBuilder.IconFont);
-					if (ImGui.Button((_shareURLToggle ? FontAwesomeIcon.EyeSlash.ToIconString() : FontAwesomeIcon.Eye.ToIconString()) + "##eye"))
+					if (ImGui.Button(FontAwesomeIcon.ShareAlt.ToIconString() + "##urlshare"))
 					{
 						_shareURLToggle = !_shareURLToggle;
 						if(playerIsRunningTV)
@@ -774,7 +774,7 @@ public class ControlWindow : Window, IDisposable
 
 					ImGui.SameLine();
 
-					textColor = _syncPlayToggle ? new Vector4(0.0f, 0.29f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
+					textColor = _syncPlayToggle ? new Vector4(0.2f, 1.0f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
 					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
 
 					ImGui.PushFont(UiBuilder.IconFont);
@@ -837,14 +837,17 @@ public class ControlWindow : Window, IDisposable
 
 						: (urlExists || (isTheRunningTV && urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f));
 
-					ImGui.PushStyleColor(ImGuiCol.Border, textColor); // red border
+					if(!isTheRunningTV)
+						ImGui.PushStyleColor(ImGuiCol.Border, textColor); // red border
+					
                     ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 1.0f);
                     
 					ImGui.SetNextItemWidth(235);
 					ImGui.InputText("##URL", ref _inputURL, 1000, ImGuiInputTextFlags.None);
 
 					ImGui.PopStyleVar();
-					ImGui.PopStyleColor();
+					if(!isTheRunningTV)
+						ImGui.PopStyleColor();
 
 					// Detect if the input is focused
 					if (ImGui.IsItemActive())
@@ -872,7 +875,7 @@ public class ControlWindow : Window, IDisposable
 
 						if (!placeholder.Equals(_placeHolderURL)) placeholder += "...";
 
-						ImGui.GetWindowDrawList().AddText(new Vector2(pos.X + 7, pos.Y), ImGui.GetColorU32(new Vector4(0.3f, 0.8f, 0.3f, 1.0f)), placeholder);
+						ImGui.GetWindowDrawList().AddText(new Vector2(pos.X + 3, pos.Y + 2), ImGui.GetColorU32(new Vector4(0.6f, 0.6f, 0.6f, 1.0f)), placeholder);
 					}
 				}
 				else
