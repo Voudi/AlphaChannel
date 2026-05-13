@@ -16,7 +16,7 @@ public class OTTApi
     private bool _isDisposed = false;
     private readonly ControlWindow _controlWindow;
 
-    public bool initialized = false;
+    public bool IsInitialized { get; private set; } = false;
     private readonly List<Requests.Video> queue = [];
     public List<Requests.Video> GetQueue => queue;
     public string GetRoomURL => URL + "/room/" + _room;
@@ -105,7 +105,7 @@ public class OTTApi
         {
             return;
         }
-        initialized = true;
+        IsInitialized = true;
 
         _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _token);
 

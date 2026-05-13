@@ -29,6 +29,10 @@ public class Plugin : IDalamudPlugin
 	private MpvRenderer? _currentMpvRenderer;
 
 	public Resources LibResources { get; }
+	public static readonly HttpClient HTTPCLIENT = new HttpClient();
+    public static readonly HttpClient NOREDIRECTHTTPCLIENT = new HttpClient(
+		new HttpClientHandler { AllowAutoRedirect = false }
+	);
 
 	public Plugin(IDalamudPluginInterface pluginInterface)
 	{
