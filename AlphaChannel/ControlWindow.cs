@@ -540,7 +540,13 @@ public class ControlWindow : Window, IDisposable
 
 				if (_syncPlayToggle)
 				{
-					_OTTApi.Initialize().ContinueWith(task => _OTTApi.PushNextVideo());
+					_OTTApi.Initialize().ContinueWith(async task => {
+						if(task.IsCompletedSuccessfully)
+						{
+							Services.Log.Debug("Pushing next video");
+							_OTTApi.PushNextVideo();
+						}
+						});
 				}
 				else
 					_core.PlayVideo(uri.ToString());

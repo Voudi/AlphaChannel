@@ -10,13 +10,12 @@ public class OTTApi
 	private static readonly string URL = "https://opentogethertube.com";
 	private static readonly string WSURL = "wss://opentogethertube.com";
     private readonly HttpClient _httpClient = new();
-    private ClientWebSocket _wsocket;
-    private bool _isInitialized;
+    private ClientWebSocket? _wsocket;
     private string _token = string.Empty;
 	private string _room = string.Empty;
-    private bool _isDisposed = false;
     private readonly ControlWindow _controlWindow;
     private readonly List<Requests.Video> queue = [];
+    private bool _connectionReady = false;
     public List<Requests.Video> GetQueue => queue;
     public string GetRoomURL => URL + "/room/" + _room;
     public bool IsInRoom => !string.IsNullOrEmpty(_room);
@@ -36,7 +35,6 @@ public class OTTApi
 
 	public void Dispose()
 	{
-        _isDisposed = true;
         if (_wsocket != null && _wsocket.State == WebSocketState.Open)
         {
             _wsocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
@@ -113,15 +111,71 @@ public class OTTApi
         }
         catch (Exception)
         {
-            _isInitialized = false;
             return;
         }
 
         _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _token);
 
+        _=ConnectWSS(_room, _token);
+    }
+
+    public async Task LeaveRoom()
+    {
         try
         {
-            await ConnectWSS(_room, _token);
+            _room = string.Empty;
+            if(_wsocket != null)
+                await _wsocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
+        }
+        catch{}        
+    }
+
+	private async Task ConnectWSS(string room, string token)
+	{
+        try
+        {
+            var uri = new Uri(WSURL + "/api/room/" + room);
+
+            _wsocket = new();
+
+            await _wsocket.ConnectAsync(uri, CancellationToken.None);
+
+            var message = new
+            {
+                action = "auth",
+                token
+            };
+
+            string jsonMessage = JsonSerializer.Serialize(message);
+            byte[] bytes = Encoding.UTF8.GetBytes(jsonMessage);
+
+            await _wsocket.SendAsync(
+                new ArraySegment<byte>(bytes),
+                WebSocketMessageType.Text,
+                true,
+                CancellationToken.None
+            );
+
+            _=ListenWSS();
+        }
+        catch (Exception e)
+        {
+            Services.Log.Error("[OTT] WS Connection closed unexpectedly " + e.Message);
+        }
+    }
+    private async Task ListenWSS()
+	{
+        try
+        {
+            var buffer = new byte[65536];
+            while (_wsocket != null && _wsocket.State == WebSocketState.Open)
+            {
+                var result = await _wsocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                string response = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                //Services.Log.Debug("OTT API RECEIVED: " + response);
+                if (response != null && response.Length > 5)
+                    OnQueueReceived(response);
+            }
         }
         catch (Exception e)
         {
@@ -132,56 +186,21 @@ public class OTTApi
             _wsocket?.Dispose();
         }
 
+        _connectionReady = false;
+        
         Services.Log.Debug("[OTT] Left room");
     }
 
-    public async Task LeaveRoom()
-    {
-        try
-        {
-            _room = string.Empty;
-            await _wsocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
-        }
-        catch{}        
-    }
-
-	private async Task ConnectWSS(string room, string token)
-	{
-        var uri = new Uri(WSURL + "/api/room/" + room);
-
-        _wsocket = new();
-
-        await _wsocket.ConnectAsync(uri, CancellationToken.None);
-
-        var message = new
-        {
-            action = "auth",
-            token
-        };
-
-        string jsonMessage = JsonSerializer.Serialize(message);
-        byte[] bytes = Encoding.UTF8.GetBytes(jsonMessage);
-
-        await _wsocket.SendAsync(
-            new ArraySegment<byte>(bytes),
-            WebSocketMessageType.Text,
-            true,
-            CancellationToken.None
-        );
-
-        var buffer = new byte[65536];
-        while (_wsocket.State == WebSocketState.Open)
-        {
-            var result = await _wsocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-            string response = Encoding.UTF8.GetString(buffer, 0, result.Count);
-            //Services.Log.Debug("OTT API RECEIVED: " + response);
-            if (response != null && response.Length > 5)
-                OnQueueReceived(response);
-        }
-    }
-
     private record PushNextVideoRequest(int type, Requests.Video video);
+    private bool _pushNextVideo = false;
     public async void PushNextVideo()
+    {
+        if(_connectionReady)
+            PushVideo();
+        else
+            _pushNextVideo = true;
+    }
+    private void PushVideo()
     {
         SendRequest(new
             {
@@ -211,7 +230,7 @@ public class OTTApi
 
     private async void SendRequest(object message)
     {
-        if(_wsocket.State == WebSocketState.Open)
+        if(_wsocket != null && _wsocket.State == WebSocketState.Open)
         {
             string jsonMessage = JsonSerializer.Serialize(message);
             
@@ -306,7 +325,15 @@ public class OTTApi
                         if (message.Action == "sync")
                         {
                             _controlWindow.OTTReceiveSeek(message.PlaybackPosition);
+
                             Services.Log.Debug("[OTT] Received seek signal");
+
+                            if(!_connectionReady)
+                            {
+                                _connectionReady = true;
+                                if(_pushNextVideo) //Seek signal indicates ready state
+                                    PushVideo();
+                            }
                         }
                     }
                 }   
