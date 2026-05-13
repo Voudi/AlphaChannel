@@ -89,6 +89,7 @@ public class Resources
         }
 
         var downloadURL = asset.GetProperty("browser_download_url").GetString()!;
+        Services.Log.Warning("Found Update: " + downloadURL);
         return [downloadURL, folderName];
     }
 

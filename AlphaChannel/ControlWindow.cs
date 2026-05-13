@@ -27,7 +27,7 @@ public class ControlWindow : Window, IDisposable
 	private int _seekerMaxSeconds = 0;
 	private bool _libsLoaded = false;
 	private bool _updatingLibs = false;
-	private bool _mvpIsPlaying = false;
+	private bool _mpvIsPlaying = false;
 	private bool _UIElementActive = false;
 	private string _mediaTitle = string.Empty;
 	private bool _sharingTitle = false;
@@ -47,7 +47,7 @@ public class ControlWindow : Window, IDisposable
 
 	private readonly OTTApi _OTTApi;
 
-    public unsafe ControlWindow(Plugin plugin, string title)
+    public ControlWindow(Plugin plugin, string title)
         : base(title, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
 		_plugin = plugin;
@@ -65,9 +65,6 @@ public class ControlWindow : Window, IDisposable
 		};
 
         _ = _compat.CheckTVMod();
-
-        if (!_OTTApi.IsInitialized)
-            _OTTApi.Login();
 		
 		_compat.CheckForUpdates();
     }
@@ -78,7 +75,7 @@ public class ControlWindow : Window, IDisposable
 	}
 
 	private bool _isFocused = false;
-	private String _placeHolderURL = String.Empty;
+	private string _placeHolderURL = string.Empty;
 	private IEnumerable<IGameObject> _playerList = [];
 	public override void Draw()
 	{
@@ -254,7 +251,7 @@ public class ControlWindow : Window, IDisposable
 						if (!isTheRunningTV || refreshNeeded)
 						{
 							if(urlExists)
-								TurnOnTV(item.EntityId, refreshNeeded);
+								TurnOnTV(item.EntityId);
 
 							if (refreshNeeded) 
 							{
@@ -310,7 +307,7 @@ public class ControlWindow : Window, IDisposable
                     {
 						if (_mpvIsIdle)
 						{
-							_mvpIsPlaying = false;
+							_mpvIsPlaying = false;
 							if (_syncPlayToggle)
 							{
 								_OTTApi.PushNextVideo();
@@ -396,9 +393,6 @@ public class ControlWindow : Window, IDisposable
 					ImGui.PushFont(UiBuilder.IconFont);
 					if (ImGui.Button(FontAwesomeIcon.Link.ToIconString() + "##sync"))
 					{
-						if (!_OTTApi.IsInitialized)
-							_OTTApi.Login();
-
 						_syncPlayToggle = !_syncPlayToggle;
 
 						if (playerIsRunningTV) //If currently hosting, turn it off, no matter what
@@ -422,10 +416,10 @@ public class ControlWindow : Window, IDisposable
 					}
 				}
 
-				if(_mvpIsPlaying && isTheRunningTV)
+				if(_mpvIsPlaying && isTheRunningTV)
 					DrawScrollingText(_mediaTitle, 250);
 
-				if (_mvpIsPlaying && isTheRunningTV)
+				if (_mpvIsPlaying && isTheRunningTV)
 				{
 					ImGui.SetNextItemWidth(268);
 					ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1));
@@ -533,27 +527,25 @@ public class ControlWindow : Window, IDisposable
         }
     }
 
-	public void TurnOnTV(uint entityId, bool isRefresh)
+	public void TurnOnTV(uint entityId)
 	{
-		var player = Services.Objects.LocalPlayer;
-		var isPlayer = entityId == player?.EntityId;
-		if (isPlayer)
+		if (Services.Objects.LocalPlayer?.EntityId == entityId)
 		{
-			if(ValidateURL(out Uri? url) && url != null)
+			if(ValidateURL(out Uri? uri) && uri != null)
 			{
 				_core.SetCurrentTV(entityId);
 				_pauseToggle = false;
 				_lastTVTurnOn = DateTime.Now;
+				_mpvIsPlaying = false;
 
 				if (_syncPlayToggle)
 				{
-					_mvpIsPlaying = false;
-					_OTTApi.PushNextVideo();
+					_OTTApi.Initialize().ContinueWith(task => _OTTApi.PushNextVideo());
 				}
 				else
-					_core.PlayVideo(url.ToString());
+					_core.PlayVideo(uri.ToString());
 
-				ShareTitle(url.ToString());
+				ShareTitle(uri.ToString());
 			}
 			else
 			{
@@ -567,11 +559,22 @@ public class ControlWindow : Window, IDisposable
 				_core.SetCurrentTV(entityId);
 				_pauseToggle = false;
 				_lastTVTurnOn = DateTime.Now;
+				_mpvIsPlaying = false;
+		
+				var result = Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri?.Scheme == Uri.UriSchemeHttp || uri?.Scheme == Uri.UriSchemeHttps) && uri.Host.Contains('.') && !uri.Host.EndsWith('.') && Uri.CheckHostName(uri.Host) == UriHostNameType.Dns;
 
-				/*if("isOTTLink" == "")
-					//_plugin.StartMPV(_OTTApiOther._videoURL, _currentSharedTexture);
-					TODO: NEUE OTTAPI ALS GAST OEFFNEN
-				else*/
+				if (!result)
+				{
+					Services.Log.Error("Failed fetching URL for player " + entityId);
+					return;
+				}
+
+				if (uri != null && (uri.Host.EndsWith(".opentogethertube.com", StringComparison.OrdinalIgnoreCase) || string.Equals(uri.Host, "opentogethertube.com", StringComparison.OrdinalIgnoreCase)))
+				{
+					string roomId = uri.Segments[^1].TrimEnd('/');
+					_=_OTTApi.Initialize(roomId);
+				}
+				else
 					_core.PlayVideo(url);
 				
 			}
@@ -584,6 +587,7 @@ public class ControlWindow : Window, IDisposable
 
 	public void TurnOffTV()
 	{
+		_=_OTTApi.LeaveRoom();
 		_pauseToggle = false;
 		_core.StopVideo();
 		if (string.IsNullOrEmpty(_inputURL) && !string.IsNullOrEmpty(_placeHolderURL))
@@ -635,7 +639,7 @@ public class ControlWindow : Window, IDisposable
 
 			ProcessURLShare();
 
-			_core.ScanTVs();
+			(_modenabled, _installWarningMessage) = _core.ScanForCompanions();
 
 			_playerList = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => (x.EntityId == Services.Objects.LocalPlayer?.EntityId) ? "@" : x.Name.TextValue);
         }
@@ -667,9 +671,9 @@ public class ControlWindow : Window, IDisposable
 
 			double time = info[0];
 			
-			if(!_mvpIsPlaying && time > 0)
+			if(!_mpvIsPlaying && time > 0)
 			{
-				_mvpIsPlaying = true;
+				_mpvIsPlaying = true;
 
 				if(_syncPlayToggle && _core.IsPlayerTVOn())
 					_OTTApi.PlayPauseVideo(true);

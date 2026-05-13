@@ -142,21 +142,19 @@ public class Plugin : IDalamudPlugin
 				{
 					_currentMpvRenderer = new MpvRenderer();
 					_currentMpvRenderer.Initialize(_resolutionWidth, _resolutionHeight, url, sharedTexture, _RenderCancellation);
-					Services.Log.Debug("Video Player started");
-					
+
 					while(true)
 					{
 						if (!_currentMpvRenderer.RenderFrame())
 							break;
 					}
 
-					Services.Log.Debug("Video Player stopped");
 					_mainWindow.TurnOffTV();
 				}
 			}
 			catch (Exception e)
 			{
-				Services.Log.Error($"Error: {e.Message} {e.StackTrace}");
+				Services.Log.Error($"[MPV] Generic error: {e.Message} {e.StackTrace}");
 			}
 			return;
 		});
@@ -245,7 +243,6 @@ public class Plugin : IDalamudPlugin
 		if (!IpcProvider.Initialized)
 		{
             IpcProvider.Init(this);
-			Services.Log.Error("Hook Initialization failed. Retrying...");
         }
 	}
 

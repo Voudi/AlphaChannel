@@ -26,7 +26,7 @@ public static class IpcProvider
 			{
 				OldDelegate = (Action<int, string>)ipcCallgateChannelActionMetaObj;
 				if (OldDelegate is null)
-					Services.Log.Warning("OldDelegate is null");
+					Services.Log.Warning("[HH] OldDelegate is null");
 				var proxyAction = new Action<int, string>((characterI, titleDataJson) =>
 				{
 					try
@@ -48,14 +48,14 @@ public static class IpcProvider
 					// Optionally do something after the original action
 				});
 
-				Services.Log.Debug("Successfully registered proxy Action");
+				Services.Log.Debug("[HH] Successfully registered Honorific Hook");
 				SetCharacterTitle?.RegisterAction(proxyAction);
 
                 Initialized = true;
             }
 			else
 			{
-				Services.Log.Error("Could not Intercept Hook, has Dalamud been updated? IPCProvider.cs L34");
+				Services.Log.Error("[HH] Could not Intercept Honorific Hook, has Dalamud been updated?");
 			}
 			
 		}

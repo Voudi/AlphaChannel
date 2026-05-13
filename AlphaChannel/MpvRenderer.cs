@@ -19,11 +19,11 @@ namespace AlphaChannel
                     }
                     else
                     {
-                        Services.Log.Error($"Failed to load libmpv from path: {_pluginInstance.AssemblyLocationMPV}");
+                        Services.Log.Error($"[MPV] Failed to load libmpv from path: {_pluginInstance.AssemblyLocationMPV}");
                         return IntPtr.Zero;
                     }
                 }
-                Services.Log.Error($"Failed to resolve native library: {name}");
+                Services.Log.Error($"[MPV] Failed to resolve native library: {name}");
                 return IntPtr.Zero;
             });
         }
@@ -128,6 +128,8 @@ namespace AlphaChannel
             };
             
             _eventThread.Start();
+            
+            Services.Log.Debug("[MPV] Video Player started");
         }
 
         public bool RenderFrame()
@@ -139,9 +141,10 @@ namespace AlphaChannel
             }
             catch 
             { 
+                Services.Log.Debug("[MPV] Video Player stopped");
                 return false; 
             }
-            if (_stopping || _cancelToken!.Token.IsCancellationRequested) return false;
+            if (_stopping || _cancelToken!.Token.IsCancellationRequested) { Services.Log.Debug("[MPV] Video Player stopped"); return false;}
             ulong flags = mpv_render_context_update(_mpvRenderCtx);
             if ((flags & 1) == 0) return true;
 
@@ -159,12 +162,12 @@ namespace AlphaChannel
                 }
                 else
                 {
-                    Services.Log.Error($"Error rendering frame: RC: {rc} Texture: {_targetTexture}");
+                    Services.Log.Warning($"[MPV] Error rendering frame: RC: {rc} Texture: {_targetTexture}");
                 }
             }
             catch (Exception e)
             {
-                Services.Log.Error($"Error rendering frame: {e.Message} {e.StackTrace}");
+                Services.Log.Warning($"[MPV] Error rendering frame: {e.Message} {e.StackTrace}");
             }
             return false;
         }

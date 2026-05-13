@@ -10,17 +10,16 @@ public class OTTApi
 	private static readonly string URL = "https://opentogethertube.com";
 	private static readonly string WSURL = "wss://opentogethertube.com";
     private readonly HttpClient _httpClient = new();
-    private readonly ClientWebSocket _wsocket = new();
+    private ClientWebSocket _wsocket;
+    private bool _isInitialized;
     private string _token = string.Empty;
 	private string _room = string.Empty;
     private bool _isDisposed = false;
     private readonly ControlWindow _controlWindow;
-
-    public bool IsInitialized { get; private set; } = false;
     private readonly List<Requests.Video> queue = [];
     public List<Requests.Video> GetQueue => queue;
     public string GetRoomURL => URL + "/room/" + _room;
-
+    public bool IsInRoom => !string.IsNullOrEmpty(_room);
     private Requests.Video? _video;
     public string _videoURL { get; private set; }
     private bool _checkingURL = false;
@@ -63,21 +62,26 @@ public class OTTApi
                 else
                     _video = PreviewAdd.Result.First();
                 
-                Services.Log.Debug("URL Check succeeded: " + _video.title);
+                Services.Log.Debug("[OTT] URL Check succeeded: " + _video.title);
                 _checkingURL = false;
                 return;
             }
         }
         catch (Exception)
         {}
-        Services.Log.Debug("URL check failed...");
+        Services.Log.Debug("[OTT] URL check failed");
         _checkFailed = true;
         await Task.Delay(1000);
         _checkingURL = false;
     }
 
-	public async void Login()
+	public async Task Initialize(string? roomId = null)
 	{
+        if(_wsocket != null)
+        {
+            await LeaveRoom();
+        }
+
         try
         {
             var Auth = await Requests.Auth.Execute(_httpClient);
@@ -89,44 +93,63 @@ public class OTTApi
             {
                 return;
             }
-        
-            var GenerateRoom = await Requests.Generate.Execute(_httpClient, _token);
-            if (GenerateRoom != null && GenerateRoom.Success)
+            if (string.IsNullOrEmpty(roomId))
             {
-                _room = GenerateRoom.Room;
-                Services.Log.Debug("OTT Room Generated: " + _room);
+                var GenerateRoom = await Requests.Generate.Execute(_httpClient, _token);
+                if (GenerateRoom != null && GenerateRoom.Success)
+                {
+                    _room = GenerateRoom.Room;
+                    Services.Log.Debug("[OTT] Room Generated: " + _room);
+                }
+                else
+                {
+                    return;
+                }
             }
             else
             {
-                return;
+                 _room = roomId;
             }
         }
         catch (Exception)
         {
+            _isInitialized = false;
             return;
         }
-        IsInitialized = true;
 
         _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _token);
 
-        while (!_isDisposed)
+        try
         {
-            try
-            {
-                await ConnectWSS(_room, _token);
-            }
-            catch (Exception)
-            {
-                //For whatever reason
-            }
-            if(!_isDisposed)
-                await Task.Delay(5000);
+            await ConnectWSS(_room, _token);
         }
+        catch (Exception e)
+        {
+            Services.Log.Debug("[OTT] WS Connection closed: " + e.Message);
+        }
+        finally
+        {
+            _wsocket?.Dispose();
+        }
+
+        Services.Log.Debug("[OTT] Left room");
+    }
+
+    public async Task LeaveRoom()
+    {
+        try
+        {
+            _room = string.Empty;
+            await _wsocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
+        }
+        catch{}        
     }
 
 	private async Task ConnectWSS(string room, string token)
 	{
         var uri = new Uri(WSURL + "/api/room/" + room);
+
+        _wsocket = new();
 
         await _wsocket.ConnectAsync(uri, CancellationToken.None);
 
@@ -244,7 +267,7 @@ public class OTTApi
                             _videoURL = url;
                             _controlWindow.OTTReceiveNewVideo();
 
-                            Services.Log.Debug("[OTT] Received new Video");
+                            Services.Log.Debug("[OTT] Received new video");
                         }
                     }
                     else if(doc.RootElement.TryGetProperty("queue", out _))
@@ -255,7 +278,7 @@ public class OTTApi
                             queue.Clear();
                             if(message.Queue != null)
                                 queue.AddRange(message.Queue);
-                            Services.Log.Debug("[OTT] Received Queue");
+                            Services.Log.Debug("[OTT] Received queue");
                         }
                     }
                     else if(doc.RootElement.TryGetProperty("playbackPosition", out _) && doc.RootElement.TryGetProperty("isPlaying", out _))
@@ -264,7 +287,7 @@ public class OTTApi
                         if (message.Action == "sync" && !message.IsPlaying)
                         {
                             _controlWindow.OTTReceivePlayPause(false, message.PlaybackPosition);
-                            Services.Log.Debug("[OTT] Received Pause signal at " + message.PlaybackPosition + " seconds");
+                            Services.Log.Debug("[OTT] Received pause signal at " + message.PlaybackPosition + " seconds");
                         }
                         
                     }
@@ -274,7 +297,7 @@ public class OTTApi
                         if (message.Action == "sync" && message.IsPlaying)
                         {
                             _controlWindow.OTTReceivePlayPause(true, -1);
-                            Services.Log.Debug("[OTT] Received Play signal");
+                            Services.Log.Debug("[OTT] Received play signal");
                         }
                     }
                     else if(doc.RootElement.TryGetProperty("playbackPosition", out _))
@@ -283,7 +306,7 @@ public class OTTApi
                         if (message.Action == "sync")
                         {
                             _controlWindow.OTTReceiveSeek(message.PlaybackPosition);
-                            Services.Log.Debug("[OTT] Received Seek signal");
+                            Services.Log.Debug("[OTT] Received seek signal");
                         }
                     }
                 }   
@@ -291,7 +314,7 @@ public class OTTApi
         }
         catch(Exception)
         {
-            Services.Log.Debug("[OTT] Notice: Could not parse OTT Response");
+            Services.Log.Debug("[OTT] Notice: Could not parse response");
         }
     }
 
@@ -311,7 +334,7 @@ public class OTTApi
                 }
 				else
                 {
-                    Services.Log.Error("Failed Generating OTT API Grant!");
+                    Services.Log.Error("[OTT] Failed generating grant");
                 }
 
 				return null;
@@ -334,7 +357,7 @@ public class OTTApi
                 }
                 else
                 {
-                    Services.Log.Error("Failed Generating OTT API Room!");
+                    Services.Log.Error("[OTT] Failed generating room");
                 }
 
                 return null;
@@ -359,7 +382,7 @@ public class OTTApi
                 }
                 else
                 {
-                    Services.Log.Debug("Failed Adding URL to OTT API Room!");
+                    Services.Log.Debug("[OTT] Failed adding URL");
                 }
 
                 return null;
@@ -392,7 +415,7 @@ public class OTTApi
                 }
                 else
                 {
-                    Services.Log.Error("Failed Removing Video from OTT API Room!");
+                    Services.Log.Error("[OTT] Failed removing video");
                 }
 
                 return null;
@@ -425,7 +448,7 @@ public class OTTApi
                 }
                 else
                 {
-                    Services.Log.Error("Failed Adding Video from OTT API Room!");
+                    Services.Log.Error("[OTT] Failed adding video");
                 }
 
                 return null;
