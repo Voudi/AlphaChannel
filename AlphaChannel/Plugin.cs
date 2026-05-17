@@ -5,7 +5,6 @@ using Dalamud.Bindings.ImGui;
 using System.Numerics;
 using System.Reflection;
 using SharpDX.Direct3D11;
-using System.Text.RegularExpressions;
 
 namespace AlphaChannel;
 
@@ -25,9 +24,6 @@ public class Plugin : IDalamudPlugin
 	private ControlWindow _mainWindow;
 	private readonly string _pluginConfigDir;
 	private readonly string _pluginDir;
-	private CancellationTokenSource _RenderCancellation = new CancellationTokenSource();
-	private MpvRenderer? _currentMpvRenderer;
-
 	public Resources LibResources { get; }
 	public static readonly HttpClient HTTPCLIENT = new HttpClient();
     public static readonly HttpClient NOREDIRECTHTTPCLIENT = new HttpClient(
@@ -80,15 +76,11 @@ public class Plugin : IDalamudPlugin
 
 	public void Dispose()
 	{
-		TerminatePlayer();
-
 		IpcProvider.DeInit();
 
 		WindowSystem.RemoveAllWindows();
 
 		_mainWindow?.Dispose();
-
-		_currentMpvRenderer?.StopRender();
 
 		DxHandler.Shutdown();
 	}
@@ -112,120 +104,6 @@ public class Plugin : IDalamudPlugin
 
 	private void DrawUI() => WindowSystem.Draw();
 	public void ToggleMainUI() => _mainWindow?.Toggle();
-	private DateTime _lastLoadYT = DateTime.MinValue;
-	private static readonly Regex _YTRegex = new Regex(@"^\w+://[^/]*youtube\.\w+/|^\w+://youtu\.be/", RegexOptions.Compiled);
-	private static bool IsYTURL(string url) => _YTRegex.IsMatch(url);
-	public void StartMPV(string url, Texture2D sharedTexture)
-	{
-		if(_currentMpvRenderer != null && _currentMpvRenderer.GetCurrentUrl() == url && !_currentMpvRenderer.IsIdle())
-			return;
-			
-		int sleepTime = 0;
-		if(IsYTURL(url))
-		{
-			var elapsed = DateTime.Now - _lastLoadYT;
-			if (elapsed.TotalSeconds < 10)
-				sleepTime = Math.Min(Math.Max((int)(10000 - elapsed.TotalMilliseconds), 0), 10000);
-			
-			_lastLoadYT = DateTime.Now;
-		}
-
-		Task.Run(() =>
-		{
-			Thread.Sleep(sleepTime);
-			
-			if(_currentMpvRenderer != null)
-				StartURL(url);
-			try
-			{
-				if(_currentMpvRenderer == null)
-				{
-					_currentMpvRenderer = new MpvRenderer();
-					_currentMpvRenderer.Initialize(_resolutionWidth, _resolutionHeight, url, sharedTexture, _RenderCancellation);
-
-					while(true)
-					{
-						if (!_currentMpvRenderer.RenderFrame())
-							break;
-					}
-
-					_mainWindow.TurnOffTV();
-				}
-			}
-			catch (Exception e)
-			{
-				Services.Log.Error($"[MPV] Generic error: {e.Message} {e.StackTrace}");
-			}
-			return;
-		});
-		
-		return;
-	}
-
-	public void StartURL(string url)
-	{
-		_currentMpvRenderer?.Play(url);
-	}
-
-	public void StopPlayer()
-	{
-		_currentMpvRenderer?.Stop();
-	}
-
-	private void TerminatePlayer()
-	{
-		_currentMpvRenderer?.StopRender();
-	}
-
-    public void TogglePause()
-    {
-		if(!_RenderCancellation.Token.IsCancellationRequested)
-		{
-			_currentMpvRenderer?.TogglePause();
-		}
-    }
-
-	public bool? IsIdle()
-    {
-		if(!_RenderCancellation.Token.IsCancellationRequested)
-		{
-			return _currentMpvRenderer?.IsIdle();
-		}
-		return true;
-    }
-
-	public bool GetPaused()
-	{
-		if (!_RenderCancellation.Token.IsCancellationRequested)
-		{
-			return _currentMpvRenderer?.GetPaused() ?? false;
-		}
-		return false;
-	}
-	public double[] GetPlayerInfos()
-	{
-		if (!_RenderCancellation.Token.IsCancellationRequested)
-		{
-			return _currentMpvRenderer?.GetProperties() ?? [0, 0, 0];
-		}
-		return [0, 0, 0];
-	}
-
-    public void SeekPlayer(int seconds)
-    {
-		if (!_RenderCancellation.Token.IsCancellationRequested)
-		{
-			_currentMpvRenderer?.Seek(seconds);
-		}
-    }
-
-    public void VolumePlayer(int vol)
-    {
-		if (!_RenderCancellation.Token.IsCancellationRequested)
-		{
-			_currentMpvRenderer?.SetVolume(vol);
-		}
-    }
 
     internal void UpdateTitle(uint entityId, TitleData titleData)
 	{
@@ -246,12 +124,4 @@ public class Plugin : IDalamudPlugin
         }
 	}
 
-    internal string GetMediaTitle()
-    {
-		if (!_RenderCancellation.Token.IsCancellationRequested)
-		{
-			return _currentMpvRenderer?.GetMediaTitle() ?? "";
-		}
-		return "";
-    }
 }

@@ -1,4 +1,5 @@
 using AlphaChannel;
+using System.Text.RegularExpressions;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
 using SharpDX.Direct3D11;
@@ -15,6 +16,13 @@ using SharpDX.Mathematics.Interop;
 public class Core
 {
     private Plugin _plugin;
+    private MpvRenderer? _currentMpvRenderer;
+    private CancellationTokenSource _RenderCancellation = new CancellationTokenSource();
+    private DateTime _lastLoadYT = DateTime.MinValue;
+    private static readonly Regex _YTRegex = new Regex(@"^\w+://[^/]*youtube\.\w+/|^\w+://youtu\.be/", RegexOptions.Compiled);
+    private static bool IsYTURL(string url) => _YTRegex.IsMatch(url);
+    public event Action? VideoEnded;
+
     private readonly Dictionary<uint, IntPtr> _companionOwners = []; //Playerpointer, CompanionDrawpointer
 	private readonly Texture2D _screenTexture;
 	private bool _screenTextureLoaded = false;
@@ -84,14 +92,95 @@ public class Core
 	public void StopVideo()
 	{
 		ClearTexture();
-		_plugin.StopPlayer();
+		_currentMpvRenderer?.Stop();
 		_playingEntityId = 0;
 		_activeEntityId = 0;
 	}
 
     public void PlayVideo(string url)
     {
-        _plugin.StartMPV(url, _screenTexture);
+        if (_currentMpvRenderer != null && _currentMpvRenderer.GetCurrentUrl() == url && !_currentMpvRenderer.IsIdle())
+            return;
+
+        int sleepTime = 0;
+        if (IsYTURL(url))
+        {
+            var elapsed = DateTime.Now - _lastLoadYT;
+            if (elapsed.TotalSeconds < 10)
+                sleepTime = Math.Min(Math.Max((int)(10000 - elapsed.TotalMilliseconds), 0), 10000);
+            _lastLoadYT = DateTime.Now;
+        }
+
+        Task.Run(() =>
+        {
+            Thread.Sleep(sleepTime);
+            if (_currentMpvRenderer != null)
+            {
+                _currentMpvRenderer.Play(url);
+                return;
+            }
+            try
+            {
+                _currentMpvRenderer = new MpvRenderer();
+                _currentMpvRenderer.Initialize(Plugin._resolutionWidth, Plugin._resolutionHeight, url, _screenTexture, _RenderCancellation);
+                while (true)
+                {
+                    if (!_currentMpvRenderer.RenderFrame())
+                        break;
+                }
+                VideoEnded?.Invoke();
+            }
+            catch (Exception e)
+            {
+                Services.Log.Error($"[MPV] Generic error: {e.Message} {e.StackTrace}");
+            }
+        });
+    }
+
+    public void TogglePause()
+    {
+        if (!_RenderCancellation.Token.IsCancellationRequested)
+            _currentMpvRenderer?.TogglePause();
+    }
+
+    public bool? IsIdle()
+    {
+        if (!_RenderCancellation.Token.IsCancellationRequested)
+            return _currentMpvRenderer?.IsIdle();
+        return true;
+    }
+
+    public bool GetPaused()
+    {
+        if (!_RenderCancellation.Token.IsCancellationRequested)
+            return _currentMpvRenderer?.GetPaused() ?? false;
+        return false;
+    }
+
+    public double[] GetPlayerInfos()
+    {
+        if (!_RenderCancellation.Token.IsCancellationRequested)
+            return _currentMpvRenderer?.GetProperties() ?? [0, 0, 0];
+        return [0, 0, 0];
+    }
+
+    public void SeekPlayer(int seconds)
+    {
+        if (!_RenderCancellation.Token.IsCancellationRequested)
+            _currentMpvRenderer?.Seek(seconds);
+    }
+
+    public void VolumePlayer(int vol)
+    {
+        if (!_RenderCancellation.Token.IsCancellationRequested)
+            _currentMpvRenderer?.SetVolume(vol);
+    }
+
+    public string GetMediaTitle()
+    {
+        if (!_RenderCancellation.Token.IsCancellationRequested)
+            return _currentMpvRenderer?.GetMediaTitle() ?? "";
+        return "";
     }
 
     public unsafe Tuple<bool, bool> ScanForCompanions()
@@ -301,6 +390,8 @@ public class Core
 
     public void Dispose()
 	{
+        _currentMpvRenderer?.StopRender();
+
         _textureOnLoadHook.Disable();
         _textureOnLoadHook.Dispose();
         _getResourceSyncHook.Dispose();

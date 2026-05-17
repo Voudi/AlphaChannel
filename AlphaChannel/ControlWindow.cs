@@ -57,6 +57,7 @@ public class ControlWindow : Window, IDisposable
 		_compat = new Compatibility(_plugin);
 
 		_core = new Core(_plugin);
+        _core.VideoEnded += TurnOffTV;
 
         SizeConstraints = new WindowSizeConstraints
 		{
@@ -71,6 +72,7 @@ public class ControlWindow : Window, IDisposable
 
 	public void Dispose()
 	{
+        _core.VideoEnded -= TurnOffTV;
         _core.Dispose();
 	}
 
@@ -323,7 +325,7 @@ public class ControlWindow : Window, IDisposable
 							_OTTApi.PlayPauseVideo(_pauseToggle);
 							else
 							{
-								_plugin.TogglePause();
+								_core.TogglePause();
 								_pauseToggle = !_pauseToggle;
 							}
 						}
@@ -655,7 +657,7 @@ public class ControlWindow : Window, IDisposable
 	{
 		var vol = (int)((float)Math.Sqrt(volume) * 10f); //Quadratic Slider Valuess
 		Services.Log.Debug("Setting volume to " + vol + "%");
-		_plugin.VolumePlayer(vol);
+		_core.VolumePlayer(vol);
 	}
 	private void SeekPlayer(double percentage)
 	{
@@ -664,14 +666,14 @@ public class ControlWindow : Window, IDisposable
 		if(_syncPlayToggle)
 			_OTTApi.Seek(seconds);
 		else
-			_plugin.SeekPlayer(seconds);
+			_core.SeekPlayer(seconds);
 	}
     private void RefreshPlayer()
     {
 		if(!_core.IsTVTurnedOff())
 		{
-			var info = _plugin.GetPlayerInfos();
-			var title = _plugin.GetMediaTitle();
+			var info = _core.GetPlayerInfos();
+			var title = _core.GetMediaTitle();
 
 			_mediaTitle = title;
 
@@ -703,8 +705,8 @@ public class ControlWindow : Window, IDisposable
 				_volume =  (float) volume / 100f * ((float)volume / 100f) * 100f; //Quadratic Slider Values
 			}
 		}
-		_pauseToggle = _plugin.GetPaused();
-		_mpvIsIdle = _plugin.IsIdle() ?? true;
+		_pauseToggle = _core.GetPaused();
+		_mpvIsIdle = _core.IsIdle() ?? true;
     }
 
 
@@ -742,7 +744,7 @@ public class ControlWindow : Window, IDisposable
 
     public void OTTReceiveSeek(double playbackPosition)
     {
-		_plugin.SeekPlayer((int) playbackPosition);
+		_core.SeekPlayer((int) playbackPosition);
     }
 
     public void OTTReceivePlayPause(bool playpause, double playbackPosition)
@@ -751,10 +753,10 @@ public class ControlWindow : Window, IDisposable
 		{
 			if(playpause == _pauseToggle)
 			{
-				_plugin.TogglePause();
+				_core.TogglePause();
 				_pauseToggle = !_pauseToggle;
 				if(playbackPosition > 0)
-				_plugin.SeekPlayer((int) playbackPosition);
+				_core.SeekPlayer((int) playbackPosition);
 			}
 		}
     }
