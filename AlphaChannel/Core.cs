@@ -99,12 +99,17 @@ public class Core : IDisposable
 		_activeEntityId = 0;
 	}
 
-	public void PlayVideo(string url)
+	public void PlayVideo(string url, bool waitForSeek = false)
 	{
 		if (_currentMpvRenderer != null && _currentMpvRenderer.GetCurrentUrl() == url && !_currentMpvRenderer.IsIdle())
 		{
 			return;
 		}
+		if(_currentMpvRenderer != null && waitForSeek)
+		{
+			waitForSeek = _currentMpvRenderer.IsIdle();
+		}
+		_currentMpvRenderer?.Stop();
 
 		int sleepTime = 0;
 		if (IsYTURL(url))
@@ -121,15 +126,16 @@ public class Core : IDisposable
 		Task.Run(() =>
 		{
 			Thread.Sleep(sleepTime);
+			
 			if (_currentMpvRenderer != null)
 			{
-				_currentMpvRenderer.Play(url);
+				_currentMpvRenderer.Play(url, waitForSeek);
 				return;
 			}
 			try
 			{
 				_currentMpvRenderer = new MpvRenderer();
-				_currentMpvRenderer.Initialize(Plugin.ResolutionWidth, Plugin.ResolutionHeight, url, _screenTexture, _renderCancellation);
+				_currentMpvRenderer.Initialize(Plugin.ResolutionWidth, Plugin.ResolutionHeight, url, _screenTexture, _renderCancellation, waitForSeek);
 				while (true)
 				{
 					if (!_currentMpvRenderer.RenderFrame())

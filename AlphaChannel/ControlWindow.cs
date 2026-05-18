@@ -1,4 +1,7 @@
-﻿using System.Numerics;
+﻿using System.Net.Http.Json;
+using System.Numerics;
+using System.Text;
+using System.Text.Json;
 using Dalamud.Bindings.ImGui;
 
 using Dalamud.Game.ClientState.Objects.SubKinds;
@@ -20,7 +23,7 @@ public class ControlWindow : Window, IDisposable
 
 	//Render Vars
 	private string _inputURL = "";
-	private float _volume = 100;
+	private float _volume = 25;
 	private float _seeker;
 	private int _seekerTimeSeconds;
 	private int _seekerTimeMinutes;
@@ -41,7 +44,7 @@ public class ControlWindow : Window, IDisposable
 	private Compatibility _compat;
 	private Core _core;
 
-	public delegate void URLShortenerCallback(string result);
+	public delegate void URLShortenerCallback(Uri result);
 	public delegate void URLFetchCallback(string result);
 	public delegate void URLShortenerErrorCallback(string result);
 	private readonly Dictionary<uint, string> _currentURLs = []; //Playerpointer, URL
@@ -74,6 +77,7 @@ public class ControlWindow : Window, IDisposable
 
 	public void Dispose()
 	{
+		_ottApi.Dispose();
 		_core.VideoEnded -= TurnOffTV;
 		_core.Dispose();
 		GC.SuppressFinalize(this);
@@ -330,7 +334,7 @@ public class ControlWindow : Window, IDisposable
 						if (_mpvIsIdle)
 						{
 							_mpvIsPlaying = false;
-							if (_syncPlayToggle)
+							if (_syncPlayToggle || _ottApi.IsInRoom)
 							{
 								_ottApi.PushNextVideo();
 							}
@@ -341,7 +345,7 @@ public class ControlWindow : Window, IDisposable
 						}
 						else
 						{
-							if (_syncPlayToggle)
+							if (_syncPlayToggle || _ottApi.IsInRoom)
 							{
 								_ottApi.PlayPauseVideo(_pauseToggle);
 							}
@@ -584,12 +588,13 @@ public class ControlWindow : Window, IDisposable
 		{
 			if (ValidateURL(out Uri? uri) && uri != null)
 			{
+				bool isOTTUrl = uri.Segments.Length > 1 && string.Equals(uri.Segments[^2].TrimEnd('/'), "room", StringComparison.OrdinalIgnoreCase) && (uri.Host.EndsWith(".opentogethertube.com", StringComparison.OrdinalIgnoreCase) || string.Equals(uri.Host, "opentogethertube.com", StringComparison.OrdinalIgnoreCase));
 				_core.SetCurrentTV(entityId);
 				_pauseToggle = false;
 				_lastTVTurnOn = DateTime.Now;
 				_mpvIsPlaying = false;
 
-				if (_syncPlayToggle)
+				if (_syncPlayToggle && !isOTTUrl)
 				{
 					_ottApi.Initialize().ContinueWith(async task =>
 					{
@@ -601,7 +606,17 @@ public class ControlWindow : Window, IDisposable
 				}
 				else
 				{
-					_core.PlayVideo(uri.ToString());
+					Services.Log.Debug("URI is: " + uri.Segments[^2]);
+					Services.Log.Debug("URI is: " + uri.Segments[^1]);
+					if(isOTTUrl){
+						string roomId = uri.Segments[^1].TrimEnd('/');
+						_=_ottApi.Initialize(roomId);
+					}
+					else
+					{
+						Services.Log.Debug("Playing normally");
+						_core.PlayVideo(uri.ToString());
+					}
 				}
 
 				ShareTitle(uri.ToString());
@@ -719,7 +734,7 @@ public class ControlWindow : Window, IDisposable
 	{
 		int seconds = (int)(_seekerMaxSeconds * (percentage / 100));
 		Services.Log.Debug("Seeking to " + seconds + " seconds");
-		if (_syncPlayToggle)
+		if (_syncPlayToggle || _ottApi.IsInRoom)
 		{
 			_ottApi.Seek(seconds);
 		}
@@ -743,7 +758,7 @@ public class ControlWindow : Window, IDisposable
 			{
 				_mpvIsPlaying = true;
 
-				if (_syncPlayToggle && _core.IsPlayerTVOn())
+				if ((_syncPlayToggle || _ottApi.IsInRoom) && _core.IsPlayerTVOn())
 				{
 					_ottApi.PlayPauseVideo(true);
 				}
@@ -780,17 +795,37 @@ public class ControlWindow : Window, IDisposable
 	{
 		try
 		{
-			HttpResponseMessage response = await Plugin.HttpClient.GetAsync("https://is.gd/create.php?format=simple&url=" + Uri.EscapeDataString(inputURL));
+			string request = JsonSerializer.Serialize(new { originalUrl = inputURL });
+			
+			HttpResponseMessage response = await Plugin.HttpClient.PostAsync("https://urlvanish.com/create_api.php", new StringContent(request, Encoding.UTF8, "application/json"));
+
 			response.EnsureSuccessStatusCode();
 			string responseBody = await response.Content.ReadAsStringAsync();
-
-			if (responseBody.Contains("error") || responseBody.Contains("Error"))
+			var responseJSON = JsonSerializer.Deserialize<JsonElement>(responseBody);
+			
+			if(responseJSON.TryGetProperty("error", out JsonElement _error))
 			{
-				error(responseBody);
+				error(_error.ToString());
 			}
 			else
 			{
-				callback(responseBody);
+				if(responseJSON.TryGetProperty("alias", out var _alias))
+				{
+					string? shortUrl = _alias.GetString();
+					if(shortUrl != null)
+					{
+						var shortUri = new Uri(shortUrl);
+						callback(shortUri);
+					}
+					else
+					{
+						error("Alias is null");
+					}
+				}
+				else
+				{
+					error(responseBody);
+				}
 			}
 		}
 		catch (Exception e)
@@ -803,7 +838,7 @@ public class ControlWindow : Window, IDisposable
 	{
 		if (!_core.IsTVTurnedOff())
 		{
-			_core.PlayVideo(_ottApi.VideoUrl);
+			_core.PlayVideo(_ottApi.VideoUrl, true);
 		}
 	}
 
@@ -931,7 +966,7 @@ public class ControlWindow : Window, IDisposable
 			await ShortenURL(url, result =>
 			{
 				_lastURL = url;
-				_shortenedURL = result.Split("/").Last();
+				_shortenedURL = result.Segments[^1].TrimEnd('/');
 				_signalShareTitle = true; //Shortened URL will be updated on main thread
 
 			}, error =>
@@ -966,17 +1001,23 @@ public class ControlWindow : Window, IDisposable
 			}
 			else
 			{
-				string url = string.Concat("https://is.gd/", title.AsSpan("alpha:".Length));
+				string url = string.Concat("https://urlvanish.com/", title.AsSpan("alpha:".Length));
 				await FetchURLData(url, response =>
 				{
 					Services.Log.Debug("New URL: " + url);
 					_currentURLs[entityId] = response;
 					if (_core.IsEntityTVOn(entityId))
 					{
-						/*if("ISOTTAPILINK" == "")
-	_plugin.StartMPV(_OTTApiOther.VideoUrl, _currentSharedTexture);
-	else*/
-						_core.PlayVideo(url);
+						var uri = new Uri(url);
+						if (uri != null && (uri.Host.EndsWith(".opentogethertube.com", StringComparison.OrdinalIgnoreCase) || string.Equals(uri.Host, "opentogethertube.com", StringComparison.OrdinalIgnoreCase)))
+						{
+							string roomId = uri.Segments[^1].TrimEnd('/');
+							_ = _ottApi.Initialize(roomId);
+						}
+						else
+						{
+							_core.PlayVideo(url);
+						}
 					}
 				});
 			}

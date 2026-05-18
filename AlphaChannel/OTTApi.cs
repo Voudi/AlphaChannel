@@ -35,11 +35,7 @@ public class OTTApi : IDisposable
 
 	public void Dispose()
 	{
-		if (_wsocket != null && _wsocket.State == WebSocketState.Open)
-		{
-			_wsocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
-		}
-		_wsocket?.Dispose();
+		LeaveRoom().ContinueWith(t => _wsocket?.Dispose());
 		_httpClient.Dispose();
 		GC.SuppressFinalize(this);
 	}
@@ -364,7 +360,7 @@ public class OTTApi : IDisposable
 						{
 							_controlWindow.OTTReceiveSeek(message.PlaybackPosition);
 
-							Services.Log.Debug("[OTT] Received seek signal");
+							Services.Log.Debug("[OTT] Received seek signal to " + message.PlaybackPosition);
 
 							if (!_connectionReady)
 							{

@@ -59,10 +59,10 @@ namespace AlphaChannel
 		private Texture2D? _targetTexture;
 		private ManualResetEventSlim _frameReady = new ManualResetEventSlim(false);
 		private MpvRenderUpdateFn? _updateCallback;
-		private bool _stopping;
+		private bool _closing;
 		private Thread? _eventThread;
 
-		public void Initialize(int width, int height, string url, Texture2D targetTexture, CancellationTokenSource cancelToken)
+		public void Initialize(int width, int height, string url, Texture2D targetTexture, CancellationTokenSource cancelToken, bool waitForSeek)
 		{
 			_width = width;
 			_height = height;
@@ -82,6 +82,7 @@ namespace AlphaChannel
 			_ = mpv_set_option_string(_mpvCtx, "script-opts", $"ytdl_hook-ytdl_path={_pluginInstance?.AssemblyLocationYTDLP}");
 			_ = mpv_set_option_string(_mpvCtx, "ytdl-format", $"bestvideo[height<={Plugin.ResolutionHeight}][ext=mp4]+bestaudio/best[height<={Plugin.ResolutionHeight}]");
 			_ = mpv_set_option_string(_mpvCtx, "terminal", "yes");
+			_ = mpv_set_option_string(_mpvCtx, "volume", "25");
 			_ = mpv_set_option_string(_mpvCtx, "msg-level", "all=warn,ffmpeg=error");
 			_ = mpv_set_option_string(_mpvCtx, "ytdl-raw-options", "force-ipv4=");
 			_ = mpv_set_option_string(_mpvCtx, "idle", "yes");
@@ -116,8 +117,6 @@ namespace AlphaChannel
 			Marshal.StructureToPtr(new MpvRenderParam { Type = 20, Data = _bufferPtr }, _renderParamsPtr + 48, false);
 			Marshal.StructureToPtr(new MpvRenderParam { Type = 0, Data = IntPtr.Zero }, _renderParamsPtr + 64, false);
 
-			_ = mpv_command(_mpvCtx, ["loadfile", url, null!]);
-
 			_updateCallback = (ctx) => _frameReady.Set();
 			mpv_render_context_set_update_callback(_mpvRenderCtx, _updateCallback, IntPtr.Zero);
 
@@ -128,6 +127,8 @@ namespace AlphaChannel
 			};
 
 			_eventThread.Start();
+
+			Play(url, waitForSeek);
 
 			Services.Log.Debug("[MPV] Video Player started");
 		}
@@ -144,7 +145,7 @@ namespace AlphaChannel
 				Services.Log.Debug("[MPV] Video Player stopped");
 				return false;
 			}
-			if (_stopping || _cancelToken!.Token.IsCancellationRequested)
+			if (_closing || _cancelToken!.Token.IsCancellationRequested)
 			{ Services.Log.Debug("[MPV] Video Player stopped"); return false; }
 			ulong flags = mpv_render_context_update(_mpvRenderCtx);
 			if ((flags & 1) == 0)
@@ -156,7 +157,7 @@ namespace AlphaChannel
 			{
 				int rc = mpv_render_context_render(_mpvRenderCtx, _renderParamsPtr);
 
-				if (_stopping || _cancelToken!.Token.IsCancellationRequested || DxHandler.DrawDevice?.ImmediateContext == null)
+				if (_closing || _cancelToken!.Token.IsCancellationRequested || DxHandler.DrawDevice?.ImmediateContext == null)
 				{
 					return false;
 				}
@@ -179,9 +180,12 @@ namespace AlphaChannel
 			return false;
 		}
 		private readonly Lock _mpvLock = new();
+		private bool _initialized;
+		private int? _pendingSeek;
+		private string? _pendingUrl;
 		public void StopRender()
 		{
-			_stopping = true;
+			_closing = true;
 			_cancelToken!.Cancel();
 			Task.Run(() =>
 			{
@@ -217,23 +221,45 @@ namespace AlphaChannel
 			_eventThread?.Join(2000);
 		}
 
-		public void Play(string url)
+		public void Play(string url, bool waitForSeek)
 		{
-			if (!_stopping)
+			if (!_closing)
 			{
 				lock (_mpvLock)
 				{
-					_ = mpv_command(_mpvCtx, ["loadfile", url, "replace", null!]);
+					if (waitForSeek && !_initialized)
+					{
+						if(_pendingSeek != null)
+						{
+							string startStr = _pendingSeek.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+							_ = mpv_command(_mpvCtx, ["loadfile", url, "replace", "0", $"start={startStr}", null!]);
+							_pendingSeek = null;
+							_pendingUrl = null;
+							_initialized = true;
+
+						}
+						else
+						{
+							_pendingUrl = url;
+						}
+						
+					}
+					else
+					{
+						_ = mpv_command(_mpvCtx, ["loadfile", url, null!]);
+						_initialized = true;
+					}
 				}
 			}
 		}
 
 		public void Stop()
 		{
-			if (!_stopping)
+			if (!_closing)
 			{
 				lock (_mpvLock)
 				{
+					_initialized = false;
 					_ = mpv_command(_mpvCtx, ["stop", null!]);
 				}
 			}
@@ -241,7 +267,7 @@ namespace AlphaChannel
 
 		public bool GetPaused()
 		{
-			if (_stopping)
+			if (_closing)
 			{
 				return true;
 			}
@@ -267,7 +293,7 @@ namespace AlphaChannel
 		}
 		public double[] GetProperties()
 		{
-			if (_stopping)
+			if (_closing)
 			{
 				return [0, 0, 100];
 			}
@@ -288,7 +314,7 @@ namespace AlphaChannel
 
 		public void TogglePause()
 		{
-			if (!_stopping)
+			if (!_closing)
 			{
 				lock (_mpvLock)
 				{
@@ -299,7 +325,7 @@ namespace AlphaChannel
 
 		public void SetVolume(int volume)
 		{
-			if (!_stopping)
+			if (!_closing)
 			{
 				lock (_mpvLock)
 				{
@@ -310,17 +336,37 @@ namespace AlphaChannel
 
 		public void Seek(int seconds)
 		{
-			if (!_stopping)
+			if (!_closing)
 			{
 				lock (_mpvLock)
 				{
+					if (!_initialized)
+					{
+						if(_pendingUrl != null)
+						{
+							string startStr = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+							_ = mpv_command(_mpvCtx, ["loadfile", _pendingUrl, "replace", "0", $"start={startStr}", null!]);
+							_pendingSeek = null;
+							_pendingUrl = null;
+							_initialized = true;
+
+						}
+						else
+						{
+							_pendingSeek = seconds;
+						}
+						
+						return;
+					}
+					
 					_ = mpv_command(_mpvCtx, ["seek", seconds.ToString(System.Globalization.CultureInfo.InvariantCulture), "absolute", null!]);
 				}
 			}
 		}
+
 		public string? GetMediaTitle()
 		{
-			if (_stopping)
+			if (_closing)
 			{
 				return null;
 			}
@@ -350,7 +396,7 @@ namespace AlphaChannel
 
 		public string? GetCurrentUrl()
 		{
-			if (_stopping)
+			if (_closing)
 			{
 				return null;
 			}
@@ -381,7 +427,7 @@ namespace AlphaChannel
 
 		public bool IsIdle()
 		{
-			if (_stopping)
+			if (_closing)
 			{
 				return true;
 			}
