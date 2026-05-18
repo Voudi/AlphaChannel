@@ -1,16 +1,15 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Text.Json.Serialization;
-using System.ComponentModel;
 
 namespace AlphaChannel;
 
 public class TitleData
 {
-	public string? Title = string.Empty;
-	public bool IsPrefix;
-	public bool IsOriginal;
-	public Vector3? Color;
-	public Vector3? Glow;
+	public string? Title { get; set; } = string.Empty;
+	public bool IsPrefix { get; set; }
+	public bool IsOriginal { get; set; }
+	public Vector3? Color { get; set; }
+	public Vector3? Glow { get; set; }
 
 	public static implicit operator TitleData(CustomTitle title) => new()
 	{
@@ -32,17 +31,17 @@ public class TitleData
 
 public class CustomTitle
 {
-	public string? Title = string.Empty;
-	public bool IsPrefix;
-	public bool IsOriginal;
-	public string UniqueId = string.Empty;
+	public string? Title { get; set; } = string.Empty;
+	public bool IsPrefix { get; set; }
+	public bool IsOriginal { get; set; }
+	public string UniqueId { get; set; } = string.Empty;
 
-	public bool Enabled;
-	public TitleConditionType TitleCondition = TitleConditionType.None;
-	public int ConditionParam0;
+	public bool Enabled { get; set; }
+	public TitleConditionType TitleCondition { get; set; } = TitleConditionType.None;
+	public int ConditionParam0 { get; set; }
 
-	public Vector3? Color;
-	public Vector3? Glow;
+	public Vector3? Color { get; set; }
+	public Vector3? Glow { get; set; }
 
 	[JsonIgnore] public string DisplayTitle => $"《{Title}》";
 }
@@ -51,15 +50,15 @@ public enum TitleConditionType
 {
 	None,
 
-	[Description("Class / Job")]
+	[System.ComponentModel.Description("Class / Job")]
 	ClassJob,
 
-	[Description("Role")]
+	[System.ComponentModel.Description("Role")]
 	JobRole,
 
-	[Description("Gear Set")]
+	[System.ComponentModel.Description("Gear Set")]
 	GearSet,
 
-	[Description("Original Title")]
+	[System.ComponentModel.Description("Original Title")]
 	Title,
 }

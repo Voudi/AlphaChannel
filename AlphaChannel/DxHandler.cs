@@ -1,4 +1,4 @@
-﻿using Dalamud.Plugin;
+using Dalamud.Plugin;
 using SharpDX.DXGI;
 using D3D11 = SharpDX.Direct3D11;
 
@@ -23,7 +23,7 @@ internal static class DxHandler
 		DrawDevice = CreateDrawDevice();
 	}
 
-    private static D3D11.Device? CreateDrawDevice()
+	private static D3D11.Device? CreateDrawDevice()
 	{
 		// Find the adapter matching the luid from the parent process
 		Factory1 factory = new();
@@ -31,7 +31,10 @@ internal static class DxHandler
 		foreach (Adapter adapter in factory.Adapters)
 		{
 			if (adapter == null)
+			{
 				continue;
+			}
+
 			if (adapter.Description.Luid == AdapterLuid)
 			{
 				gameAdapter = adapter;

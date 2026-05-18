@@ -1,10 +1,8 @@
-﻿using Dalamud.Game.Command;
+using System.Numerics;
+using Dalamud.Bindings.ImGui;
+using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
-using Dalamud.Bindings.ImGui;
-using System.Numerics;
-using System.Reflection;
-using SharpDX.Direct3D11;
 
 namespace AlphaChannel;
 
@@ -13,21 +11,20 @@ public class Plugin : IDalamudPlugin
 	// Required for LivePluginLoader support
 	public string? AssemblyLocationMPV { get; set; }
 	public string? AssemblyLocationYTDLP { get; set; }
-	// Required for LivePluginLoader support
+	// Required for LivePluginLoader support — interface member cannot be static
 	public string Name => "AlphaChannel";
 
-	public readonly WindowSystem WindowSystem = new("AlphaChannel");
-	private const string _commandRemote = "/aremote";
+	public WindowSystem WindowSystem { get; } = new("AlphaChannel");
+	private const string CommandRemote = "/aremote";
 
-	public static readonly int _resolutionWidth = 1920;
-	public static readonly int _resolutionHeight = 1080;
+	public static readonly int ResolutionWidth = 1920;
+	public static readonly int ResolutionHeight = 1080;
 	private ControlWindow _mainWindow;
-	private readonly string _pluginConfigDir;
 	private readonly string _pluginDir;
 	public Resources LibResources { get; }
-	public static readonly HttpClient HTTPCLIENT = new HttpClient();
-    public static readonly HttpClient NOREDIRECTHTTPCLIENT = new HttpClient(
-		new HttpClientHandler { AllowAutoRedirect = false }
+	public static readonly System.Net.Http.HttpClient HttpClient = new();
+	public static readonly System.Net.Http.HttpClient NoRedirectHttpClient = new(
+		new System.Net.Http.HttpClientHandler { AllowAutoRedirect = false }
 	);
 
 	public Plugin(IDalamudPluginInterface pluginInterface)
@@ -37,25 +34,23 @@ public class Plugin : IDalamudPlugin
 
 		string title = "AlphaChannel Remote ";
 
-		#if IS_TEST
-			title += " (Test)";
-		#endif
+#if IS_TEST
+		title += " (Test)";
+#endif
 
-        // init services
-        pluginInterface.Create<Services>();
+		// init services
+		pluginInterface.Create<Services>();
 
 		_pluginDir = pluginInterface.AssemblyLocation.DirectoryName ?? "";
-		if (String.IsNullOrEmpty(_pluginDir))
+		if (string.IsNullOrEmpty(_pluginDir))
 		{
-			throw new Exception("Could not determine plugin directory");
+			throw new InvalidOperationException("Could not determine plugin directory");
 		}
-
-		_pluginConfigDir = pluginInterface.GetPluginConfigDirectory();
 
 		LibResources = new Resources(_pluginDir);
 
-        // Spin up DX handling from the plugin interface
-        DxHandler.Initialise(Services.PluginInterface);
+		// Spin up DX handling from the plugin interface
+		DxHandler.Initialise(Services.PluginInterface);
 
 		// Hook up render hook
 		pluginInterface.UiBuilder.Draw += Render;
@@ -71,8 +66,8 @@ public class Plugin : IDalamudPlugin
 		pluginInterface.UiBuilder.OpenConfigUi += ToggleMainUI;
 		pluginInterface.UiBuilder.OpenMainUi += ToggleMainUI;
 
-        Services.CommandManager.AddHandler(_commandRemote, new CommandInfo(HandleCommand) { HelpMessage = "Toggles the Remote Window", ShowInHelp = true });
-    }
+		Services.CommandManager.AddHandler(CommandRemote, new CommandInfo(HandleCommand) { HelpMessage = "Toggles the Remote Window", ShowInHelp = true });
+	}
 
 	public void Dispose()
 	{
@@ -83,6 +78,8 @@ public class Plugin : IDalamudPlugin
 		_mainWindow?.Dispose();
 
 		DxHandler.Shutdown();
+
+		GC.SuppressFinalize(this);
 	}
 
 	private void Render()
@@ -98,17 +95,21 @@ public class Plugin : IDalamudPlugin
 
 	private void HandleCommand(string command, string rawArgs)
 	{
-		if (_commandRemote.Equals(command))
+		if (CommandRemote.Equals(command, StringComparison.Ordinal))
+		{
 			ToggleMainUI();
+		}
 	}
 
 	private void DrawUI() => WindowSystem.Draw();
 	public void ToggleMainUI() => _mainWindow?.Toggle();
 
-    internal void UpdateTitle(uint entityId, TitleData titleData)
+	internal void UpdateTitle(uint entityId, TitleData titleData)
 	{
 		if (titleData?.Title != null)
+		{
 			_mainWindow?.UpdateTitle(entityId, titleData.Title);
+		}
 	}
 
 	internal string GetModPath()
@@ -116,12 +117,11 @@ public class Plugin : IDalamudPlugin
 		return Path.Combine(_pluginDir, "resources\\AlphaChannelTV.pmp");
 	}
 
-    internal void CheckURLHook()
-    {
+	internal void CheckURLHook()
+	{
 		if (!IpcProvider.Initialized)
 		{
-            IpcProvider.Init(this);
-        }
+			IpcProvider.Init(this);
+		}
 	}
-
 }

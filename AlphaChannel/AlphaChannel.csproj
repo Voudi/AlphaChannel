@@ -7,6 +7,12 @@
 	</PropertyGroup>
 	<PropertyGroup>
 		<LangVersion>latest</LangVersion>
+		<!-- Lint: Roslyn-Analyzer auf empfohlenem Niveau aktivieren -->
+		<AnalysisLevel>latest-recommended</AnalysisLevel>
+		<!-- Lint: .editorconfig-Regeln beim Build durchsetzen -->
+		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+		<!-- Lint: Alle Warnungen werden zu Fehlern — Build schlägt fehl wenn Standard verletzt -->
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 	</PropertyGroup>
 	<PropertyGroup>
 		<UseWinRT>true</UseWinRT>
@@ -36,7 +42,7 @@
 	  <None Include="DalamudPackager.targets" />
 	</ItemGroup>
 	<ItemGroup>
-		<PackageReference Include="SharpCompress" Version="0.47.4" />
+		<PackageReference Include="SharpCompress" Version="0.48.1" />
 		<PackageReference Include="SharpDX" Version="4.2.0" />
 		<PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
 		<PackageReference Include="SharpDX.DXGI" Version="4.2.0" />

@@ -1,42 +1,43 @@
-using AlphaChannel;
-using Microsoft.Win32;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32;
 
-class Compatibility
+namespace AlphaChannel;
+
+internal sealed class Compatibility
 {
-    private Plugin _plugin;
-    public bool _modexists {get; private set;} = false;
-	public bool _installedmod {get; private set;} = false;
+	private readonly Plugin _plugin;
+	public bool ModExists { get; private set; }
+	public bool InstalledMod { get; private set; }
 
-    public Compatibility(Plugin plugin)
-    {
-        _plugin = plugin;
-    }
-
-    public static bool IsRunningUnderWine()
-    {
-        // Wine sets this registry key
-        try
-        {
-            using var key = Registry.LocalMachine.OpenSubKey(@"Software\Wine");
-            return key != null;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    public void CheckForUpdates()
+	public Compatibility(Plugin plugin)
 	{
-		var mpvLocation = _plugin.LibResources.GetLocationMPV();
-		if(mpvLocation != null)
+		_plugin = plugin;
+	}
+
+	public static bool IsRunningUnderWine()
+	{
+		// Wine sets this registry key
+		try
+		{
+			using var key = Registry.LocalMachine.OpenSubKey(@"Software\Wine");
+			return key != null;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	public void CheckForUpdates()
+	{
+		string? mpvLocation = _plugin.LibResources.GetLocationMPV();
+		if (mpvLocation != null)
 		{
 			_plugin.AssemblyLocationMPV = mpvLocation;
 		}
-		var ytdlpLocation = _plugin.LibResources.GetLocationYTDLP();
-		if(ytdlpLocation != null)
+		string? ytdlpLocation = _plugin.LibResources.GetLocationYTDLP();
+		if (ytdlpLocation != null)
 		{
 			_plugin.AssemblyLocationYTDLP = ytdlpLocation;
 		}
@@ -65,56 +66,55 @@ class Compatibility
 		});
 	}
 
-    public async Task<bool> CheckTVMod()
+	public async Task<bool> CheckTVMod()
 	{
-		var apiUrl = "http://localhost:42069/api";
+		string apiUrl = "http://localhost:42069/api";
 
-        try
-        {
-            var responseMods = await Plugin.HTTPCLIENT.GetAsync(apiUrl + "/mods");
+		try
+		{
+			System.Net.Http.HttpResponseMessage responseMods = await Plugin.HttpClient.GetAsync(apiUrl + "/mods");
 
-            responseMods.EnsureSuccessStatusCode();
+			responseMods.EnsureSuccessStatusCode();
 
-            var responseModsBody = await responseMods.Content.ReadAsStringAsync();
+			string responseModsBody = await responseMods.Content.ReadAsStringAsync();
 
-			_modexists = responseModsBody.Contains("AlphaChannelTV");
-        }
-        catch (Exception ex)
-        {
-            Services.Log.Debug("Error:" + ex.Message);
-        }
+			ModExists = responseModsBody.Contains("AlphaChannelTV");
+		}
+		catch (Exception ex)
+		{
+			Services.Log.Debug("Error:" + ex.Message);
+		}
 
-		return _modexists;
-    }
+		return ModExists;
+	}
 
-    public async void InstallTVMod()
+	public async void InstallTVMod()
 	{
-        var apiUrl = "http://localhost:42069/api";
+		string apiUrl = "http://localhost:42069/api";
 
-        try
-        {
-            if (!await CheckTVMod())
-            {
-                var content = new StringContent(JsonSerializer.Serialize(
-                    new
-                    {
-                        Path = _plugin.GetModPath()
-                    }
-                ), Encoding.UTF8, "application/json");
+		try
+		{
+			if (!await CheckTVMod())
+			{
+				System.Net.Http.StringContent content = new(JsonSerializer.Serialize(
+					new
+					{
+						Path = _plugin.GetModPath()
+					}
+				), Encoding.UTF8, "application/json");
 
-                Services.Log.Debug("Installing mod: " + _plugin.GetModPath());
-                var responseInstall = await Plugin.HTTPCLIENT.PostAsync(apiUrl + "/installmod", content);
+				Services.Log.Debug("Installing mod: " + _plugin.GetModPath());
+				System.Net.Http.HttpResponseMessage responseInstall = await Plugin.HttpClient.PostAsync(apiUrl + "/installmod", content);
 
-                responseInstall.EnsureSuccessStatusCode();
+				responseInstall.EnsureSuccessStatusCode();
 
-				_modexists = true;
-                _installedmod = true;
-            }
-        }
-        catch (Exception ex)
-        {
-            Services.Log.Debug("Error:" + ex.Message);
-
-        }
-    }
+				ModExists = true;
+				InstalledMod = true;
+			}
+		}
+		catch (Exception ex)
+		{
+			Services.Log.Debug("Error:" + ex.Message);
+		}
+	}
 }

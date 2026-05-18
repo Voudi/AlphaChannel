@@ -1,4 +1,4 @@
-﻿using Dalamud.IoC;
+using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 
@@ -6,10 +6,10 @@ namespace AlphaChannel;
 
 public class Services
 {
-	[PluginService] 
+	[PluginService]
 	public static IObjectTable Objects { get; private set; } = null!;
 
-	[PluginService] 
+	[PluginService]
 	public static IPluginLog Log { get; private set; } = null!;
 
 	[PluginService]
@@ -30,9 +30,9 @@ public class Services
 	[PluginService]
 	public static IGameInteropProvider InteropProvider { get; private set; } = null!;
 
-    [PluginService]
-    public static ISigScanner SigScanner { get; private set; } = null!;
+	[PluginService]
+	public static ISigScanner SigScanner { get; private set; } = null!;
 
-    [PluginService]
-    public static IDutyState DutyState { get; private set; } = null!;
+	[PluginService]
+	public static IDutyState DutyState { get; private set; } = null!;
 }
