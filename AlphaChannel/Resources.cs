@@ -122,9 +122,7 @@ public class Resources : IDisposable
 			Services.Log.Debug("Finished Downloading " + downloadURL);
 			if (nameEndsWith == ".7z")
 			{
-				string tempFolderName = Path.GetTempFileName();
-				File.Delete(tempFolderName);
-				string localFolder = Path.Combine(pluginDir, tempFolderName);
+				string localFolder = Path.Combine(pluginDir, Path.GetRandomFileName());
 				Directory.CreateDirectory(localFolder);
 				using (var archive = ArchiveFactory.OpenArchive(tempFile))
 				{

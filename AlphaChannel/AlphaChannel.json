@@ -2,8 +2,8 @@
   "Author": "Voudisteppi",
   "Name": "AlphaChannel",
   "InternalName": "AlphaChannel",
-  "AssemblyVersion": "1.1.20260518.347",
-  "TestingAssemblyVersion": "1.1.20260518.537",
+  "AssemblyVersion": "1.1.20260518.349",
+  "TestingAssemblyVersion": "1.1.20260518.539",
   "Description": "Ingame watch parties.",
   "ApplicableVersion": "any",
   "Tags": [
