@@ -32,7 +32,6 @@ public class ControlWindow : Window, IDisposable
 	private int _seekerMaxSeconds;
 	private bool _libsLoaded;
 	private bool _updatingLibs;
-	private bool _mpvIsPlaying;
 	private bool _uiElementActive;
 	private string _mediaTitle = string.Empty;
 	private bool _sharingTitle;
@@ -333,7 +332,6 @@ public class ControlWindow : Window, IDisposable
 					{
 						if (_mpvIsIdle)
 						{
-							_mpvIsPlaying = false;
 							if (_syncPlayToggle || _ottApi.IsInRoom)
 							{
 								_ottApi.PushNextVideo();
@@ -448,13 +446,19 @@ public class ControlWindow : Window, IDisposable
 					}
 				}
 
-				if (_mpvIsPlaying && isTheRunningTV)
+				if (isTheRunningTV)
 				{
 					DrawScrollingText(_mediaTitle, 250);
 				}
 
-				if (_mpvIsPlaying && isTheRunningTV)
+				
+				if (isTheRunningTV)
 				{
+					if (!isPlayer)
+					{
+						ImGui.BeginDisabled();
+					}
+
 					ImGui.SetNextItemWidth(268);
 					ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1));
 					ImGui.SliderFloat("##seeker" + item.EntityId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
@@ -592,7 +596,6 @@ public class ControlWindow : Window, IDisposable
 				_core.SetCurrentTV(entityId);
 				_pauseToggle = false;
 				_lastTVTurnOn = DateTime.Now;
-				_mpvIsPlaying = false;
 
 				if (_syncPlayToggle && !isOTTUrl)
 				{
@@ -606,15 +609,12 @@ public class ControlWindow : Window, IDisposable
 				}
 				else
 				{
-					Services.Log.Debug("URI is: " + uri.Segments[^2]);
-					Services.Log.Debug("URI is: " + uri.Segments[^1]);
 					if(isOTTUrl){
 						string roomId = uri.Segments[^1].TrimEnd('/');
 						_=_ottApi.Initialize(roomId);
 					}
 					else
 					{
-						Services.Log.Debug("Playing normally");
 						_core.PlayVideo(uri.ToString());
 					}
 				}
@@ -633,7 +633,6 @@ public class ControlWindow : Window, IDisposable
 				_core.SetCurrentTV(entityId);
 				_pauseToggle = false;
 				_lastTVTurnOn = DateTime.Now;
-				_mpvIsPlaying = false;
 
 				bool result = Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri?.Scheme == Uri.UriSchemeHttp || uri?.Scheme == Uri.UriSchemeHttps) && uri.Host.Contains('.') && !uri.Host.EndsWith('.') && Uri.CheckHostName(uri.Host) == UriHostNameType.Dns;
 
@@ -754,16 +753,6 @@ public class ControlWindow : Window, IDisposable
 
 			double time = info[0];
 
-			if (!_mpvIsPlaying && time > 0)
-			{
-				_mpvIsPlaying = true;
-
-				if ((_syncPlayToggle || _ottApi.IsInRoom) && _core.IsPlayerTVOn())
-				{
-					_ottApi.PlayPauseVideo(true);
-				}
-			}
-
 			_seekerTimeMinutes = (int)(time / 60);
 			_seekerTimeSeconds = (int)(time % 60);
 			double duration = info[1];
@@ -834,11 +823,11 @@ public class ControlWindow : Window, IDisposable
 		}
 	}
 
-	public void OTTReceiveNewVideo() //Receive new Video from OTT
+	public void OTTReceiveNewVideo(string url, double playbackPosition, bool isPlaying) //Receive new Video from OTT
 	{
 		if (!_core.IsTVTurnedOff())
 		{
-			_core.PlayVideo(_ottApi.VideoUrl, true);
+			_core.PlayVideo(url, playbackPosition, isPlaying);
 		}
 	}
 

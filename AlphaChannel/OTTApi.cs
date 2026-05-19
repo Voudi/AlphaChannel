@@ -26,6 +26,7 @@ public class OTTApi : IDisposable
 	private bool _checkFailed;
 	public bool LastCheckSuccessful => !_checkingURL && _video is not null && !_checkFailed;
 	public bool IsChecking => _checkingURL && !_checkFailed;
+	private bool _isNewRoom;
 	private readonly JsonSerializerOptions _jsonOptions;
 	public OTTApi(ControlWindow controlWindow)
 	{
@@ -114,6 +115,7 @@ public class OTTApi : IDisposable
 
 		_httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _token);
 
+		_isNewRoom = string.IsNullOrEmpty(roomId);
 		_ = ConnectWSS(_room, _token);
 	}
 
@@ -171,7 +173,7 @@ public class OTTApi : IDisposable
 			byte[] buffer = new byte[65536];
 			while (_wsocket != null && _wsocket.State == WebSocketState.Open)
 			{
-				System.Net.WebSockets.WebSocketReceiveResult result = await _wsocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+				WebSocketReceiveResult result = await _wsocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
 				string response = Encoding.UTF8.GetString(buffer, 0, result.Count);
 				if (response != null && response.Length > 5)
 				{
@@ -261,7 +263,7 @@ public class OTTApi : IDisposable
 		}
 	}
 
-	private sealed record PushNextVideoEvent([property: JsonRequired] string Action, List<Requests.Video> Queue, Requests.Video CurrentSource, [property: JsonRequired] double PlaybackPosition, [property: JsonPropertyName("hls_url")] string HlsUrl);
+	private sealed record PushNextVideoEvent([property: JsonRequired] string Action, List<Requests.Video> Queue, Requests.Video CurrentSource, [property: JsonRequired] double PlaybackPosition, bool? IsPlaying, [property: JsonPropertyName("hls_url")] string HlsUrl);
 	private sealed record QueueEvent([property: JsonRequired] string Action, [property: JsonRequired] List<Requests.Video> Queue);
 	private sealed record PauseEvent([property: JsonRequired] string Action, [property: JsonRequired] double PlaybackPosition, [property: JsonRequired] bool IsPlaying);
 	private sealed record PlayEvent([property: JsonRequired] string Action, [property: JsonRequired] bool IsPlaying);
@@ -313,11 +315,25 @@ public class OTTApi : IDisposable
 								return;
 							}
 
+							Services.Log.Debug("[OTT] Received new video: " + response);
 							_video = message.CurrentSource;
 							VideoUrl = url;
-							_controlWindow.OTTReceiveNewVideo();
-
-							Services.Log.Debug("[OTT] Received new video");
+							double playbackPos = message.PlaybackPosition;
+							if(message.IsPlaying.HasValue)
+							{
+								_controlWindow.OTTReceiveNewVideo(url, playbackPos, message.IsPlaying.Value);
+							}
+							else
+							{
+								_controlWindow.OTTReceiveNewVideo(url, playbackPos, true);
+							}
+							
+							if (_isNewRoom)
+							{
+								_isNewRoom = false;
+								PlayPauseVideo(true);
+							}
+							
 						}
 					}
 					else if (doc.RootElement.TryGetProperty("queue", out _))
@@ -419,7 +435,7 @@ public class OTTApi : IDisposable
 				}
 				else
 				{
-					Services.Log.Error("[OTT] Failed generating room");
+					Services.Log.Error("[OTT] Failed generating room: " + result.Content);
 				}
 
 				return null;

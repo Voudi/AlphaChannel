@@ -59,10 +59,10 @@ namespace AlphaChannel
 		private Texture2D? _targetTexture;
 		private ManualResetEventSlim _frameReady = new ManualResetEventSlim(false);
 		private MpvRenderUpdateFn? _updateCallback;
-		private bool _closing;
+		private bool _closed = true;
 		private Thread? _eventThread;
 
-		public void Initialize(int width, int height, string url, Texture2D targetTexture, CancellationTokenSource cancelToken, bool waitForSeek)
+		public void Initialize(int width, int height, Texture2D targetTexture, CancellationTokenSource cancelToken)
 		{
 			_width = width;
 			_height = height;
@@ -128,7 +128,7 @@ namespace AlphaChannel
 
 			_eventThread.Start();
 
-			Play(url, waitForSeek);
+			_closed = false;
 
 			Services.Log.Debug("[MPV] Video Player started");
 		}
@@ -145,7 +145,7 @@ namespace AlphaChannel
 				Services.Log.Debug("[MPV] Video Player stopped");
 				return false;
 			}
-			if (_closing || _cancelToken!.Token.IsCancellationRequested)
+			if (_closed || _cancelToken!.Token.IsCancellationRequested)
 			{ Services.Log.Debug("[MPV] Video Player stopped"); return false; }
 			ulong flags = mpv_render_context_update(_mpvRenderCtx);
 			if ((flags & 1) == 0)
@@ -157,7 +157,7 @@ namespace AlphaChannel
 			{
 				int rc = mpv_render_context_render(_mpvRenderCtx, _renderParamsPtr);
 
-				if (_closing || _cancelToken!.Token.IsCancellationRequested || DxHandler.DrawDevice?.ImmediateContext == null)
+				if (_closed || _cancelToken!.Token.IsCancellationRequested || DxHandler.DrawDevice?.ImmediateContext == null)
 				{
 					return false;
 				}
@@ -180,12 +180,9 @@ namespace AlphaChannel
 			return false;
 		}
 		private readonly Lock _mpvLock = new();
-		private bool _initialized;
-		private int? _pendingSeek;
-		private string? _pendingUrl;
 		public void StopRender()
 		{
-			_closing = true;
+			_closed = true;
 			_cancelToken!.Cancel();
 			Task.Run(() =>
 			{
@@ -221,45 +218,26 @@ namespace AlphaChannel
 			_eventThread?.Join(2000);
 		}
 
-		public void Play(string url, bool waitForSeek)
+		public void Play(string url, double playbackPosition, bool isPlaying)
 		{
-			if (!_closing)
+			if (!_closed)
 			{
+				Services.Log.Debug("Playing New Video at " + playbackPosition + " | " + isPlaying);
 				lock (_mpvLock)
 				{
-					if (waitForSeek && !_initialized)
-					{
-						if(_pendingSeek != null)
-						{
-							string startStr = _pendingSeek.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-							_ = mpv_command(_mpvCtx, ["loadfile", url, "replace", "0", $"start={startStr}", null!]);
-							_pendingSeek = null;
-							_pendingUrl = null;
-							_initialized = true;
-
-						}
-						else
-						{
-							_pendingUrl = url;
-						}
-						
-					}
-					else
-					{
-						_ = mpv_command(_mpvCtx, ["loadfile", url, null!]);
-						_initialized = true;
-					}
+					string startStr = ((int)playbackPosition).ToString(System.Globalization.CultureInfo.InvariantCulture);
+					string pauseStr = !isPlaying ? ",pause=yes" : string.Empty;
+					_ = mpv_command(_mpvCtx, ["loadfile", url, "replace", "0", $"start={startStr}{pauseStr}", null!]);
 				}
 			}
 		}
 
 		public void Stop()
 		{
-			if (!_closing)
+			if (!_closed)
 			{
 				lock (_mpvLock)
 				{
-					_initialized = false;
 					_ = mpv_command(_mpvCtx, ["stop", null!]);
 				}
 			}
@@ -267,7 +245,7 @@ namespace AlphaChannel
 
 		public bool GetPaused()
 		{
-			if (_closing)
+			if (_closed)
 			{
 				return true;
 			}
@@ -293,7 +271,7 @@ namespace AlphaChannel
 		}
 		public double[] GetProperties()
 		{
-			if (_closing)
+			if (_closed)
 			{
 				return [0, 0, 100];
 			}
@@ -314,7 +292,7 @@ namespace AlphaChannel
 
 		public void TogglePause()
 		{
-			if (!_closing)
+			if (!_closed)
 			{
 				lock (_mpvLock)
 				{
@@ -325,7 +303,7 @@ namespace AlphaChannel
 
 		public void SetVolume(int volume)
 		{
-			if (!_closing)
+			if (!_closed)
 			{
 				lock (_mpvLock)
 				{
@@ -336,29 +314,10 @@ namespace AlphaChannel
 
 		public void Seek(int seconds)
 		{
-			if (!_closing)
+			if (!_closed)
 			{
 				lock (_mpvLock)
-				{
-					if (!_initialized)
-					{
-						if(_pendingUrl != null)
-						{
-							string startStr = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
-							_ = mpv_command(_mpvCtx, ["loadfile", _pendingUrl, "replace", "0", $"start={startStr}", null!]);
-							_pendingSeek = null;
-							_pendingUrl = null;
-							_initialized = true;
-
-						}
-						else
-						{
-							_pendingSeek = seconds;
-						}
-						
-						return;
-					}
-					
+				{	
 					_ = mpv_command(_mpvCtx, ["seek", seconds.ToString(System.Globalization.CultureInfo.InvariantCulture), "absolute", null!]);
 				}
 			}
@@ -366,7 +325,7 @@ namespace AlphaChannel
 
 		public string? GetMediaTitle()
 		{
-			if (_closing)
+			if (_closed)
 			{
 				return null;
 			}
@@ -396,7 +355,7 @@ namespace AlphaChannel
 
 		public string? GetCurrentUrl()
 		{
-			if (_closing)
+			if (_closed)
 			{
 				return null;
 			}
@@ -427,7 +386,7 @@ namespace AlphaChannel
 
 		public bool IsIdle()
 		{
-			if (_closing)
+			if (_closed)
 			{
 				return true;
 			}
