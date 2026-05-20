@@ -26,8 +26,9 @@ public class OTTApi : IDisposable
 	private bool _checkFailed;
 	public bool LastCheckSuccessful => !_checkingURL && _video is not null && !_checkFailed;
 	public bool IsChecking => _checkingURL && !_checkFailed;
-	private bool _isNewRoom;
+	private bool _toggleUnpause;
 	private readonly JsonSerializerOptions _jsonOptions;
+	public bool IsPlayerRoom {get; private set;}
 	public OTTApi(ControlWindow controlWindow)
 	{
 		_controlWindow = controlWindow;
@@ -115,7 +116,8 @@ public class OTTApi : IDisposable
 
 		_httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _token);
 
-		_isNewRoom = string.IsNullOrEmpty(roomId);
+		IsPlayerRoom = string.IsNullOrEmpty(roomId);
+		_toggleUnpause = IsPlayerRoom; // For new rooms
 		_ = ConnectWSS(_room, _token);
 	}
 
@@ -199,7 +201,7 @@ public class OTTApi : IDisposable
 		[property: JsonPropertyName("type")] int Type,
 		[property: JsonPropertyName("video")] Requests.Video Video);
 	private bool _pushNextVideo;
-	public async void PushNextVideo()
+	public async void PushNextVideo(bool replay)
 	{
 		if (_connectionReady)
 		{
@@ -209,6 +211,7 @@ public class OTTApi : IDisposable
 		{
 			_pushNextVideo = true;
 		}
+		_toggleUnpause = replay;
 	}
 	private void PushVideo()
 	{
@@ -328,9 +331,9 @@ public class OTTApi : IDisposable
 								_controlWindow.OTTReceiveNewVideo(url, playbackPos, true);
 							}
 							
-							if (_isNewRoom)
+							if (_toggleUnpause)
 							{
-								_isNewRoom = false;
+								_toggleUnpause = false;
 								PlayPauseVideo(true);
 							}
 							

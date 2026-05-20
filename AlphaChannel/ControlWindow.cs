@@ -334,7 +334,7 @@ public class ControlWindow : Window, IDisposable
 						{
 							if (_syncPlayToggle || _ottApi.IsInRoom)
 							{
-								_ottApi.PushNextVideo();
+								_ottApi.PushNextVideo(true);
 							}
 							else
 							{
@@ -594,32 +594,44 @@ public class ControlWindow : Window, IDisposable
 			{
 				bool isOTTUrl = uri.Segments.Length > 1 && string.Equals(uri.Segments[^2].TrimEnd('/'), "room", StringComparison.OrdinalIgnoreCase) && (uri.Host.EndsWith(".opentogethertube.com", StringComparison.OrdinalIgnoreCase) || string.Equals(uri.Host, "opentogethertube.com", StringComparison.OrdinalIgnoreCase));
 				_core.SetCurrentTV(entityId);
-				_pauseToggle = false;
 				_lastTVTurnOn = DateTime.Now;
 
 				if (_syncPlayToggle && !isOTTUrl)
 				{
-					_ottApi.Initialize().ContinueWith(async task =>
+					if(_ottApi.IsInRoom && _ottApi.IsPlayerRoom)
 					{
-						if (task.IsCompletedSuccessfully)
+						_ottApi.PushNextVideo(false);
+					}
+					else
+					{
+						_ottApi.Initialize().ContinueWith(async task =>
 						{
-							_ottApi.PushNextVideo();
-						}
-					});
+							if (task.IsCompletedSuccessfully)
+							{
+								ShareTitle(_ottApi.GetRoomURL);
+								_ottApi.PushNextVideo(true);
+							}
+						});
+					}
 				}
 				else
 				{
 					if(isOTTUrl){
 						string roomId = uri.Segments[^1].TrimEnd('/');
-						_=_ottApi.Initialize(roomId);
+						_=_ottApi.Initialize(roomId).ContinueWith(async task =>
+						{
+							if(task.IsCompletedSuccessfully)
+							{
+								ShareTitle(_ottApi.GetRoomURL);
+							}
+						});
 					}
 					else
 					{
 						_core.PlayVideo(uri.ToString());
+						ShareTitle(uri.ToString());
 					}
 				}
-
-				ShareTitle(uri.ToString());
 			}
 			else
 			{
@@ -631,7 +643,6 @@ public class ControlWindow : Window, IDisposable
 			if (_currentURLs.TryGetValue(entityId, out string? url))
 			{
 				_core.SetCurrentTV(entityId);
-				_pauseToggle = false;
 				_lastTVTurnOn = DateTime.Now;
 
 				bool result = Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri?.Scheme == Uri.UriSchemeHttp || uri?.Scheme == Uri.UriSchemeHttps) && uri.Host.Contains('.') && !uri.Host.EndsWith('.') && Uri.CheckHostName(uri.Host) == UriHostNameType.Dns;
@@ -651,6 +662,9 @@ public class ControlWindow : Window, IDisposable
 				{
 					_core.PlayVideo(url);
 				}
+
+				_shareURLToggle = false;
+				Services.CommandManager?.ProcessCommand("/honorific force clear");
 			}
 			else
 			{
@@ -662,7 +676,6 @@ public class ControlWindow : Window, IDisposable
 	public void TurnOffTV()
 	{
 		_ = _ottApi.LeaveRoom();
-		_pauseToggle = false;
 		_core.StopVideo();
 		if (string.IsNullOrEmpty(_inputURL) && !string.IsNullOrEmpty(_placeHolderURL))
 		{
@@ -774,8 +787,9 @@ public class ControlWindow : Window, IDisposable
 				_volume = (float)volume / 100f * ((float)volume / 100f) * 100f; //Quadratic Slider Values
 			}
 		}
-		_pauseToggle = _core.GetPaused();
+		
 		_mpvIsIdle = _core.IsIdle() ?? true;
+		_pauseToggle = _core.GetPaused() || _mpvIsIdle;
 	}
 
 
