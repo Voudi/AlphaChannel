@@ -17,7 +17,6 @@ namespace AlphaChannel;
 
 public class Core : IDisposable
 {
-	private Plugin _plugin;
 	private MpvRenderer? _currentMpvRenderer;
 	private CancellationTokenSource _renderCancellation = new CancellationTokenSource();
 	private DateTime _lastLoadYT = DateTime.MinValue;
@@ -47,8 +46,6 @@ public class Core : IDisposable
 
 	public unsafe Core(Plugin plugin)
 	{
-		_plugin = plugin;
-
 		//INIT TEXTURE
 		_screenTexture = new Texture2D(DxHandler.Device, _texture2dDescription);
 		using SharpDX.DXGI.Resource resource = _screenTexture.QueryInterface<SharpDX.DXGI.Resource>();
@@ -110,9 +107,9 @@ public class Core : IDisposable
 		if (IsYTURL(url))
 		{
 			var elapsed = DateTime.Now - _lastLoadYT;
-			if (elapsed.TotalSeconds < 10)
+			if (elapsed.TotalSeconds < 5)
 			{
-				sleepTime = Math.Min(Math.Max((int)(10000 - elapsed.TotalMilliseconds), 0), 10000);
+				sleepTime = Math.Min(Math.Max((int)(5000 - elapsed.TotalMilliseconds), 0), 5000); //Add some sleep time to avoid hitting rate limits
 			}
 
 			_lastLoadYT = DateTime.Now;
@@ -176,7 +173,7 @@ public class Core : IDisposable
 		return false;
 	}
 
-	public double[] GetPlayerInfos()
+	public double[] GetInfo()
 	{
 		if (!_renderCancellation.Token.IsCancellationRequested)
 		{
@@ -321,7 +318,6 @@ public class Core : IDisposable
 
 	private void CheckoutCompanion(IntPtr tvDraw, uint ownerId, nint companionMemoryAddress)
 	{
-		_plugin.CheckURLHook();
 		IntPtr ptr = tvDraw;
 		bool tvAddrFound = _companionOwners.TryGetValue(ownerId, out nint tvAddr);
 		if (!tvAddrFound)

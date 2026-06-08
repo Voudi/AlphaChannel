@@ -1,8 +1,0 @@
-TODO
-
-
-implement checks for other plugins (mare,penumbra,honorific required)
-implement settings section
-rework control of player through OTT (Two Watch Modes: Private, Host; create room/leave room/join room/authenticate)
-
-find a way to not use honorific for url transmission

@@ -71,8 +71,6 @@ public class Plugin : IDalamudPlugin
 
 	public void Dispose()
 	{
-		IpcProvider.DeInit();
-
 		WindowSystem.RemoveAllWindows();
 
 		_mainWindow?.Dispose();
@@ -104,24 +102,28 @@ public class Plugin : IDalamudPlugin
 	private void DrawUI() => WindowSystem.Draw();
 	public void ToggleMainUI() => _mainWindow?.Toggle();
 
-	internal void UpdateTitle(uint entityId, TitleData titleData)
-	{
-		if (titleData?.Title != null)
-		{
-			_mainWindow?.UpdateTitle(entityId, titleData.Title);
-		}
-	}
-
 	internal string GetModPath()
 	{
 		return Path.Combine(_pluginDir, "resources\\AlphaChannelTV.pmp");
 	}
 
-	internal void CheckURLHook()
+	internal string? IPCGetLocalState()
 	{
-		if (!IpcProvider.Initialized)
-		{
-			IpcProvider.Init(this);
-		}
+		throw new NotImplementedException();
+	}
+
+	internal void IPCSetState(nint addr, string s)
+	{
+		throw new NotImplementedException();
+	}
+
+	internal void IPCApplyStateUpdate(nint addr, string s)
+	{
+		throw new NotImplementedException();
+	}
+
+	internal void IPCClearState(nint addr)
+	{
+		throw new NotImplementedException();
 	}
 }

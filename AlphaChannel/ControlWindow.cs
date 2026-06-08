@@ -13,12 +13,9 @@ namespace AlphaChannel;
 
 public class ControlWindow : Window, IDisposable
 {
-	private bool _signalShareTitle;
 	private bool _modenabled;
 	private bool _installWarningMessage;
 
-	private bool _shareURLToggle;
-	private bool _syncPlayToggle;
 	private bool _pauseToggle;
 
 	//Render Vars
@@ -34,10 +31,7 @@ public class ControlWindow : Window, IDisposable
 	private bool _updatingLibs;
 	private bool _uiElementActive;
 	private string _mediaTitle = string.Empty;
-	private bool _sharingTitle;
 	private bool _mpvIsIdle = true;
-	private string _shortenedURL = "";
-	private string _lastURL = "";
 	private DateTime _lastTVTurnOn = DateTime.MinValue;
 	private Plugin _plugin;
 	private Compatibility _compat;
@@ -47,16 +41,11 @@ public class ControlWindow : Window, IDisposable
 	public delegate void URLFetchCallback(string result);
 	public delegate void URLShortenerErrorCallback(string result);
 	private readonly Dictionary<uint, string> _currentURLs = []; //Playerpointer, URL
-	private readonly Dictionary<uint, string> _currentTitles = []; //Playerpointer, Title
-
-	private readonly OTTApi _ottApi;
 
 	public ControlWindow(Plugin plugin, string title)
 		: base(title, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
 	{
 		_plugin = plugin;
-
-		_ottApi = new OTTApi(this);
 
 		_compat = new Compatibility(_plugin);
 
@@ -76,7 +65,6 @@ public class ControlWindow : Window, IDisposable
 
 	public void Dispose()
 	{
-		_ottApi.Dispose();
 		_core.VideoEnded -= TurnOffTV;
 		_core.Dispose();
 		GC.SuppressFinalize(this);
@@ -230,6 +218,7 @@ public class ControlWindow : Window, IDisposable
 					if (_currentURLs.TryGetValue(item.EntityId, out string? tempURL))
 					{
 						url = tempURL;
+						urlExists = true;
 					}
 				}
 
@@ -273,16 +262,6 @@ public class ControlWindow : Window, IDisposable
 							if (urlExists)
 							{
 								TurnOnTV(item.EntityId);
-							}
-
-							if (refreshNeeded)
-							{
-								//Update title share if player is changing url (only for non-sync mode)
-								if (_shareURLToggle && !_syncPlayToggle)
-								{
-									//Reapply sharing
-									_signalShareTitle = true;
-								}
 							}
 
 							if (isPlayer)
@@ -332,26 +311,12 @@ public class ControlWindow : Window, IDisposable
 					{
 						if (_mpvIsIdle)
 						{
-							if (_syncPlayToggle || _ottApi.IsInRoom)
-							{
-								_ottApi.PushNextVideo(true);
-							}
-							else
-							{
-								_core.PlayVideo(_placeHolderURL);
-							}
+							_core.PlayVideo(_placeHolderURL);
 						}
 						else
 						{
-							if (_syncPlayToggle || _ottApi.IsInRoom)
-							{
-								_ottApi.PlayPauseVideo(_pauseToggle);
-							}
-							else
-							{
-								_core.TogglePause();
-								_pauseToggle = !_pauseToggle;
-							}
+							_core.TogglePause();
+							_pauseToggle = !_pauseToggle;
 						}
 					}
 					ImGui.PopFont();
@@ -378,72 +343,6 @@ public class ControlWindow : Window, IDisposable
 						_uiElementActive = false;
 					}
 					ImGui.PopFont();
-				}
-				if (isPlayer)
-				{
-					ImGui.SameLine();
-
-					textColor = _shareURLToggle ? new Vector4(0.2f, 1.0f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
-					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
-
-					ImGui.PushFont(UiBuilder.IconFont);
-					if (ImGui.Button(FontAwesomeIcon.ShareAlt.ToIconString() + "##urlshare"))
-					{
-						_shareURLToggle = !_shareURLToggle;
-						if (playerIsRunningTV)
-						{
-							if (_shareURLToggle)
-							{
-								//Reapply sharing
-								_signalShareTitle = true;
-							}
-							else
-							{
-								_signalShareTitle = false;
-								Services.CommandManager?.ProcessCommand("/honorific force clear");
-							}
-						}
-					}
-					ImGui.PopFont();
-
-					ImGui.PopStyleColor();
-
-					if (ImGui.IsItemHovered())
-					{
-						ImGui.BeginTooltip();
-						ImGui.Text(_shareURLToggle ? "Currently sharing URL with others, press to stop sharing." : "Currently not sharing URL with others, press to share URL.");
-						ImGui.EndTooltip();
-					}
-
-					ImGui.SameLine();
-
-					textColor = _syncPlayToggle ? new Vector4(0.2f, 1.0f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
-					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
-
-					ImGui.PushFont(UiBuilder.IconFont);
-					if (ImGui.Button(FontAwesomeIcon.Link.ToIconString() + "##sync"))
-					{
-						_syncPlayToggle = !_syncPlayToggle;
-
-						if (playerIsRunningTV) //If currently hosting, turn it off, no matter what
-						{
-							TurnOffTV();
-							if (string.IsNullOrEmpty(_inputURL))
-							{
-								_inputURL = _placeHolderURL;
-							}
-						}
-					}
-					ImGui.PopFont();
-
-					ImGui.PopStyleColor();
-
-					if (ImGui.IsItemHovered())
-					{
-						ImGui.BeginTooltip();
-						ImGui.Text(_syncPlayToggle ? "Currently using video sync. Click to deactivate." : "Currently not using video sync. Click to activate.");
-						ImGui.EndTooltip();
-					}
 				}
 
 				if (isTheRunningTV)
@@ -482,12 +381,7 @@ public class ControlWindow : Window, IDisposable
 
 				if (isPlayer)
 				{
-					textColor = _syncPlayToggle ?
-
-						(_ottApi.IsChecking ? new Vector4(0.8f, 0.8f, 0.3f, 1f)
-							: (urlExists || (isTheRunningTV && urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f)))
-
-						: (urlExists || (isTheRunningTV && urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f));
+					textColor = (urlExists || (isTheRunningTV && urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f));
 
 					if (!isTheRunningTV)
 					{
@@ -592,50 +486,10 @@ public class ControlWindow : Window, IDisposable
 		{
 			if (ValidateURL(out Uri? uri) && uri != null)
 			{
-				bool isOTTUrl = uri.Segments.Length > 1 && string.Equals(uri.Segments[^2].TrimEnd('/'), "room", StringComparison.OrdinalIgnoreCase) && (uri.Host.EndsWith(".opentogethertube.com", StringComparison.OrdinalIgnoreCase) || string.Equals(uri.Host, "opentogethertube.com", StringComparison.OrdinalIgnoreCase));
 				_core.SetCurrentTV(entityId);
 				_lastTVTurnOn = DateTime.Now;
 
-				if (_syncPlayToggle && !isOTTUrl)
-				{
-					if(_ottApi.IsInRoom && _ottApi.IsPlayerRoom)
-					{
-						_ottApi.PushNextVideo(false);
-					}
-					else
-					{
-						_ottApi.Initialize().ContinueWith(async task =>
-						{
-							if (task.IsCompletedSuccessfully)
-							{
-								ShareTitle(_ottApi.GetRoomURL);
-								_ottApi.PushNextVideo(true);
-							}
-						});
-					}
-				}
-				else
-				{
-					if(isOTTUrl){
-						string roomId = uri.Segments[^1].TrimEnd('/');
-						_=_ottApi.Initialize(roomId).ContinueWith(async task =>
-						{
-							if(task.IsCompletedSuccessfully)
-							{
-								ShareTitle(_ottApi.GetRoomURL);
-							}
-						});
-					}
-					else
-					{
-						_core.PlayVideo(uri.ToString());
-						ShareTitle(uri.ToString());
-					}
-				}
-			}
-			else
-			{
-				return;
+				_core.PlayVideo(uri.ToString());
 			}
 		}
 		else
@@ -653,29 +507,13 @@ public class ControlWindow : Window, IDisposable
 					return;
 				}
 
-				if (uri != null && (uri.Host.EndsWith(".opentogethertube.com", StringComparison.OrdinalIgnoreCase) || string.Equals(uri.Host, "opentogethertube.com", StringComparison.OrdinalIgnoreCase)))
-				{
-					string roomId = uri.Segments[^1].TrimEnd('/');
-					_ = _ottApi.Initialize(roomId);
-				}
-				else
-				{
-					_core.PlayVideo(url);
-				}
-
-				_shareURLToggle = false;
-				Services.CommandManager?.ProcessCommand("/honorific force clear");
-			}
-			else
-			{
-				return;
+				_core.PlayVideo(url);
 			}
 		}
 	}
 
 	public void TurnOffTV()
 	{
-		_ = _ottApi.LeaveRoom();
 		_core.StopVideo();
 		if (string.IsNullOrEmpty(_inputURL) && !string.IsNullOrEmpty(_placeHolderURL))
 		{
@@ -700,35 +538,22 @@ public class ControlWindow : Window, IDisposable
 			return false;
 		}
 
-		if (url != null && _syncPlayToggle && !url!.Host.EndsWith(".opentogethertube.com", StringComparison.OrdinalIgnoreCase) && !string.Equals(url!.Host, "opentogethertube.com", StringComparison.OrdinalIgnoreCase))
-		{
-			_ottApi.CheckURL(formattedUrl);
-
-			result &= _ottApi.LastCheckSuccessful;
-
-			formattedUrl = _ottApi.GetRoomURL;
-
-			result &= Uri.TryCreate(formattedUrl, UriKind.Absolute, out url) && (url?.Scheme == Uri.UriSchemeHttp || url?.Scheme == Uri.UriSchemeHttps) && url.Host.Contains('.') && !url.Host.EndsWith('.') && Uri.CheckHostName(url.Host) == UriHostNameType.Dns;
-		}
-
 		return result;
 	}
 
-	private long _lastMilliSecond;
-	private long _lastMilliSecond144fps;
+	private long _lastMilliSecond1000ms;
+	private long _lastMilliSecond6ms;
 	public void Refresh()
 	{
-		if (_lastMilliSecond144fps + 6 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+		if (_lastMilliSecond6ms + 6 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 		{
-			_lastMilliSecond144fps = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+			_lastMilliSecond6ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-			RefreshPlayer();
+			GetCoreInfo();
 		}
-		if (_lastMilliSecond + 1000 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+		if (_lastMilliSecond1000ms + 1000 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 		{
-			_lastMilliSecond = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-			ProcessURLShare();
+			_lastMilliSecond1000ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 			(_modenabled, _installWarningMessage) = _core.ScanForCompanions();
 
@@ -742,24 +567,19 @@ public class ControlWindow : Window, IDisposable
 		Services.Log.Debug("Setting volume to " + vol + "%");
 		_core.VolumePlayer(vol);
 	}
+
 	private void SeekPlayer(double percentage)
 	{
 		int seconds = (int)(_seekerMaxSeconds * (percentage / 100));
 		Services.Log.Debug("Seeking to " + seconds + " seconds");
-		if (_syncPlayToggle || _ottApi.IsInRoom)
-		{
-			_ottApi.Seek(seconds);
-		}
-		else
-		{
-			_core.SeekPlayer(seconds);
-		}
+		_core.SeekPlayer(seconds);
 	}
-	private void RefreshPlayer()
+
+	private void GetCoreInfo()
 	{
 		if (!_core.IsTVTurnedOff())
 		{
-			double[] info = _core.GetPlayerInfos();
+			double[] info = _core.GetInfo();
 			string title = _core.GetMediaTitle();
 
 			_mediaTitle = title;
@@ -790,80 +610,6 @@ public class ControlWindow : Window, IDisposable
 		
 		_mpvIsIdle = _core.IsIdle() ?? true;
 		_pauseToggle = _core.GetPaused() || _mpvIsIdle;
-	}
-
-
-
-	public async Task ShortenURL(string inputURL, URLShortenerCallback callback, URLShortenerErrorCallback error)
-	{
-		try
-		{
-			string request = JsonSerializer.Serialize(new { originalUrl = inputURL });
-			
-			HttpResponseMessage response = await Plugin.HttpClient.PostAsync("https://urlvanish.com/create_api.php", new StringContent(request, Encoding.UTF8, "application/json"));
-
-			response.EnsureSuccessStatusCode();
-			string responseBody = await response.Content.ReadAsStringAsync();
-			var responseJSON = JsonSerializer.Deserialize<JsonElement>(responseBody);
-			
-			if(responseJSON.TryGetProperty("error", out JsonElement _error))
-			{
-				error(_error.ToString());
-			}
-			else
-			{
-				if(responseJSON.TryGetProperty("alias", out var _alias))
-				{
-					string? shortUrl = _alias.GetString();
-					if(shortUrl != null)
-					{
-						var shortUri = new Uri(shortUrl);
-						callback(shortUri);
-					}
-					else
-					{
-						error("Alias is null");
-					}
-				}
-				else
-				{
-					error(responseBody);
-				}
-			}
-		}
-		catch (Exception e)
-		{
-			error(e.Message);
-		}
-	}
-
-	public void OTTReceiveNewVideo(string url, double playbackPosition, bool isPlaying) //Receive new Video from OTT
-	{
-		if (!_core.IsTVTurnedOff())
-		{
-			_core.PlayVideo(url, playbackPosition, isPlaying);
-		}
-	}
-
-	public void OTTReceiveSeek(double playbackPosition)
-	{
-		_core.SeekPlayer((int)playbackPosition);
-	}
-
-	public void OTTReceivePlayPause(bool playpause, double playbackPosition)
-	{
-		if (!_core.IsTVTurnedOff()) //TV is running
-		{
-			if (playpause == _pauseToggle)
-			{
-				_core.TogglePause();
-				_pauseToggle = !_pauseToggle;
-				if (playbackPosition > 0)
-				{
-					_core.SeekPlayer((int)playbackPosition);
-				}
-			}
-		}
 	}
 
 	private float _scrollOffset;
@@ -942,110 +688,5 @@ public class ControlWindow : Window, IDisposable
 		drawList.PopClipRect();
 
 		ImGui.Dummy(new Vector2(maxWidth, textSize.Y));
-	}
-	public void ProcessURLShare()
-	{
-		if (_signalShareTitle && _shareURLToggle)
-		{
-			Services.CommandManager.ProcessCommand("/honorific force set alpha:" + _shortenedURL + "|silent");
-			_sharingTitle = true;
-			_signalShareTitle = false;
-		}
-		else if (_core.IsTVTurnedOff() && _sharingTitle)
-		{
-			Services.CommandManager?.ProcessCommand("/honorific force clear");
-			_sharingTitle = false;
-		}
-	}
-
-	private async void ShareTitle(string url)
-	{
-		if (url == _lastURL)
-		{
-			_signalShareTitle = true;
-		}
-		else
-		{
-			await ShortenURL(url, result =>
-			{
-				_lastURL = url;
-				_shortenedURL = result.Segments[^1].TrimEnd('/');
-				_signalShareTitle = true; //Shortened URL will be updated on main thread
-
-			}, error =>
-			{
-				Services.Log.Error("Request exception: Could not create Shortlink: " + error);
-			});
-		}
-	}
-
-	public async void UpdateTitle(uint entityId, string title)
-	{
-		if (entityId == Services.Objects.LocalPlayer?.EntityId)
-		{
-			return;
-		}
-
-		if (!_currentTitles.TryGetValue(entityId, out string? oldTitle) || oldTitle != title)
-		{
-			_currentTitles[entityId] = title;
-
-			if (title.Length < 7 || !title.StartsWith("alpha:", StringComparison.Ordinal))
-			{
-				if (_currentURLs.TryGetValue(entityId, out _))
-				{
-					_currentURLs.Remove(entityId);
-				}
-
-				if (_core.IsEntityTVOn(entityId))
-				{
-					TurnOffTV();
-				}
-			}
-			else
-			{
-				string url = string.Concat("https://urlvanish.com/", title.AsSpan("alpha:".Length));
-				await FetchURLData(url, response =>
-				{
-					Services.Log.Debug("New URL: " + url);
-					_currentURLs[entityId] = response;
-					if (_core.IsEntityTVOn(entityId))
-					{
-						var uri = new Uri(url);
-						if (uri != null && (uri.Host.EndsWith(".opentogethertube.com", StringComparison.OrdinalIgnoreCase) || string.Equals(uri.Host, "opentogethertube.com", StringComparison.OrdinalIgnoreCase)))
-						{
-							string roomId = uri.Segments[^1].TrimEnd('/');
-							_ = _ottApi.Initialize(roomId);
-						}
-						else
-						{
-							_core.PlayVideo(url);
-						}
-					}
-				});
-			}
-		}
-	}
-	private async Task FetchURLData(string url, URLFetchCallback callback)
-	{
-		try
-		{
-			HttpResponseMessage response = await Plugin.NoRedirectHttpClient.GetAsync(url);
-
-			if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400)
-			{
-				// Get the Location header value
-				if (response.Headers.Location != null)
-				{
-					callback(response.Headers.Location.ToString());
-					return;
-				}
-			}
-			Services.Log.Debug("Request exception: Shortlink returned 200-OK instead of a 300-redirect, which should not happen with Shortlinks");
-		}
-		catch (HttpRequestException e)
-		{
-			Services.Log.Debug("Request exception: " + e.Message + e.StackTrace);
-		}
 	}
 }
