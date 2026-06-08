@@ -1,13 +1,11 @@
+.vscode/
 .vs/
+.claude/
 bin/
 obj/
+AlphaChannel/obj/
 out/
 packages/
-*.sln.DotSettings.user
-AlphaChannel/Content/libEGL.dll
 .gitignore
-AlphaChannel/Content/libmpv-2.dll
-AlphaChannel/Content/yt-dlp.exe
-AlphaChannel/Content/libGLESv2.dll
 *.bat
 *.sh
