@@ -10,3 +10,4 @@ AlphaChannel/Content/libmpv-2.dll
 AlphaChannel/Content/yt-dlp.exe
 AlphaChannel/Content/libGLESv2.dll
 *.bat
+*.sh
