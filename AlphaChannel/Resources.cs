@@ -1,7 +1,6 @@
 using System.Text.Json;
 using SharpCompress.Archives;
 using SharpCompress.Common;
-using Windows.Media.Capture.Core;
 
 namespace AlphaChannel;
 

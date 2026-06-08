@@ -29,15 +29,6 @@ public class Plugin : IDalamudPlugin
 
 	public Plugin(IDalamudPluginInterface pluginInterface)
 	{
-		Application.EnableVisualStyles();
-		Application.SetCompatibleTextRenderingDefault(false);
-
-		string title = "AlphaChannel Remote ";
-
-#if IS_TEST
-		title += " (Test)";
-#endif
-
 		// init services
 		pluginInterface.Create<Services>();
 
@@ -60,6 +51,10 @@ public class Plugin : IDalamudPlugin
 		MpvRenderer.Setup(this);
 
 		// Create Main Window
+		string title = "AlphaChannel Remote ";
+		#if IS_TEST
+				title += " (Test)";
+		#endif
 		_mainWindow = new ControlWindow(this, title);
 		WindowSystem.AddWindow(_mainWindow);
 
@@ -100,7 +95,7 @@ public class Plugin : IDalamudPlugin
 	}
 
 	private void DrawUI() => WindowSystem.Draw();
-	public void ToggleMainUI() => _mainWindow?.Toggle();
+	private void ToggleMainUI() => _mainWindow?.Toggle();
 
 	internal string GetModPath()
 	{
