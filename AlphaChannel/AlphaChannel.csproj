@@ -27,6 +27,7 @@
 	<ItemGroup>
 		<PackageReference Include="SharpCompress" Version="0.48.1" />
 		<PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
+		<PackageReference Include="Penumbra.Api" Version="5.15.1" />
 	</ItemGroup>
 
 	<Target Name="UpdateJsonWithBuildNumber" AfterTargets="Build">

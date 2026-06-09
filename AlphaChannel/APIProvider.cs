@@ -33,10 +33,10 @@ public static class ApiProvider
         _onDispose        = Services.PluginInterface.GetIpcProvider<object?>("AlphaChannel.OnDispose");
 
         _version.RegisterFunc(() => (ApiVersionMajor, ApiVersionMinor));
-        _getState.RegisterFunc(plugin.IPCGetLocalState);
-        _setState.RegisterAction(plugin.IPCSetState);
-        _applyStateUpdate.RegisterAction(plugin.IPCApplyStateUpdate);
-        _clearState.RegisterAction(plugin.IPCClearState);
+        _getState.RegisterFunc(plugin.OnIPCGetLocalState);
+        _setState.RegisterAction(plugin.OnIPCSetState);
+        _applyStateUpdate.RegisterAction(plugin.OnIPCApplyStateUpdate);
+        _clearState.RegisterAction(plugin.OnIPCClearState);
 
         _onReady.SendMessage();
     }

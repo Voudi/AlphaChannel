@@ -1,7 +1,4 @@
-﻿using System.Net.Http.Json;
-using System.Numerics;
-using System.Text;
-using System.Text.Json;
+﻿using System.Numerics;
 using Dalamud.Bindings.ImGui;
 
 using Dalamud.Game.ClientState.Objects.SubKinds;
@@ -89,12 +86,12 @@ public class ControlWindow : Window, IDisposable
 			bool needsFirstInstall = _plugin.AssemblyLocationMPV == null || _plugin.AssemblyLocationYTDLP == null;
 			bool updatesAvailable = (_plugin.LibResources.MpvCheckResult[0] != string.Empty) || (_plugin.LibResources.YtdlpCheckResult[0] != string.Empty);
 
-			_libsLoaded = !needsFirstInstall && !updatesAvailable;
+			_libsLoaded = !needsFirstInstall;
 			if (!_libsLoaded)
 			{
 				if (_updatingLibs)
 				{
-					ImGui.Text("Downloading dependencies...");
+					ImGui.Text("Installing dependencies...");
 					return;
 				}
 				ImGui.Text("Please download the required dependencies to use AlphaChannel:");
@@ -103,9 +100,9 @@ public class ControlWindow : Window, IDisposable
 					ImGui.BeginDisabled();
 				}
 
-				if (ImGui.Button(updatesAvailable ? "Update dependencies" : "Checking for updates..."))
+				if (ImGui.Button(updatesAvailable ? "Install dependencies" : "Checking for updates..."))
 				{
-					Services.Log.Debug("Updating AlphaChannel Dependencies...");
+					Services.Log.Debug("Installing AlphaChannel Dependencies...");
 					if (_plugin.AssemblyLocationMPV == null || _plugin.LibResources.MpvCheckResult[0] != string.Empty)
 					{
 						_plugin.LibResources.DownloadMPVAsync().ContinueWith(async task =>
@@ -374,11 +371,6 @@ public class ControlWindow : Window, IDisposable
 					ImGui.PopStyleColor(1);
 				}
 
-				if (!_playerList.Last().Equals(item))
-				{
-					ImGui.Separator();
-				}
-
 				if (isPlayer)
 				{
 					textColor = (urlExists || (isTheRunningTV && urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f));
@@ -467,6 +459,11 @@ public class ControlWindow : Window, IDisposable
 						ImGui.Text("Copy URL to clipboard");
 						ImGui.EndTooltip();
 					}
+				}
+
+				if (!_playerList.Last().Equals(item))
+				{
+					ImGui.Separator();
 				}
 			}
 			else

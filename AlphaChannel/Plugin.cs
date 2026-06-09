@@ -102,23 +102,28 @@ public class Plugin : IDalamudPlugin
 		return Path.Combine(_pluginDir, "resources\\AlphaChannelTV.pmp");
 	}
 
-	internal string? IPCGetLocalState()
+	internal string? OnIPCGetLocalState()
 	{
 		throw new NotImplementedException();
 	}
 
-	internal void IPCSetState(nint addr, string s)
+	internal void OnIPCSetState(nint addr, string s)
 	{
 		throw new NotImplementedException();
 	}
 
-	internal void IPCApplyStateUpdate(nint addr, string s)
+	internal void OnIPCApplyStateUpdate(nint addr, string s)
 	{
 		throw new NotImplementedException();
 	}
 
-	internal void IPCClearState(nint addr)
+	internal void OnIPCClearState(nint addr)
 	{
 		throw new NotImplementedException();
+	}
+
+	internal void UpdateIPCState(string? fullState, string? partialState = null)
+	{
+		ApiProvider.NotifyStateChange(fullState, partialState);
 	}
 }
