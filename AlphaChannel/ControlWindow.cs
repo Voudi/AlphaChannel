@@ -5,6 +5,7 @@ using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
+using Penumbra.Api.Enums;
 
 namespace AlphaChannel;
 
@@ -37,7 +38,7 @@ public class ControlWindow : Window, IDisposable
 	public delegate void URLShortenerCallback(Uri result);
 	public delegate void URLFetchCallback(string result);
 	public delegate void URLShortenerErrorCallback(string result);
-	private readonly Dictionary<uint, string> _currentURLs = []; //Playerpointer, URL
+	private readonly Dictionary<uint, string> _currentURLs = []; //PlayerEntityID, URL
 
 	public ControlWindow(Plugin plugin, string title)
 		: base(title, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
@@ -47,7 +48,7 @@ public class ControlWindow : Window, IDisposable
 		_compat = new Compatibility(_plugin);
 
 		_core = new Core(_plugin);
-		_core.VideoEnded += TurnOffTV;
+		_core.VideoEnded += StopVideo;
 
 		SizeConstraints = new WindowSizeConstraints
 		{
@@ -62,7 +63,7 @@ public class ControlWindow : Window, IDisposable
 
 	public void Dispose()
 	{
-		_core.VideoEnded -= TurnOffTV;
+		_core.VideoEnded -= StopVideo;
 		_core.Dispose();
 		GC.SuppressFinalize(this);
 	}
@@ -155,37 +156,6 @@ public class ControlWindow : Window, IDisposable
 			ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 2. Restart the game client, or");
 			ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 3. Teleport to another zone");
 		}
-		if (!_compat.ModExists && !_ignoreError1)
-		{
-			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please install the AlphaChannelTV");
-			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Penumbra mod before continuing:");
-			if (ImGui.Button("Step 1 - Install"))
-			{
-				_compat.InstallTVMod();
-			}
-			if (ImGui.Button("Ignore this error (for custom configurations)"))
-			{
-				_ignoreError1 = true;
-			}
-			return;
-		}
-		if (!_modenabled && _compat.InstalledMod && !_ignoreError2)
-		{
-			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please enable the AlphaChannelTV");
-			ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Penumbra mod before continuing:");
-			if (ImGui.Button("Step 2 - Enable"))
-			{
-				Services.CommandManager?.ProcessCommand("/penumbra reload");
-				Services.CommandManager?.ProcessCommand("/penumbra mod enable Default | AlphaChannelTV");
-				Services.CommandManager?.ProcessCommand("/penumbra redraw carbuncle");
-				_modenabled = true;
-			}
-			if (ImGui.Button("Ignore this error (for custom configurations)"))
-			{
-				_ignoreError2 = true;
-			}
-			return;
-		}
 
 		ImGui.Text(" Available TV List:");
 		ImGui.Separator();
@@ -193,12 +163,6 @@ public class ControlWindow : Window, IDisposable
 		{
 			bool isPlayer = item.EntityId == Services.Objects.LocalPlayer?.EntityId;
 
-			if (isPlayer && _installWarningMessage && _modenabled)
-			{
-				ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Please enable the AlphaChannelTV");
-				ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " Penumbra mod and make sure");
-				ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.3f, 1.0f), " it has the highest priority.");
-			}
 			if ((isPlayer && _installWarningMessage) || _core.TVExistsForEntity(item.EntityId)) //Checks if players carbuncle exists OR other players TV exists
 			{
 				bool isTheRunningTV = _core.IsEntityTVOn(item.EntityId);
@@ -223,16 +187,38 @@ public class ControlWindow : Window, IDisposable
 
 				ImGui.SameLine();
 
+				if(isPlayer)
+				{
+					ImGui.PushStyleColor(ImGuiCol.Text, _installWarningMessage ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
 
+					ImGui.PushFont(UiBuilder.IconFont);
+
+					if(ImGui.Button(FontAwesomeIcon.PowerOff.ToIconString() + "##power" + item.EntityId))
+					{
+						if (_installWarningMessage)
+						{
+							PenumbraIPC.ApplyTempMod(Services.Objects.LocalPlayer!.ObjectIndex, _plugin.PenumbraTempModPaths);
+						}
+						else
+						{
+							PenumbraIPC.RemoveTempMod();
+						}
+						PenumbraIPC.Redraw(_core.GetCompanion(item.EntityId)?.ObjectIndex ?? -1);
+					}
+
+					ImGui.PopFont();
+					ImGui.PopStyleColor();
+					ImGui.SameLine();
+				}
+
+				if (_installWarningMessage)
+				{
+					continue;
+				}
 				if (isTheRunningTV)
 				{
 					textColor = isPlayer ? new Vector4(1.0f, 0.0f, 0.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f);
-					;
 					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
-				}
-				else if (isPlayer && _installWarningMessage)
-				{
-					ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
 				}
 				else if (!urlExists)
 				{
@@ -247,10 +233,8 @@ public class ControlWindow : Window, IDisposable
 						FontAwesomeIcon.Repeat.ToIconString()
 						: FontAwesomeIcon.Stop.ToIconString()
 					)
-					: ((isPlayer && _installWarningMessage) ?
-							FontAwesomeIcon.Download.ToIconString()
-						 : FontAwesomeIcon.Play.ToIconString()
-					)) + "##play" + item.EntityId))
+					: FontAwesomeIcon.Play.ToIconString()
+					) + "##play" + item.EntityId))
 				{
 					try
 					{
@@ -258,7 +242,7 @@ public class ControlWindow : Window, IDisposable
 						{
 							if (urlExists)
 							{
-								TurnOnTV(item.EntityId);
+								StartVideo(item.EntityId);
 							}
 
 							if (isPlayer)
@@ -269,7 +253,7 @@ public class ControlWindow : Window, IDisposable
 						}
 						else
 						{
-							TurnOffTV();
+							StopVideo();
 						}
 
 					}
@@ -280,7 +264,7 @@ public class ControlWindow : Window, IDisposable
 				}
 				ImGui.PopFont();
 
-				if (isTheRunningTV || !urlExists || (isPlayer && _installWarningMessage))
+				if (isTheRunningTV || !urlExists)
 				{
 					ImGui.PopStyleColor();
 				}
@@ -373,11 +357,11 @@ public class ControlWindow : Window, IDisposable
 
 				if (isPlayer)
 				{
-					textColor = (urlExists || (isTheRunningTV && urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f));
+					textColor = urlExists || (isTheRunningTV && urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f);
 
 					if (!isTheRunningTV)
 					{
-						ImGui.PushStyleColor(ImGuiCol.Border, textColor); // red border
+						ImGui.PushStyleColor(ImGuiCol.Border, textColor);
 					}
 
 					ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 1.0f);
@@ -477,7 +461,7 @@ public class ControlWindow : Window, IDisposable
 		}
 	}
 
-	public void TurnOnTV(uint entityId)
+	public void StartVideo(uint entityId)
 	{
 		if (Services.Objects.LocalPlayer?.EntityId == entityId)
 		{
@@ -509,7 +493,7 @@ public class ControlWindow : Window, IDisposable
 		}
 	}
 
-	public void TurnOffTV()
+	public void StopVideo()
 	{
 		_core.StopVideo();
 		if (string.IsNullOrEmpty(_inputURL) && !string.IsNullOrEmpty(_placeHolderURL))
@@ -611,12 +595,9 @@ public class ControlWindow : Window, IDisposable
 
 	private float _scrollOffset;
 	private float _pauseTimer;
-	private int _phase; // 0 = Pause Anfang, 1 = scrollen, 2 = Pause Ende
+	private int _phase;
 	private string? _lastText;
 	private double _lastTime = ImGui.GetTime();
-	private bool _ignoreError1;
-	private bool _ignoreError2;
-
 	private void DrawScrollingText(string text, float maxWidth)
 	{
 		var textSize = ImGui.CalcTextSize(text);
@@ -627,7 +608,6 @@ public class ControlWindow : Window, IDisposable
 			return;
 		}
 
-		// Reset bei neuem Text
 		if (text != _lastText)
 		{
 			_lastText = text;
@@ -646,7 +626,7 @@ public class ControlWindow : Window, IDisposable
 
 		switch (_phase)
 		{
-			case 0: // Pause am Anfang
+			case 0:
 				_scrollOffset = 0;
 				_pauseTimer += dt;
 				if (_pauseTimer >= pauseDuration)
@@ -656,7 +636,7 @@ public class ControlWindow : Window, IDisposable
 				}
 				break;
 
-			case 1: // scrollen
+			case 1:
 				_scrollOffset += dt * scrollSpeed;
 				if (_scrollOffset >= maxScroll)
 				{
@@ -665,7 +645,7 @@ public class ControlWindow : Window, IDisposable
 				}
 				break;
 
-			case 2: // Pause am Ende
+			case 2:
 				_scrollOffset = maxScroll;
 				_pauseTimer += dt;
 				if (_pauseTimer >= pauseDuration)

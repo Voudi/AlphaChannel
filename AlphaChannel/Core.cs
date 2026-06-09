@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Hooking;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
+using FFXIVClientStructs.FFXIV.Client.Game.Object;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
 using FFXIVClientStructs.FFXIV.Client.System.Resource;
@@ -24,7 +25,8 @@ public class Core : IDisposable
 	private static bool IsYTURL(string url) => _ytRegex.IsMatch(url);
 	public event Action? VideoEnded;
 
-	private readonly Dictionary<uint, IntPtr> _companionOwners = []; //Playerpointer, CompanionDrawpointer
+	private readonly Dictionary<uint, IGameObject> _tvOwners = []; //PlayerEntityID, Companion
+	private readonly Dictionary<uint, IGameObject> _companionOwners = []; //PlayerEntityID, Companion
 	private readonly Texture2D _screenTexture;
 	private bool _screenTextureLoaded;
 	private uint _activeEntityId;
@@ -80,7 +82,16 @@ public class Core : IDisposable
 
 	public bool TVExistsForEntity(uint entityId)
 	{
-		return _companionOwners.TryGetValue(entityId, out _);
+		return _tvOwners.TryGetValue(entityId, out _);
+	}
+
+	public IGameObject? GetCompanion(uint entityId)
+	{
+		if(!_companionOwners.TryGetValue(entityId, out IGameObject? result))
+		{
+			Services.Log.Warning("Could not find companion for entity " + entityId);
+		}
+		return result;
 	}
 
 	public void SetCurrentTV(uint entityId)
@@ -219,25 +230,28 @@ public class Core : IDisposable
 		if (hookEnabled) //Only check for stuff while the hook is activated, which is outside from duties
 		{
 			List<uint> visitedTvs = [];
+			List<uint> visitedCompanions = [];
 
-			foreach (var item in Services.Objects.Where(x => x is IBattleNpc))
+			foreach (var item in Services.Objects.Where(x => x is ICharacter))
 			{
-				if (item.Name.TextValue == "Carbuncle")
+				if (item.BaseId == 414 && item.ObjectKind.Equals(Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Companion)) //Companion: Wanderers Campfire
 				{
 					if (item.Address == IntPtr.Zero)
 					{
 						continue;
 					}
-
+					
 					var character = (Character*)item.Address;
 					if (character != null && character->DrawObject != null)
 					{
-						if (character->DrawObject->GetObjectType() == ObjectType.CharacterBase)
+						if (character->DrawObject->GetObjectType() == FFXIVClientStructs.FFXIV.Client.Graphics.Scene.ObjectType.CharacterBase)
 						{
 							try
 							{
 								var tvDraw = (CharacterBase*)character->DrawObject;
 								uint ownerId = character->CompanionOwnerId;
+								_companionOwners.TryAdd(ownerId, item);
+								visitedCompanions.Add(ownerId);
 								if (tvDraw->Models[0] is not null)
 								{
 									if (tvDraw->Models[0]->MaterialCount >= 1)
@@ -259,7 +273,7 @@ public class Core : IDisposable
 															}
 
 															visitedTvs.Add(ownerId);
-															CheckoutCompanion((IntPtr)tvDraw, ownerId, item.Address);
+															CheckoutCompanion((IntPtr)tvDraw, ownerId, item);
 															continue;
 														}
 													}
@@ -281,13 +295,18 @@ public class Core : IDisposable
 			}
 
 			//Remove unvisited TVs
-			_companionOwners.Where(owner => !visitedTvs.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
+			_tvOwners.Where(owner => !visitedTvs.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
 			{
-				;
 				if (_activeEntityId == ownerId)
 				{
 					StopVideo();
 				}
+				_tvOwners.Remove(ownerId);
+			});
+
+			//Remove unvisited Companions
+			_companionOwners.Where(owner => !visitedCompanions.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
+			{
 				_companionOwners.Remove(ownerId);
 			});
 		}
@@ -316,34 +335,26 @@ public class Core : IDisposable
 		return new Tuple<bool, bool>(modenabled, showWarningMessage);
 	}
 
-	private void CheckoutCompanion(IntPtr tvDraw, uint ownerId, nint companionMemoryAddress)
+	private void CheckoutCompanion(IntPtr tvDraw, uint ownerId, IGameObject companion)
 	{
-		IntPtr ptr = tvDraw;
-		bool tvAddrFound = _companionOwners.TryGetValue(ownerId, out nint tvAddr);
-		if (!tvAddrFound)
+		if (!_tvOwners.TryGetValue(ownerId, out _))
 		{
-			_companionOwners.Add(ownerId, ptr);
-		}
-		else if (tvAddrFound && tvAddr != ptr)
-		{
-			_playingEntityId = 0; //Texturepointer has changed, assume no TV is running for it to get reassigned
-			_companionOwners[ownerId] = ptr;
+			_tvOwners.Add(ownerId, companion);
 		}
 		if (_activeEntityId == ownerId) //This TV is supposed to be active...
 		{
-			nint? playerMemoryAddress = Services.Objects.LocalPlayer?.Address;
-			if (_playingEntityId != _activeEntityId) //...But it's not active
+			if (_playingEntityId != _activeEntityId) //...But it's not active, activate it
 			{
 				_playingEntityId = ownerId;
 			}
 			else
 			{
-				RefreshActorVFX(playerMemoryAddress ?? companionMemoryAddress, companionMemoryAddress); //This TV is active, play its VFX
+				RefreshActorVFX(Services.Objects.LocalPlayer?.Address ?? companion.Address, companion.Address); //This TV is active, play its VFX
 			}
 		}
 	}
 
-	private const string VFXPath = "chara/monster/m7002/obj/body/b0001/vfx/eff/carbuncleemittor.avfx";
+	private const string VFXPath = "chara/monster/m8373/obj/body/b0001/vfx/eff/alphachannelscreen.avfx";
 
 	private void RefreshActorVFX(nint addrCaster, nint addrTarget)
 	{
@@ -361,7 +372,7 @@ public class Core : IDisposable
 	private Hook<ResourceManager.Delegates.GetResourceSync> _getResourceSyncHook;
 	private Hook<Texture.Delegates.InitializeContents> _textureOnLoadHook;
 
-	private const string TEXPath = "chara/monster/m7002/obj/body/b0001/vfx/texture/screentex.atex";
+	private const string TEXPath = "chara/monster/m8373/obj/body/b0001/vfx/texture/alphachannelscreentex.atex";
 	private unsafe ResourceHandle* GetResourceSyncDetour(ResourceManager* thisPtr, ResourceCategory* category, uint* type, uint* hash, CStringPointer path, void* unknown, void* unkDebugPtr, uint unkDebugInt)
 	{
 		if (path.ToString().Contains(TEXPath))

@@ -25,6 +25,34 @@ public class Resources : IDisposable
 		GC.SuppressFinalize(this);
 	}
 
+	public Dictionary<string, string> LoadPenumbraModResources()
+	{
+		Dictionary<string, string> paths = new () {
+			{"chara/monster/m8373/obj/body/b0001/model/m8373b0001.mdl", "m8373b0001.mdl"},
+			{"chara/monster/m8373/obj/body/b0001/material/v0001/mt_m8373b0001_b.mtrl", "mt_m8373b0001_b.mtrl"},
+			{"chara/monster/m8373/obj/body/b0001/texture/tv_n_m7002b0001.tex", "tv_n_m7002b0001.tex"},
+			{"chara/monster/m8373/obj/body/b0001/texture/tv_s_m7002b0001.tex", "tv_s_m7002b0001.tex"},
+			{"chara/monster/m8373/obj/body/b0001/texture/tv_d_m7002b0001.tex", "tv_d_m7002b0001.tex"},
+			{"chara/monster/m8373/obj/body/b0001/texture/tv_id_m7002b0001.tex", "tv_s_m7002b0001.tex"},
+			{"chara/monster/m8373/obj/body/b0001/vfx/texture/alphachannelscreentex.atex", "alphachannelscreentex.atex"},
+			{"chara/monster/m8373/obj/body/b0001/vfx/eff/alphachannelscreen.avfx", "alphachannelscreen.avfx"},
+			{"chara/monster/m8373/obj/body/b0001/vfx/eff/vm0001.avfx", "removecampfire.avfx"}
+		};
+		foreach(string key in paths.Keys)
+		{
+			string fullPath = Path.Combine(_pluginDir, "resources", paths[key]);
+			if (!File.Exists(fullPath))
+			{
+				throw new FileNotFoundException($"Required resource not found: {fullPath}");
+			}
+			else
+			{
+				paths[key] = Path.Combine(_pluginDir, "resources", paths[key]);
+			}
+		}
+		return paths;
+	}
+
 	public string? GetLocationMPV()
 	{
 		string filenameStart = "mpv-dev-lgpl-x86_64-";
@@ -38,6 +66,7 @@ public class Resources : IDisposable
 			return null;
 		}
 	}
+
 	public string? GetLocationYTDLP()
 	{
 		string filenameStart = "yt-dlp";

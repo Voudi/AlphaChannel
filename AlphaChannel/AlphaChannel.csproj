@@ -19,9 +19,6 @@
 		<EnableWindowsTargeting>true</EnableWindowsTargeting>
 	</PropertyGroup>
 	<ItemGroup>
-	  <Content Include="AlphaChannel.json" />
-	</ItemGroup>
-	<ItemGroup>
 	  <None Include="DalamudPackager.targets" />
 	</ItemGroup>
 	<ItemGroup>

@@ -1,8 +1,14 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project>
+	<ItemGroup>
+		<ImgFiles Include="$(OutputPath)..\AlphaChannel\images\**\*" />
+		<ModFiles Include="$(OutputPath)..\AlphaChannel\resources\**\*" />
+	</ItemGroup>
 	<Target Name="PrepareOutput" AfterTargets="Build">
 		<RemoveDir Directories="$(OutputPath)\locales"/>
 		<Copy SourceFiles="$(OutputPath)..\AlphaChannel\AlphaChannel.json" DestinationFolder="$(OutputPath)"/>
+		<Copy SourceFiles="@(ImgFiles)" DestinationFolder="$(OutputPath)images\%(RecursiveDir)" />
+		<Copy SourceFiles="@(ModFiles)" DestinationFolder="$(OutputPath)resources\%(RecursiveDir)" />
 	</Target>
 	<Target Name="PackagePlugin" AfterTargets="PrepareOutput" Condition="'$(Configuration)' == 'Release'">
 		<DalamudPackager
