@@ -15,9 +15,8 @@ internal sealed class Compatibility
 		_plugin = plugin;
 	}
 
-	public static bool IsRunningUnderWine()
+	public static bool IsRunningUnderWine() //Will be used for windows hardware acceleration down the road
 	{
-		// Wine sets this registry key
 		try
 		{
 			using var key = Registry.LocalMachine.OpenSubKey(@"Software\Wine");
@@ -64,57 +63,5 @@ internal sealed class Compatibility
 				Services.Log.Error("Failed to check for YTDLP updates: " + task.Exception?.ToString());
 			}
 		});
-	}
-
-	public async Task<bool> CheckTVMod()
-	{
-		string apiUrl = "http://localhost:42069/api";
-
-		try
-		{
-			System.Net.Http.HttpResponseMessage responseMods = await Plugin.HttpClient.GetAsync(apiUrl + "/mods");
-
-			responseMods.EnsureSuccessStatusCode();
-
-			string responseModsBody = await responseMods.Content.ReadAsStringAsync();
-
-			ModExists = responseModsBody.Contains("AlphaChannelTV");
-		}
-		catch (Exception ex)
-		{
-			Services.Log.Debug("Error:" + ex.Message);
-		}
-
-		return ModExists;
-	}
-
-	public async void InstallTVMod()
-	{
-		string apiUrl = "http://localhost:42069/api";
-
-		try
-		{
-			if (!await CheckTVMod())
-			{
-				System.Net.Http.StringContent content = new(JsonSerializer.Serialize(
-					new
-					{
-						Path = _plugin.GetModPath()
-					}
-				), Encoding.UTF8, "application/json");
-
-				Services.Log.Debug("Installing mod: " + _plugin.GetModPath());
-				System.Net.Http.HttpResponseMessage responseInstall = await Plugin.HttpClient.PostAsync(apiUrl + "/installmod", content);
-
-				responseInstall.EnsureSuccessStatusCode();
-
-				ModExists = true;
-				InstalledMod = true;
-			}
-		}
-		catch (Exception ex)
-		{
-			Services.Log.Debug("Error:" + ex.Message);
-		}
 	}
 }

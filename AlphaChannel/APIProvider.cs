@@ -22,11 +22,11 @@ public static class ApiProvider
     public static void Init(Plugin plugin)
     {
         _version          = Services.PluginInterface.GetIpcProvider<(int, int)>("AlphaChannel.Version");
-
         _getState         = Services.PluginInterface.GetIpcProvider<string?>("AlphaChannel.GetState");
         _setState         = Services.PluginInterface.GetIpcProvider<nint, string, object?>("AlphaChannel.SetState");
         _applyStateUpdate = Services.PluginInterface.GetIpcProvider<nint, string, object?>("AlphaChannel.ApplyStateUpdate");
         _clearState       = Services.PluginInterface.GetIpcProvider<nint, object?>("AlphaChannel.ClearState");
+
         _stateChange      = Services.PluginInterface.GetIpcProvider<string?, string?, object?>("AlphaChannel.StateChange");
 
         _onReady          = Services.PluginInterface.GetIpcProvider<object?>("AlphaChannel.OnReady");

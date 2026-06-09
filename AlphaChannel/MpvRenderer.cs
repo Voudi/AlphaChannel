@@ -84,10 +84,11 @@ namespace AlphaChannel
 			_ = mpv_set_option_string(_mpvCtx, "terminal", "yes");
 			_ = mpv_set_option_string(_mpvCtx, "volume", "25");
 			_ = mpv_set_option_string(_mpvCtx, "msg-level", "all=warn,ffmpeg=error");
-			_ = mpv_set_option_string(_mpvCtx, "ytdl-raw-options", "force-ipv4=");
+			_ = mpv_set_option_string(_mpvCtx, "ytdl-raw-options", "force-ipv4=,hls-use-mpegts=");
 			_ = mpv_set_option_string(_mpvCtx, "idle", "yes");
 			_ = mpv_set_option_string(_mpvCtx, "keep-open", "no");
-			_ = mpv_request_log_messages(_mpvCtx, "debug");
+			//_ = mpv_set_option_string(_mpvCtx, "tls-verify", "no"); TODO: Make it optional to disable TLS verification because WINE is a bitch
+			_ = mpv_request_log_messages(_mpvCtx, "warn");
 			_ = mpv_initialize(_mpvCtx);
 
 			nint apiTypePtr = Marshal.StringToHGlobalAnsi("sw");
@@ -424,15 +425,14 @@ namespace AlphaChannel
 
 		private void EventLoop()
 		{
-			/*
-            Services.Log.Debug("[mpv] event loop started");
+			
+            Services.Log.Verbose("[MPV] event loop started");
             try
             {
-                while (!_stopping)
+                while (!_closed)
                 {
-                    // 100ms Timeout, damit wir _stopping regelmäßig prüfen können
-                    IntPtr ev = mpv_wait_event(_mpvCtx, 0.1);
-                    if (ev == IntPtr.Zero) continue;
+                    IntPtr ev = mpv_wait_event(_mpvCtx, 0);
+                    if (ev == IntPtr.Zero) {continue;}
 
                     int eventId = Marshal.ReadInt32(ev);
 
@@ -444,7 +444,7 @@ namespace AlphaChannel
                             continue;
 
                         case 1: // MPV_EVENT_SHUTDOWN
-                            Services.Log.Debug("[mpv] SHUTDOWN");
+                            Services.Log.Verbose("[MPV] SHUTDOWN");
                             return;
 
                         case 2: // MPV_EVENT_LOG_MESSAGE
@@ -452,50 +452,45 @@ namespace AlphaChannel
                                 IntPtr dataPtr = Marshal.ReadIntPtr(ev + 16);
                                 if (dataPtr != IntPtr.Zero && dataPtr.ToInt64() > 65536)
                                 {
-                                    var prefix = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr));
-                                    var level  = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr + 8));
-                                    var text   = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr + 16));
-                                    Services.Log.Verbose($"[mpv/{prefix}/{level}] {text?.Trim()}");
+									string? prefix = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr));
+									string? level  = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr + 8));
+									string? text   = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr + 16));
+                                    Services.Log.Verbose($"[MPV/{prefix}/{level}] {text?.Trim()}");
                                 }
                                 break;
                             }
 
-                        case 3:  Services.Log.Debug("[mpv] GET_PROPERTY_REPLY"); break;
-                        case 4:  Services.Log.Debug("[mpv] SET_PROPERTY_REPLY"); break;
-                        case 5:  Services.Log.Debug("[mpv] COMMAND_REPLY");      break;
-                        case 6:  Services.Log.Debug("[mpv] START_FILE");         break;
+                        case 3:  Services.Log.Verbose("[MPV] GET_PROPERTY_REPLY"); break;
+                        case 4:  Services.Log.Verbose("[MPV] SET_PROPERTY_REPLY"); break;
+                        case 5:  Services.Log.Verbose("[MPV] COMMAND_REPLY");      break;
+                        case 6:  Services.Log.Verbose("[MPV] START_FILE");         break;
                         
                         case 7: // MPV_EVENT_END_FILE
-                            _endOfFile = true;
                             break;
                         
-                        case 8:  Services.Log.Debug("[mpv] FILE_LOADED");      break;
-                        case 14: Services.Log.Debug("[mpv] CLIENT_MESSAGE");   break;
-                        case 15: Services.Log.Debug("[mpv] VIDEO_RECONFIG");   break;
-                        case 16: Services.Log.Debug("[mpv] AUDIO_RECONFIG");   break;
-                        case 17: Services.Log.Debug("[mpv] SEEK");             break;
-                        case 18: Services.Log.Debug("[mpv] PLAYBACK_RESTART"); break;
-                        case 19: Services.Log.Debug("[mpv] PROPERTY_CHANGE");  break;
-                        case 21: Services.Log.Warning("[mpv] QUEUE_OVERFLOW"); break;
-                        case 22: Services.Log.Debug("[mpv] HOOK");             break;
+                        case 8:  Services.Log.Verbose("[MPV] FILE_LOADED");      break;
+                        case 14: Services.Log.Verbose("[MPV] CLIENT_MESSAGE");   break;
+                        case 15: Services.Log.Verbose("[MPV] VIDEO_RECONFIG");   break;
+                        case 16: Services.Log.Verbose("[MPV] AUDIO_RECONFIG");   break;
+                        case 17: Services.Log.Verbose("[MPV] SEEK");             break;
+                        case 18: Services.Log.Verbose("[MPV] PLAYBACK_RESTART"); break;
+                        case 19: Services.Log.Verbose("[MPV] PROPERTY_CHANGE");  break;
+                        case 22: Services.Log.Verbose("[MPV] HOOK");             break;
 
                         default:
-                            Services.Log.Debug($"[mpv] Unknown event id={eventId}");
                             break;
-                    }
-                    *
                     }
                 }
             }
             catch (Exception e)
             {
-                Services.Log.Error($"[mpv] event loop crashed: {e.Message}\n{e.StackTrace}");
+                Services.Log.Verbose($"[MPV] event loop crashed: {e.Message}\n{e.StackTrace}");
             }
             finally
             {
-                Services.Log.Debug("[mpv] event loop ended");
+                Services.Log.Verbose("[MPV] event loop ended");
             }
-            */
+            
 		}
 	}
 }

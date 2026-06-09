@@ -22,8 +22,6 @@ public static class PenumbraIPC
 
         var assign = new AssignTemporaryCollection(Services.PluginInterface);
         assign.Invoke(_collectionId, actorIndex, true);
-
-
     }
 
     public static void RemoveTempMod()

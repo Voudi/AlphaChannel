@@ -72,7 +72,7 @@ public class Plugin : IDalamudPlugin
 		WindowSystem.RemoveAllWindows();
 
 		PenumbraIPC.Dispose();
-		
+
 		_mainWindow?.Dispose();
 
 		DxHandler.Shutdown();
@@ -109,26 +109,31 @@ public class Plugin : IDalamudPlugin
 
 	internal string? OnIPCGetLocalState()
 	{
-		throw new NotImplementedException();
+		return _mainWindow.GetStateInfo();
 	}
 
 	internal void OnIPCSetState(nint addr, string s)
 	{
-		throw new NotImplementedException();
+		_mainWindow.UpdateOtherPlayer(addr, s);
 	}
 
 	internal void OnIPCApplyStateUpdate(nint addr, string s)
 	{
-		throw new NotImplementedException();
+		_mainWindow.UpdateOtherPlayerSeek(addr, s);
 	}
 
 	internal void OnIPCClearState(nint addr)
 	{
-		throw new NotImplementedException();
+		_mainWindow.RemoveOtherPlayer(addr);
 	}
 
-	internal void UpdateIPCState(string? fullState, string? partialState = null)
+	internal void UpdateIPCState()
 	{
-		ApiProvider.NotifyStateChange(fullState, partialState);
+		ApiProvider.NotifyStateChange(_mainWindow.GetStateInfo(), null);
+	}
+	
+	internal void UpdateIPCPartialState(string? partialState = null)
+	{
+		ApiProvider.NotifyStateChange(_mainWindow.GetStateInfo(), partialState);
 	}
 }

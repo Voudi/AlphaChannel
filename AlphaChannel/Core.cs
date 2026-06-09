@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using Dalamud.Game.ClientState.Objects.Types;
@@ -28,6 +29,7 @@ public class Core : IDisposable
 	private readonly Dictionary<uint, IGameObject> _tvOwners = []; //PlayerEntityID, Companion
 	private readonly Dictionary<uint, IGameObject> _companionOwners = []; //PlayerEntityID, Companion
 	private readonly Texture2D _screenTexture;
+	private readonly ConcurrentDictionary<nint, ShaderResourceView> _views = new();
 	private bool _screenTextureLoaded;
 	private uint _activeEntityId;
 	private uint _playingEntityId;
@@ -164,11 +166,11 @@ public class Core : IDisposable
 		}
 	}
 
-	public bool? IsIdle()
+	public bool IsIdle()
 	{
 		if (!_renderCancellation.Token.IsCancellationRequested)
 		{
-			return _currentMpvRenderer?.IsIdle();
+			return _currentMpvRenderer?.IsIdle() ?? true;
 		}
 
 		return true;
@@ -220,11 +222,14 @@ public class Core : IDisposable
 		return "";
 	}
 
-	public unsafe Tuple<bool, bool> ScanForCompanions()
+	public string? GetCurrentUrl()
+	{
+		return _currentMpvRenderer?.GetCurrentUrl();
+	}
+	public unsafe bool ScanForCompanions()
 	{
 		uint? playerId = Services.Objects.LocalPlayer?.EntityId;
-		bool modenabled = true;
-		bool showWarningMessage = false;
+		bool isTVPoweredOff = false;
 
 		bool hookEnabled = !_getResourceSyncHook.IsDisposed && _getResourceSyncHook.IsEnabled;
 		if (hookEnabled) //Only check for stuff while the hook is activated, which is outside from duties
@@ -267,11 +272,6 @@ public class Core : IDisposable
 														if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualHeight == 1024
 															&& tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualWidth == 1024)
 														{
-															if (playerId == ownerId)
-															{
-																modenabled = false;
-															}
-
 															visitedTvs.Add(ownerId);
 															CheckoutCompanion((IntPtr)tvDraw, ownerId, item);
 															continue;
@@ -285,7 +285,7 @@ public class Core : IDisposable
 
 								if (playerId == ownerId)
 								{
-									showWarningMessage = true;
+									isTVPoweredOff = true;
 								}
 							}
 							catch (Exception) { }
@@ -332,7 +332,7 @@ public class Core : IDisposable
 			}
 		}
 
-		return new Tuple<bool, bool>(modenabled, showWarningMessage);
+		return isTVPoweredOff;
 	}
 
 	private void CheckoutCompanion(IntPtr tvDraw, uint ownerId, IGameObject companion)
@@ -419,27 +419,39 @@ public class Core : IDisposable
 
 			lock (_screenTextureLock)
 			{
-				if (_screenTexture is not { IsDisposed: false })
-				{
-					return tex;
-				}
-
-				if (DxHandler.Device is not { IsDisposed: false })
-				{
-					return tex;
-				}
-
-				var view = new ShaderResourceView(DxHandler.Device, _screenTexture,
-					new ShaderResourceViewDescription
+					if (_screenTexture is not { IsDisposed: false })
 					{
-						Format = _screenTexture.Description.Format,
-						Dimension = ShaderResourceViewDimension.Texture2D,
-						Texture2D = { MipLevels = _screenTexture.Description.MipLevels }
-					});
+						return tex;
+					}
+					
+					if (DxHandler.Device is not { IsDisposed: false })
+					{
+						return tex;
+					}
 
-				thisPtr->D3D11Texture2D = (void*)_screenTexture.NativePointer;
-				thisPtr->D3D11ShaderResourceView = (void*)view.NativePointer;
-				_screenTextureLoaded = true;
+					var newView = new ShaderResourceView(DxHandler.Device, _screenTexture,
+						new ShaderResourceViewDescription
+						{
+							Format = _screenTexture.Description.Format,
+							Dimension = ShaderResourceViewDimension.Texture2D,
+							Texture2D = { MipLevels = _screenTexture.Description.MipLevels }
+						});
+
+					nint key = (nint)thisPtr;
+
+					if (_views.TryGetValue(key, out var oldView))
+					{
+						oldView.Dispose();
+						_views[key] = newView;
+					}
+					else
+					{
+						_views[key] = newView;
+					}
+
+					thisPtr->D3D11Texture2D = (void*)_screenTexture.NativePointer;
+					thisPtr->D3D11ShaderResourceView = (void*)newView.NativePointer;
+					_screenTextureLoaded = true;
 			}
 
 			return tex;
@@ -469,6 +481,12 @@ public class Core : IDisposable
 		_textureOnLoadHook.Disable();
 		_textureOnLoadHook.Dispose();
 		_getResourceSyncHook.Dispose();
+
+		foreach (var v in _views.Values)
+		{
+			v.Dispose();
+		}
+		_views.Clear();
 
 		Services.CommandManager.ProcessCommand("/honorific force clear");
 		GC.SuppressFinalize(this);

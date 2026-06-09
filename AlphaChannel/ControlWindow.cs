@@ -1,18 +1,17 @@
 ﻿using System.Numerics;
+using System.Text.Json;
 using Dalamud.Bindings.ImGui;
 
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
-using Penumbra.Api.Enums;
 
 namespace AlphaChannel;
 
 public class ControlWindow : Window, IDisposable
 {
-	private bool _modenabled;
-	private bool _installWarningMessage;
+	private bool _isTVPoweredOff;
 
 	private bool _pauseToggle;
 
@@ -35,9 +34,6 @@ public class ControlWindow : Window, IDisposable
 	private Compatibility _compat;
 	private Core _core;
 
-	public delegate void URLShortenerCallback(Uri result);
-	public delegate void URLFetchCallback(string result);
-	public delegate void URLShortenerErrorCallback(string result);
 	private readonly Dictionary<uint, string> _currentURLs = []; //PlayerEntityID, URL
 
 	public ControlWindow(Plugin plugin, string title)
@@ -55,8 +51,6 @@ public class ControlWindow : Window, IDisposable
 			MinimumSize = new Vector2(275, 235),
 			MaximumSize = new Vector2(275, 1080)
 		};
-
-		_ = _compat.CheckTVMod();
 
 		_compat.CheckForUpdates();
 	}
@@ -163,7 +157,7 @@ public class ControlWindow : Window, IDisposable
 		{
 			bool isPlayer = item.EntityId == Services.Objects.LocalPlayer?.EntityId;
 
-			if ((isPlayer && _installWarningMessage) || _core.TVExistsForEntity(item.EntityId)) //Checks if players carbuncle exists OR other players TV exists
+			if ((isPlayer && _isTVPoweredOff) || _core.TVExistsForEntity(item.EntityId)) //Checks if TV exists or if it's the player and the TV is powered off
 			{
 				bool isTheRunningTV = _core.IsEntityTVOn(item.EntityId);
 				string url = string.Empty;
@@ -189,13 +183,13 @@ public class ControlWindow : Window, IDisposable
 
 				if(isPlayer)
 				{
-					ImGui.PushStyleColor(ImGuiCol.Text, _installWarningMessage ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
+					ImGui.PushStyleColor(ImGuiCol.Text, _isTVPoweredOff ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
 
 					ImGui.PushFont(UiBuilder.IconFont);
 
 					if(ImGui.Button(FontAwesomeIcon.PowerOff.ToIconString() + "##power" + item.EntityId))
 					{
-						if (_installWarningMessage)
+						if (_isTVPoweredOff)
 						{
 							PenumbraIPC.ApplyTempMod(Services.Objects.LocalPlayer!.ObjectIndex, _plugin.PenumbraTempModPaths);
 						}
@@ -211,7 +205,7 @@ public class ControlWindow : Window, IDisposable
 					ImGui.SameLine();
 				}
 
-				if (_installWarningMessage)
+				if (_isTVPoweredOff)
 				{
 					continue;
 				}
@@ -326,35 +320,6 @@ public class ControlWindow : Window, IDisposable
 					ImGui.PopFont();
 				}
 
-				if (isTheRunningTV)
-				{
-					DrawScrollingText(_mediaTitle, 250);
-				}
-
-				
-				if (isTheRunningTV)
-				{
-					if (!isPlayer)
-					{
-						ImGui.BeginDisabled();
-					}
-
-					ImGui.SetNextItemWidth(268);
-					ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1));
-					ImGui.SliderFloat("##seeker" + item.EntityId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
-					if (ImGui.IsItemActive())
-					{
-						_uiElementActive = true;
-					}
-
-					if (ImGui.IsItemDeactivatedAfterEdit())
-					{
-						SeekPlayer(_seeker);
-						_uiElementActive = false;
-					}
-					ImGui.PopStyleColor(1);
-				}
-
 				if (isPlayer)
 				{
 					textColor = urlExists || (isTheRunningTV && urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f);
@@ -445,17 +410,43 @@ public class ControlWindow : Window, IDisposable
 					}
 				}
 
-				if (!_playerList.Last().Equals(item))
+				if (isTheRunningTV)
 				{
-					ImGui.Separator();
+					DrawScrollingText(_mediaTitle, 250);
 				}
+
+				
+				if (isTheRunningTV)
+				{
+					if (!isPlayer)
+					{
+						ImGui.BeginDisabled();
+					}
+
+					ImGui.SetNextItemWidth(268);
+					ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1));
+					ImGui.SliderFloat("##seeker" + item.EntityId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
+					if (ImGui.IsItemActive())
+					{
+						_uiElementActive = true;
+					}
+
+					if (ImGui.IsItemDeactivatedAfterEdit())
+					{
+						SeekPlayer(_seeker);
+						_uiElementActive = false;
+					}
+					ImGui.PopStyleColor(1);
+				}
+
+				ImGui.Separator();
 			}
 			else
 			{
 				if (isPlayer)
 				{
 					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: You have not summoned");
-					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " your standard blue carbuncle.");
+					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " your Wanderer's Campfire.");
 				}
 			}
 		}
@@ -536,7 +527,7 @@ public class ControlWindow : Window, IDisposable
 		{
 			_lastMilliSecond1000ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-			(_modenabled, _installWarningMessage) = _core.ScanForCompanions();
+			_isTVPoweredOff = _core.ScanForCompanions();
 
 			_playerList = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => (x.EntityId == Services.Objects.LocalPlayer?.EntityId) ? "@" : x.Name.TextValue);
 		}
@@ -589,7 +580,7 @@ public class ControlWindow : Window, IDisposable
 			}
 		}
 		
-		_mpvIsIdle = _core.IsIdle() ?? true;
+		_mpvIsIdle = _core.IsIdle();
 		_pauseToggle = _core.GetPaused() || _mpvIsIdle;
 	}
 
@@ -665,5 +656,84 @@ public class ControlWindow : Window, IDisposable
 		drawList.PopClipRect();
 
 		ImGui.Dummy(new Vector2(maxWidth, textSize.Y));
+	}
+
+	public void RemoveOtherPlayer(nint addr)
+	{
+		uint player = _playerList.FirstOrDefault(player => player.Address == addr)?.EntityId ?? 0;
+		if (Services.Objects.LocalPlayer?.EntityId != player && player != 0)
+		{
+			_currentURLs.Remove(player);
+			if (_core.IsEntityTVOn(player))
+			{
+				StopVideo();
+			}
+		}
+	}
+
+	public void UpdateOtherPlayer(nint addr, string s)
+	{
+		uint player = _playerList.FirstOrDefault(player => player.Address == addr)?.EntityId ?? 0;
+		if (Services.Objects.LocalPlayer?.EntityId != player && player != 0)
+		{
+			//TODO: Update State
+		}
+	}
+	public void UpdateOtherPlayerSeek(nint addr, string s)
+	{
+		uint player = _playerList.FirstOrDefault(player => player.Address == addr)?.EntityId ?? 0;
+		if (Services.Objects.LocalPlayer?.EntityId != player && player != 0)
+		{
+			if (_core.IsEntityTVOn(player))
+			{
+				//TODO: Update Seek
+			}
+		}
+	}
+
+	public string? GetStateInfo()
+	{
+		string? url = _core.GetCurrentUrl();
+		int pos = (int)_core.GetInfo()[0];
+		Dictionary<string, object?> state;
+		if(_isTVPoweredOff) //TV is off
+		{
+			return null;
+		}
+		else if(!_core.IsPlayerTVOn() || _core.IsIdle()) //TV is on but no video is playing
+		{
+			state = new Dictionary<string, object?>()
+			{
+				{ "state", 1 },
+				{ "url", string.Empty },
+				{ "pos", 0 }
+			};
+
+        	return JsonSerializer.Serialize(state);
+		}
+		else if(url != null && _core.GetPaused()) //TV is on and video is paused
+		{
+			state = new Dictionary<string, object?>()
+			{
+				{ "state", 1 },
+				{ "url", Uri.EscapeDataString(url) },
+				{ "pos", pos }
+			};
+
+        	return JsonSerializer.Serialize(state);
+		}
+		else if(url != null && !_core.GetPaused()) //TV is on and video is playing
+		{
+			state = new Dictionary<string, object?>
+			{
+				{ "state", 1 },
+				{ "url", Uri.EscapeDataString(url) },
+				{ "pos", pos }
+			};
+
+        	return JsonSerializer.Serialize(state);
+		}
+
+		return null; //However we managed to get here, just return null to be safe
 	}
 }
