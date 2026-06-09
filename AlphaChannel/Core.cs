@@ -122,7 +122,7 @@ public class Core : IDisposable
 			var elapsed = DateTime.Now - _lastLoadYT;
 			if (elapsed.TotalSeconds < 5)
 			{
-				sleepTime = Math.Min(Math.Max((int)(5000 - elapsed.TotalMilliseconds), 0), 5000); //Add some sleep time to avoid hitting rate limits
+				sleepTime = Math.Min(Math.Max((int)(7000 - elapsed.TotalMilliseconds), 0), 7000); //Add some sleep time to avoid hitting rate limits
 			}
 
 			_lastLoadYT = DateTime.Now;
