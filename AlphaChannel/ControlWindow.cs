@@ -24,6 +24,7 @@ public class ControlWindow : Window, IDisposable
 	private string _inputURL = "";
 	private float _volume = 25;
 	private float _seeker;
+	private double _seekerExactTime;
 	private int _seekerTimeSeconds;
 	private int _seekerTimeMinutes;
 	private int _seekerDurationSeconds;
@@ -155,10 +156,9 @@ public class ControlWindow : Window, IDisposable
 			ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 1. Keep the plugin activated");
 			ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 2. Restart the game client, or");
 			ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 3. Teleport to another zone");
+			ImGui.Separator();
 		}
 
-		ImGui.Text(" Available TV List:");
-		ImGui.Separator();
 		foreach (var item in _playerList)
 		{
 			bool isPlayer = item.EntityId == LocalEntityId;
@@ -181,149 +181,6 @@ public class ControlWindow : Window, IDisposable
 						url = tempURL.Url;
 						urlExists = true;
 					}
-				}
-
-				ImGui.Text(isPlayer ? "YOU" : " " + item.Name.TextValue);
-
-				ImGui.SameLine();
-
-				if(isPlayer)
-				{
-					ImGui.PushStyleColor(ImGuiCol.Text, _isTVPoweredOff ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
-
-					ImGui.PushFont(UiBuilder.IconFont);
-
-					if(ImGui.Button(FontAwesomeIcon.PowerOff.ToIconString() + "##power" + item.EntityId))
-					{
-						if (_isTVPoweredOff)
-						{
-							PenumbraIPC.ApplyTempMod(Services.Objects.LocalPlayer?.ObjectIndex, _plugin.PenumbraTempModPaths);
-						}
-						else
-						{
-							PenumbraIPC.RemoveTempMod();
-						}
-						PenumbraIPC.Redraw(_core.GetCompanion(item.EntityId)?.ObjectIndex ?? -1);
-					}
-
-					ImGui.PopFont();
-					ImGui.PopStyleColor();
-					ImGui.SameLine();
-				}
-
-				if (_isTVPoweredOff)
-				{
-					continue;
-				}
-				if (isTheRunningTV)
-				{
-					textColor = isPlayer ? new Vector4(1.0f, 0.0f, 0.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f);
-					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
-				}
-				else if (!urlExists)
-				{
-					ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1.0f));
-				}
-				ImGui.PushFont(UiBuilder.IconFont);
-
-				bool refreshNeeded = isTheRunningTV && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists;
-
-				if (ImGui.Button((isTheRunningTV ?
-					(refreshNeeded ?
-						FontAwesomeIcon.Repeat.ToIconString()
-						: FontAwesomeIcon.Stop.ToIconString()
-					)
-					: FontAwesomeIcon.Play.ToIconString()
-					) + "##play" + item.EntityId))
-				{
-					try
-					{
-						if (!isTheRunningTV || refreshNeeded)
-						{
-							if (urlExists)
-							{
-								StartVideo(item.EntityId);
-							}
-
-							if (isPlayer)
-							{
-								_placeHolderURL = _inputURL;
-								_inputURL = string.Empty;
-							}
-						}
-						else
-						{
-							StopVideo();
-						}
-
-					}
-					catch (Exception ex)
-					{
-						Services.Log.Error("FATAL ERROR: " + ex.ToString());
-					}
-				}
-				ImGui.PopFont();
-
-				if (isTheRunningTV || !urlExists)
-				{
-					ImGui.PopStyleColor();
-				}
-
-				if (ImGui.IsItemHovered())
-				{
-					ImGui.BeginTooltip();
-					ImGui.Text(
-
-						isTheRunningTV ?
-							(!string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists ? "Visit new URL"
-							 : "Stop"
-						)
-						: "Play"
-					);
-					ImGui.EndTooltip();
-				}
-
-				if (isTheRunningTV && isPlayer)
-				{
-					ImGui.SameLine();
-
-					ImGui.PushFont(UiBuilder.IconFont);
-					if (ImGui.Button(_mpvIsIdle ? FontAwesomeIcon.Repeat.ToIconString() : (_pauseToggle ? FontAwesomeIcon.Play.ToIconString() : FontAwesomeIcon.Pause.ToIconString()) + "##forceplay" + item.EntityId))
-					{
-						if (_mpvIsIdle)
-						{
-							_core.PlayVideo(_placeHolderURL);
-						}
-						else
-						{
-							_pauseToggle = !_pauseToggle;
-							_core.Pause(_pauseToggle);
-						}
-					}
-					ImGui.PopFont();
-					if (ImGui.IsItemHovered())
-					{
-						ImGui.BeginTooltip();
-						ImGui.Text("Pause/Resume");
-						ImGui.EndTooltip();
-					}
-
-					ImGui.SameLine();
-
-					ImGui.PushFont(UiBuilder.IconFont);
-					ImGui.SetNextItemWidth(100);
-					ImGui.SliderFloat("##volumebar" + item.EntityId, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
-					if (ImGui.IsItemActive())
-					{
-						_uiElementActive = true;
-					}
-
-					if (ImGui.IsItemDeactivatedAfterEdit())
-					{
-						VolumePlayer(_volume);
-						_uiElementActive = false;
-					}
-					ImGui.PopFont();
 				}
 
 				if (isPlayer)
@@ -416,9 +273,13 @@ public class ControlWindow : Window, IDisposable
 					}
 				}
 
-				if (isTheRunningTV)
+				if (isTheRunningTV && _seekerExactTime > 0)
 				{
 					DrawScrollingText(_mediaTitle, 250);
+				}
+				else
+				{
+					ImGui.Text(item.Name.TextValue);
 				}
 
 				
@@ -444,6 +305,161 @@ public class ControlWindow : Window, IDisposable
 					}
 					ImGui.PopStyleColor(1);
 				}
+				
+				if(isPlayer)
+				{
+					ImGui.PushStyleColor(ImGuiCol.Text, _isTVPoweredOff ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
+
+					ImGui.PushFont(UiBuilder.IconFont);
+
+					if(ImGui.Button(FontAwesomeIcon.PowerOff.ToIconString() + "##power" + item.EntityId))
+					{
+						if (_isTVPoweredOff)
+						{
+							PenumbraIPC.ApplyTempMod(Services.Objects.LocalPlayer?.ObjectIndex, _plugin.PenumbraTempModPaths);
+						}
+						else
+						{
+							PenumbraIPC.RemoveTempMod();
+						}
+						PenumbraIPC.Redraw(_core.GetCompanion(item.EntityId)?.ObjectIndex ?? -1);
+					}
+
+					ImGui.PopFont();
+					ImGui.PopStyleColor();
+				}
+
+				if (_isTVPoweredOff)
+				{
+					ImGui.Separator();
+
+					continue;
+				}
+				ImGui.SameLine();
+
+				bool refreshNeeded = isTheRunningTV && !string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists;
+
+				if (isTheRunningTV)
+				{
+					textColor = isPlayer ? (refreshNeeded ? new Vector4(0.0f, 1.0f, 1.0f, 1.0f) : new Vector4(1.0f, 0.0f, 0.0f, 1.0f)) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f);
+					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
+				}
+				else if (!urlExists)
+				{
+					ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1.0f));
+				}
+				ImGui.PushFont(UiBuilder.IconFont);
+
+				if (ImGui.Button((isTheRunningTV ?
+					(refreshNeeded ?
+						FontAwesomeIcon.ArrowRight.ToIconString()
+						: FontAwesomeIcon.Stop.ToIconString()
+					)
+					: FontAwesomeIcon.Play.ToIconString()
+					) + "##play" + item.EntityId))
+				{
+					try
+					{
+						if (!isTheRunningTV || refreshNeeded)
+						{
+							if (urlExists)
+							{
+								StartVideo(item.EntityId);
+							}
+
+							if (isPlayer)
+							{
+								_placeHolderURL = _inputURL;
+								_inputURL = string.Empty;
+							}
+						}
+						else
+						{
+							StopVideo();
+						}
+
+					}
+					catch (Exception ex)
+					{
+						Services.Log.Error("FATAL ERROR: " + ex.ToString());
+					}
+				}
+				ImGui.PopFont();
+
+				if (isTheRunningTV || !urlExists)
+				{
+					ImGui.PopStyleColor();
+				}
+
+				if (ImGui.IsItemHovered())
+				{
+					ImGui.BeginTooltip();
+					ImGui.Text(
+
+						isTheRunningTV ?
+							(!string.IsNullOrEmpty(_inputURL) && isPlayer && urlExists ? "Visit new URL"
+							 : "Stop"
+						)
+						: "Play"
+					);
+					ImGui.EndTooltip();
+				}
+
+				if (isTheRunningTV && isPlayer)
+				{
+					ImGui.SameLine();
+
+					ImGui.PushFont(UiBuilder.IconFont);
+					if (ImGui.Button(_mpvIsIdle ? FontAwesomeIcon.Repeat.ToIconString() : (_pauseToggle ? FontAwesomeIcon.Play.ToIconString() : FontAwesomeIcon.Pause.ToIconString()) + "##forceplay" + item.EntityId))
+					{
+						if (_mpvIsIdle)
+						{
+							SeekPlayer(0);
+							_core.Pause(false);
+							_pauseToggle = false;
+						}
+						else
+						{
+							_pauseToggle = !_pauseToggle;
+							_core.Pause(_pauseToggle);
+						}
+					}
+					ImGui.PopFont();
+					if (ImGui.IsItemHovered())
+					{
+						ImGui.BeginTooltip();
+						if (_mpvIsIdle)
+						{
+							ImGui.Text("Replay");
+						}
+						else if (_pauseToggle)
+						{
+							ImGui.Text("Pause");
+						}
+						else
+						{
+							ImGui.Text("Resume");
+						}
+						ImGui.EndTooltip();
+					}
+
+					ImGui.SameLine();
+
+					ImGui.PushFont(UiBuilder.IconFont);
+					ImGui.SetNextItemWidth(100);
+					ImGui.SliderFloat("##volumebar" + item.EntityId, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
+					if (ImGui.IsItemActive())
+					{
+						_uiElementActive = true;
+					}
+
+					if (ImGui.IsItemDeactivatedAfterEdit())
+					{
+						VolumePlayer(_volume);
+						_uiElementActive = false;
+					}
+					ImGui.PopFont();
+				}
 
 				ImGui.Separator();
 			}
@@ -453,6 +469,7 @@ public class ControlWindow : Window, IDisposable
 				{
 					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: You have not summoned");
 					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " your Wanderer's Campfire.");
+					ImGui.Separator();
 				}
 			}
 		}
@@ -574,11 +591,12 @@ public class ControlWindow : Window, IDisposable
 		{
 			double[] info = _core.GetInfo();
 			string title = _core.GetMediaTitle();
-
 			_mediaTitle = title;
+			
 
 			double time = info[0];
-
+			
+			_seekerExactTime = time;
 			_seekerTimeMinutes = (int)(time / 60);
 			_seekerTimeSeconds = (int)(time % 60);
 			double duration = info[1];
@@ -714,11 +732,7 @@ public class ControlWindow : Window, IDisposable
 		int pos = _seekerTimeMinutes * 60 + _seekerTimeSeconds;
 		IPCVideoState? state = null;
 
-		if(_core.IsLocalPlayerTVOn() && _core.IsIdle()) //LocalPlayer TV is on but no video is playing
-		{
-			state = new IPCVideoState("idle", string.Empty, 0, (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-		}
-		else if(_core.IsLocalPlayerTVOn() && !string.IsNullOrEmpty(url) && _core.GetPaused()) //LocalPlayer TV is on and video is paused
+		if(_core.IsLocalPlayerTVOn() && !string.IsNullOrEmpty(url) && _core.GetPaused()) //LocalPlayer TV is on and video is paused
 		{
 			state = new IPCVideoState("paused", Uri.EscapeDataString(url), pos, (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 		}
@@ -768,9 +782,6 @@ public class ControlWindow : Window, IDisposable
 								case "paused":
 									_core.PlayVideo(state.Url, state.PlaybackPosition, true);
 									break;
-								case "idle":
-									_core.GoIdle();
-									break;
 							}
 						}
 						else
@@ -791,12 +802,6 @@ public class ControlWindow : Window, IDisposable
 									if(!_core.GetPaused())
 									{
 										_core.Pause(true);
-									}
-									break;
-								case "idle":
-									if(_core.IsIdle())
-									{
-										_core.GoIdle();
 									}
 									break;
 							}

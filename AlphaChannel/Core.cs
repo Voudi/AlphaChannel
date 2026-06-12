@@ -176,7 +176,7 @@ public class Core : IDisposable
 	{
 		if (!_renderCancellation.Token.IsCancellationRequested)
 		{
-			return _currentMpvRenderer?.IsIdle() ?? true;
+			return _currentMpvRenderer?.IsEofReached() ?? true;
 		}
 
 		return true;
@@ -263,7 +263,7 @@ public class Core : IDisposable
 								uint ownerId = character->CompanionOwnerId;
 								_companionOwners.TryAdd(ownerId, item);
 								visitedCompanions.Add(ownerId);
-								if (tvDraw->Models[0] is not null)
+								if (tvDraw->Models[0] is not null) //TODO: Detect TV Mod based on sync, not by checking their material
 								{
 									if (tvDraw->Models[0]->MaterialCount >= 1)
 									{
@@ -279,7 +279,7 @@ public class Core : IDisposable
 															&& tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualWidth == 1024)
 														{
 															visitedTvs.Add(ownerId);
-															CheckoutCompanion((IntPtr)tvDraw, ownerId, item);
+															CheckoutCompanion(ownerId, item);
 															continue;
 														}
 													}
@@ -341,7 +341,7 @@ public class Core : IDisposable
 		return isTVPoweredOff;
 	}
 
-	private void CheckoutCompanion(IntPtr tvDraw, uint ownerId, IGameObject companion)
+	private void CheckoutCompanion(uint ownerId, IGameObject companion)
 	{
 		if (!_tvOwners.TryGetValue(ownerId, out _))
 		{

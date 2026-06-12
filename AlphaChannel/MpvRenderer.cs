@@ -86,7 +86,7 @@ namespace AlphaChannel
 			_ = mpv_set_option_string(_mpvCtx, "msg-level", "all=warn,ffmpeg=error");
 			_ = mpv_set_option_string(_mpvCtx, "ytdl-raw-options", "force-ipv4=,hls-use-mpegts=");
 			_ = mpv_set_option_string(_mpvCtx, "idle", "yes");
-			_ = mpv_set_option_string(_mpvCtx, "keep-open", "no");
+			_ = mpv_set_option_string(_mpvCtx, "keep-open", "yes");
 			//_ = mpv_set_option_string(_mpvCtx, "tls-verify", "no"); TODO: Make it optional to disable TLS verification because WINE is a bitch
 			_ = mpv_request_log_messages(_mpvCtx, "warn");
 			_ = mpv_initialize(_mpvCtx);
@@ -424,6 +424,38 @@ namespace AlphaChannel
 			}
 		}
 
+		public bool IsEofReached()
+		{
+			if (_closed)
+			{
+				return true;
+			}
+
+			lock (_mpvLock)
+			{
+				if (_mpvCtx == IntPtr.Zero)
+				{
+					return true;
+				}
+
+				IntPtr ptr = Marshal.AllocHGlobal(4);
+				try
+				{
+					int rc = mpv_get_property(_mpvCtx, "eof-reached", 3, ptr);
+					if (rc < 0)
+					{
+						return false;
+					}
+
+					return Marshal.ReadInt32(ptr) == 1;
+				}
+				finally
+				{
+					Marshal.FreeHGlobal(ptr);
+				}
+			}
+		}
+		
 		public void Dispose()
 		{
 			_frameReady.Dispose();
