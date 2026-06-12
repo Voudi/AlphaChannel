@@ -9,19 +9,26 @@ public static class PenumbraIPC
 
     private static Guid _collectionId = Guid.Empty;
 
-    public static void ApplyTempMod(int actorIndex, Dictionary<string, string> gamePaths)
+    public static void ApplyTempMod(int? actorIndex, Dictionary<string, string> gamePaths)
     {
-        if (_collectionId == Guid.Empty)
+        if(actorIndex == null)
         {
-            var createCollection = new CreateTemporaryCollection(Services.PluginInterface);
-            createCollection.Invoke(Tag, Tag, out _collectionId);
+            return;
         }
+        else
+        {
+            if (_collectionId == Guid.Empty)
+            {
+                var createCollection = new CreateTemporaryCollection(Services.PluginInterface);
+                createCollection.Invoke(Tag, Tag, out _collectionId);
+            }
 
-        var addMod = new AddTemporaryMod(Services.PluginInterface);
-        addMod.Invoke(Tag, _collectionId, gamePaths, string.Empty, int.MaxValue);
+            var addMod = new AddTemporaryMod(Services.PluginInterface);
+            addMod.Invoke(Tag, _collectionId, gamePaths, string.Empty, int.MaxValue);
 
-        var assign = new AssignTemporaryCollection(Services.PluginInterface);
-        assign.Invoke(_collectionId, actorIndex, true);
+            var assign = new AssignTemporaryCollection(Services.PluginInterface);
+            assign.Invoke(_collectionId, (int)actorIndex, true);
+        }
     }
 
     public static void RemoveTempMod()

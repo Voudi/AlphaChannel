@@ -6,6 +6,7 @@ namespace AlphaChannel;
 
 public class Services
 {
+
 	[PluginService]
 	public static IObjectTable Objects { get; private set; } = null!;
 

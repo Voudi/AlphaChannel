@@ -226,9 +226,16 @@ namespace AlphaChannel
 				Services.Log.Debug("Playing New Video at " + playbackPosition + " | " + isPlaying);
 				lock (_mpvLock)
 				{
-					string startStr = ((int)playbackPosition).ToString(System.Globalization.CultureInfo.InvariantCulture);
-					string pauseStr = !isPlaying ? ",pause=yes" : string.Empty;
-					_ = mpv_command(_mpvCtx, ["loadfile", url, "replace", "0", $"start={startStr}{pauseStr}", null!]);
+					if(url == string.Empty)
+					{
+						Stop();
+					}
+					else
+					{
+						string startStr = ((int)playbackPosition).ToString(System.Globalization.CultureInfo.InvariantCulture);
+						string pauseStr = !isPlaying ? ",pause=yes" : string.Empty;
+						_ = mpv_command(_mpvCtx, ["loadfile", url, "replace", "0", $"start={startStr}{pauseStr}", null!]);	
+					}
 				}
 			}
 		}
@@ -291,17 +298,17 @@ namespace AlphaChannel
 			}
 		}
 
-		public void TogglePause()
+		public void Pause(bool pause)
 		{
 			if (!_closed)
 			{
 				lock (_mpvLock)
 				{
-					_ = mpv_command(_mpvCtx, ["cycle", "pause", null!]);
+					_ = mpv_command(_mpvCtx, ["set", "pause", pause ? "yes" : "no", null!]);
 				}
 			}
 		}
-
+		
 		public void SetVolume(int volume)
 		{
 			if (!_closed)

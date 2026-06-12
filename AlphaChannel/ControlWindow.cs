@@ -1,19 +1,24 @@
 ﻿using System.Numerics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Dalamud.Bindings.ImGui;
 
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
+using Dalamud.Utility;
 
 namespace AlphaChannel;
 
 public class ControlWindow : Window, IDisposable
 {
 	private bool _isTVPoweredOff;
-
 	private bool _pauseToggle;
+	private Plugin _plugin;
+	private Compatibility _compat;
+	private Core _core;
+	private uint? LocalEntityId => Services.Objects?.LocalPlayer?.EntityId;
 
 	//Render Vars
 	private string _inputURL = "";
@@ -24,17 +29,17 @@ public class ControlWindow : Window, IDisposable
 	private int _seekerDurationSeconds;
 	private int _seekerDurationMinutes;
 	private int _seekerMaxSeconds;
+	private bool _mpvIsIdle = true;
+	private string _mediaTitle = string.Empty;
 	private bool _libsLoaded;
 	private bool _updatingLibs;
 	private bool _uiElementActive;
-	private string _mediaTitle = string.Empty;
-	private bool _mpvIsIdle = true;
-	private DateTime _lastTVTurnOn = DateTime.MinValue;
-	private Plugin _plugin;
-	private Compatibility _compat;
-	private Core _core;
+	private DateTime _lastTextureDebugMsg = DateTime.MinValue;
 
-	private readonly Dictionary<uint, string> _currentURLs = []; //PlayerEntityID, URL
+	private readonly Dictionary<uint, IPCVideoState> _currentStates = []; //PlayerEntityID, IPCVideoState
+	public sealed record IPCVideoState([property: JsonRequired] string State, [property: JsonRequired] string Url, [property: JsonRequired] int PlaybackPosition, [property: JsonRequired] long Timestamp);
+
+	private IPCVideoState? _localPlayerState;
 
 	public ControlWindow(Plugin plugin, string title)
 		: base(title, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
@@ -57,6 +62,7 @@ public class ControlWindow : Window, IDisposable
 
 	public void Dispose()
 	{
+		_plugin.UpdateIPCState(null);
 		_core.VideoEnded -= StopVideo;
 		_core.Dispose();
 		GC.SuppressFinalize(this);
@@ -68,7 +74,7 @@ public class ControlWindow : Window, IDisposable
 	public override void Draw()
 	{
 		Vector4 textColor;
-		bool playerIsRunningTV = _core.IsPlayerTVOn();
+		bool playerIsRunningTV = _core.IsLocalPlayerTVOn();
 
 		if (Services.DutyState.IsDutyStarted)
 		{
@@ -143,7 +149,7 @@ public class ControlWindow : Window, IDisposable
 			}
 
 		}
-		if (!_core.IsTVTurnedOff() && !_core.TextureExists() && _lastTVTurnOn.AddSeconds(5) < DateTime.Now)
+		if (!_core.IsTVTurnedOff() && !_core.TextureExists() && _lastTextureDebugMsg.AddSeconds(5) < DateTime.Now)
 		{
 			ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " Error: Cannot Fetch Screen Texture");
 			ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 1. Keep the plugin activated");
@@ -155,7 +161,7 @@ public class ControlWindow : Window, IDisposable
 		ImGui.Separator();
 		foreach (var item in _playerList)
 		{
-			bool isPlayer = item.EntityId == Services.Objects.LocalPlayer?.EntityId;
+			bool isPlayer = item.EntityId == LocalEntityId;
 
 			if ((isPlayer && _isTVPoweredOff) || _core.TVExistsForEntity(item.EntityId)) //Checks if TV exists or if it's the player and the TV is powered off
 			{
@@ -170,9 +176,9 @@ public class ControlWindow : Window, IDisposable
 				}
 				else
 				{
-					if (_currentURLs.TryGetValue(item.EntityId, out string? tempURL))
+					if (_currentStates.TryGetValue(item.EntityId, out IPCVideoState? tempURL))
 					{
-						url = tempURL;
+						url = tempURL.Url;
 						urlExists = true;
 					}
 				}
@@ -191,7 +197,7 @@ public class ControlWindow : Window, IDisposable
 					{
 						if (_isTVPoweredOff)
 						{
-							PenumbraIPC.ApplyTempMod(Services.Objects.LocalPlayer!.ObjectIndex, _plugin.PenumbraTempModPaths);
+							PenumbraIPC.ApplyTempMod(Services.Objects.LocalPlayer?.ObjectIndex, _plugin.PenumbraTempModPaths);
 						}
 						else
 						{
@@ -290,8 +296,8 @@ public class ControlWindow : Window, IDisposable
 						}
 						else
 						{
-							_core.TogglePause();
 							_pauseToggle = !_pauseToggle;
+							_core.Pause(_pauseToggle);
 						}
 					}
 					ImGui.PopFont();
@@ -454,22 +460,27 @@ public class ControlWindow : Window, IDisposable
 
 	public void StartVideo(uint entityId)
 	{
-		if (Services.Objects.LocalPlayer?.EntityId == entityId)
+		if (LocalEntityId == entityId)
 		{
 			if (ValidateURL(out Uri? uri) && uri != null)
 			{
 				_core.SetCurrentTV(entityId);
-				_lastTVTurnOn = DateTime.Now;
+				_lastTextureDebugMsg = DateTime.Now;
 
+				_localPlayerState = new("playing", Uri.EscapeDataString(uri.ToString()), 0, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+				_plugin.UpdateIPCState(_localPlayerState);
+				
 				_core.PlayVideo(uri.ToString());
 			}
 		}
 		else
 		{
-			if (_currentURLs.TryGetValue(entityId, out string? url))
+			if (_currentStates.TryGetValue(entityId, out IPCVideoState? stateInfo))
 			{
+				string url = stateInfo.Url;
+
 				_core.SetCurrentTV(entityId);
-				_lastTVTurnOn = DateTime.Now;
+				_lastTextureDebugMsg = DateTime.Now;
 
 				bool result = Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri?.Scheme == Uri.UriSchemeHttp || uri?.Scheme == Uri.UriSchemeHttps) && uri.Host.Contains('.') && !uri.Host.EndsWith('.') && Uri.CheckHostName(uri.Host) == UriHostNameType.Dns;
 
@@ -479,7 +490,8 @@ public class ControlWindow : Window, IDisposable
 					return;
 				}
 
-				_core.PlayVideo(url);
+				int getTimeDiff = (int) (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - stateInfo.Timestamp);
+				_core.PlayVideo(url, stateInfo.PlaybackPosition + getTimeDiff, stateInfo.State == "playing");
 			}
 		}
 	}
@@ -529,7 +541,7 @@ public class ControlWindow : Window, IDisposable
 
 			_isTVPoweredOff = _core.ScanForCompanions();
 
-			_playerList = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => (x.EntityId == Services.Objects.LocalPlayer?.EntityId) ? "@" : x.Name.TextValue);
+			_playerList = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => (x.EntityId == LocalEntityId) ? "@" : x.Name.TextValue);
 		}
 	}
 
@@ -544,6 +556,15 @@ public class ControlWindow : Window, IDisposable
 	{
 		int seconds = (int)(_seekerMaxSeconds * (percentage / 100));
 		Services.Log.Debug("Seeking to " + seconds + " seconds");
+
+		IPCVideoState? state = IPCGetState();
+		if(state != null)
+		{
+			state = new IPCVideoState(state.State, state.Url, seconds, state.Timestamp);
+			_localPlayerState = state;
+			_plugin.UpdateIPCState(state);
+		}
+
 		_core.SeekPlayer(seconds);
 	}
 
@@ -580,8 +601,24 @@ public class ControlWindow : Window, IDisposable
 			}
 		}
 		
-		_mpvIsIdle = _core.IsIdle();
-		_pauseToggle = _core.GetPaused() || _mpvIsIdle;
+		if(_localPlayerState != null && !_core.IsLocalPlayerTVOn()) //Level 1 - TV is has been turned completely off
+		{
+			_localPlayerState = null;
+			_plugin.UpdateIPCState(_localPlayerState);
+		}
+		else if(_mpvIsIdle != _core.IsIdle()) //Level 2 - TV has been turned idle
+		{
+			_mpvIsIdle = _core.IsIdle();
+			_pauseToggle = true;
+			_localPlayerState = IPCGetState();
+			_plugin.UpdateIPCState(_localPlayerState);
+		}
+		else if(_pauseToggle != _core.GetPaused()) //Level 3 - TV has been paused
+		{
+			_pauseToggle = _core.GetPaused();
+			_localPlayerState = IPCGetState();
+			_plugin.UpdateIPCState(_localPlayerState);
+		}
 	}
 
 	private float _scrollOffset;
@@ -661,9 +698,9 @@ public class ControlWindow : Window, IDisposable
 	public void RemoveOtherPlayer(nint addr)
 	{
 		uint player = _playerList.FirstOrDefault(player => player.Address == addr)?.EntityId ?? 0;
-		if (Services.Objects.LocalPlayer?.EntityId != player && player != 0)
+		if (LocalEntityId != player && player != 0)
 		{
-			_currentURLs.Remove(player);
+			_currentStates.Remove(player);
 			if (_core.IsEntityTVOn(player))
 			{
 				StopVideo();
@@ -671,69 +708,106 @@ public class ControlWindow : Window, IDisposable
 		}
 	}
 
-	public void UpdateOtherPlayer(nint addr, string s)
-	{
-		uint player = _playerList.FirstOrDefault(player => player.Address == addr)?.EntityId ?? 0;
-		if (Services.Objects.LocalPlayer?.EntityId != player && player != 0)
-		{
-			//TODO: Update State
-		}
-	}
-	public void UpdateOtherPlayerSeek(nint addr, string s)
-	{
-		uint player = _playerList.FirstOrDefault(player => player.Address == addr)?.EntityId ?? 0;
-		if (Services.Objects.LocalPlayer?.EntityId != player && player != 0)
-		{
-			if (_core.IsEntityTVOn(player))
-			{
-				//TODO: Update Seek
-			}
-		}
-	}
-
-	public string? GetStateInfo()
+	public IPCVideoState? IPCGetState()
 	{
 		string? url = _core.GetCurrentUrl();
-		int pos = (int)_core.GetInfo()[0];
-		Dictionary<string, object?> state;
-		if(_isTVPoweredOff) //TV is off
+		int pos = _seekerTimeMinutes * 60 + _seekerTimeSeconds;
+		IPCVideoState? state = null;
+
+		if(_core.IsLocalPlayerTVOn() && _core.IsIdle()) //LocalPlayer TV is on but no video is playing
 		{
-			return null;
+			state = new IPCVideoState("idle", string.Empty, 0, (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 		}
-		else if(!_core.IsPlayerTVOn() || _core.IsIdle()) //TV is on but no video is playing
+		else if(_core.IsLocalPlayerTVOn() && !string.IsNullOrEmpty(url) && _core.GetPaused()) //LocalPlayer TV is on and video is paused
 		{
-			state = new Dictionary<string, object?>()
+			state = new IPCVideoState("paused", Uri.EscapeDataString(url), pos, (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+		}
+		else if(_core.IsLocalPlayerTVOn() && !string.IsNullOrEmpty(url) && !_core.GetPaused()) //LocalPlayer TV is on and video is playing
+		{
+			state = new IPCVideoState("playing", Uri.EscapeDataString(url), pos, (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+		}
+
+		return state;
+	}
+
+	public void IPCSetState(nint addr, string stateJSON)
+	{
+		int pos = _seekerTimeMinutes * 60 + _seekerTimeSeconds;
+		uint player = _playerList.FirstOrDefault(player => player.Address == addr)?.EntityId ?? 0;
+		if (player == LocalEntityId)
+		{
+			return;
+		}
+		if (LocalEntityId != player && player != 0)
+		{
+			if(stateJSON == null)
 			{
-				{ "state", 1 },
-				{ "url", string.Empty },
-				{ "pos", 0 }
-			};
-
-        	return JsonSerializer.Serialize(state);
-		}
-		else if(url != null && _core.GetPaused()) //TV is on and video is paused
-		{
-			state = new Dictionary<string, object?>()
+				_currentStates.Remove(player);
+				if (_core.IsEntityTVOn(player))
+				{
+					StopVideo();
+				}
+			}
+			else
 			{
-				{ "state", 1 },
-				{ "url", Uri.EscapeDataString(url) },
-				{ "pos", pos }
-			};
-
-        	return JsonSerializer.Serialize(state);
+				IPCVideoState? state = JsonSerializer.Deserialize<IPCVideoState>(stateJSON);
+				if (state != null)
+				{
+					_currentStates.TryGetValue(player, out IPCVideoState? oldState);
+					state = _currentStates[player] = new IPCVideoState(state.State, Uri.UnescapeDataString(state.Url), state.PlaybackPosition, state.Timestamp);
+					
+					if (oldState != null && _core.IsEntityTVOn(player))
+					{
+						if(oldState.Url != state.Url && state.Url != string.Empty)
+						{
+							switch(state.State)
+							{
+								case "playing":
+									_core.PlayVideo(state.Url, state.PlaybackPosition, false);
+									break;
+								case "paused":
+									_core.PlayVideo(state.Url, state.PlaybackPosition, true);
+									break;
+								case "idle":
+									_core.GoIdle();
+									break;
+							}
+						}
+						else
+						{
+							if(pos + 7 >= state.PlaybackPosition && pos - 7 <= state.PlaybackPosition) //7s grace period to avoid unnecessary seeks due to minor desyncs
+							{
+								_core.SeekPlayer(state.PlaybackPosition);
+							}
+							switch(state.State)
+							{
+								case "playing":
+									if(_core.GetPaused())
+									{
+										_core.Pause(false);
+									}
+									break;
+								case "paused":
+									if(!_core.GetPaused())
+									{
+										_core.Pause(true);
+									}
+									break;
+								case "idle":
+									if(_core.IsIdle())
+									{
+										_core.GoIdle();
+									}
+									break;
+							}
+						}
+					}
+				}
+				else{
+					Services.Log.Error("Failed to deserialize state for player " + player + " with JSON: " + stateJSON);
+				}
+			}
+			
 		}
-		else if(url != null && !_core.GetPaused()) //TV is on and video is playing
-		{
-			state = new Dictionary<string, object?>
-			{
-				{ "state", 1 },
-				{ "url", Uri.EscapeDataString(url) },
-				{ "pos", pos }
-			};
-
-        	return JsonSerializer.Serialize(state);
-		}
-
-		return null; //However we managed to get here, just return null to be safe
 	}
 }

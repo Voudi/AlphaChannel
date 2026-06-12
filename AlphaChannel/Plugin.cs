@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text.Json;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
@@ -24,10 +25,6 @@ public class Plugin : IDalamudPlugin
 	private ControlWindow _mainWindow;
 	private readonly string _pluginDir;
 	public Resources LibResources { get; }
-	public static readonly System.Net.Http.HttpClient HttpClient = new();
-	public static readonly System.Net.Http.HttpClient NoRedirectHttpClient = new(
-		new System.Net.Http.HttpClientHandler { AllowAutoRedirect = false }
-	);
 
 	public Plugin(IDalamudPluginInterface pluginInterface)
 	{
@@ -69,13 +66,15 @@ public class Plugin : IDalamudPlugin
 
 	public void Dispose()
 	{
-		WindowSystem.RemoveAllWindows();
-
 		PenumbraIPC.Dispose();
 
 		_mainWindow?.Dispose();
 
 		DxHandler.Shutdown();
+
+		ApiProvider.DeInit();
+
+		WindowSystem.RemoveAllWindows();
 
 		GC.SuppressFinalize(this);
 	}
@@ -109,31 +108,23 @@ public class Plugin : IDalamudPlugin
 
 	internal string? OnIPCGetLocalState()
 	{
-		return _mainWindow.GetStateInfo();
+		ControlWindow.IPCVideoState? state = _mainWindow.IPCGetState();
+		return state is null ? null : JsonSerializer.Serialize(state);
 	}
 
 	internal void OnIPCSetState(nint addr, string s)
 	{
-		_mainWindow.UpdateOtherPlayer(addr, s);
+		_mainWindow.IPCSetState(addr, s);
 	}
-
-	internal void OnIPCApplyStateUpdate(nint addr, string s)
-	{
-		_mainWindow.UpdateOtherPlayerSeek(addr, s);
-	}
-
+	
 	internal void OnIPCClearState(nint addr)
 	{
 		_mainWindow.RemoveOtherPlayer(addr);
 	}
 
-	internal void UpdateIPCState()
+	internal void UpdateIPCState(ControlWindow.IPCVideoState? state)
 	{
-		ApiProvider.NotifyStateChange(_mainWindow.GetStateInfo(), null);
-	}
-	
-	internal void UpdateIPCPartialState(string? partialState = null)
-	{
-		ApiProvider.NotifyStateChange(_mainWindow.GetStateInfo(), partialState);
+		string? IPCstate = state is null ? null : JsonSerializer.Serialize(state);
+		ApiProvider.NotifyStateChange(IPCstate, IPCstate);
 	}
 }

@@ -33,6 +33,7 @@ public class Core : IDisposable
 	private bool _screenTextureLoaded;
 	private uint _activeEntityId;
 	private uint _playingEntityId;
+	private uint? LocalEntityId => Services.Objects?.LocalPlayer?.EntityId;
 
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
 	{
@@ -68,9 +69,9 @@ public class Core : IDisposable
 		return _activeEntityId == 0;
 	}
 
-	public bool IsPlayerTVOn()
+	public bool IsLocalPlayerTVOn()
 	{
-		return _activeEntityId == Services.Objects.LocalPlayer?.EntityId;
+		return _activeEntityId == LocalEntityId;
 	}
 	public bool IsEntityTVOn(uint entityId)
 	{
@@ -101,6 +102,11 @@ public class Core : IDisposable
 		_activeEntityId = entityId;
 	}
 
+	public void GoIdle()
+	{
+		_currentMpvRenderer?.Stop();
+	}
+
 	public void StopVideo()
 	{
 		ClearTexture();
@@ -109,7 +115,7 @@ public class Core : IDisposable
 		_activeEntityId = 0;
 	}
 
-	public void PlayVideo(string url, double playbackPosition = 0, bool isPlaying = true)
+	public void PlayVideo(string url, int playbackPosition = 0, bool isPlaying = true)
 	{
 		if (_currentMpvRenderer != null && _currentMpvRenderer.GetCurrentUrl() == url && !_currentMpvRenderer.IsIdle())
 		{
@@ -158,11 +164,11 @@ public class Core : IDisposable
 		});
 	}
 
-	public void TogglePause()
+	public void Pause(bool pause)
 	{
 		if (!_renderCancellation.Token.IsCancellationRequested)
 		{
-			_currentMpvRenderer?.TogglePause();
+			_currentMpvRenderer?.Pause(pause);
 		}
 	}
 
@@ -228,7 +234,7 @@ public class Core : IDisposable
 	}
 	public unsafe bool ScanForCompanions()
 	{
-		uint? playerId = Services.Objects.LocalPlayer?.EntityId;
+		uint? playerId = LocalEntityId;
 		bool isTVPoweredOff = false;
 
 		bool hookEnabled = !_getResourceSyncHook.IsDisposed && _getResourceSyncHook.IsEnabled;
@@ -349,7 +355,7 @@ public class Core : IDisposable
 			}
 			else
 			{
-				RefreshActorVFX(Services.Objects.LocalPlayer?.Address ?? companion.Address, companion.Address); //This TV is active, play its VFX
+				RefreshActorVFX(Services.Objects?.LocalPlayer?.Address ?? companion.Address, companion.Address); //This TV is active, play its VFX
 			}
 		}
 	}

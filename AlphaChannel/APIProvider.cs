@@ -34,8 +34,8 @@ public static class ApiProvider
 
         _version.RegisterFunc(() => (ApiVersionMajor, ApiVersionMinor));
         _getState.RegisterFunc(plugin.OnIPCGetLocalState);
-        _setState.RegisterAction(plugin.OnIPCSetState);
-        _applyStateUpdate.RegisterAction(plugin.OnIPCApplyStateUpdate);
+        _setState.RegisterAction(plugin.OnIPCSetState); //Persistent State
+        _applyStateUpdate.RegisterAction(plugin.OnIPCSetState); //Fleeting State
         _clearState.RegisterAction(plugin.OnIPCClearState);
 
         _onReady.SendMessage();
