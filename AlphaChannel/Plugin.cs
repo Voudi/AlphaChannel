@@ -12,6 +12,8 @@ public class Plugin : IDalamudPlugin
 	// Required for LivePluginLoader support
 	public string? AssemblyLocationMPV { get; set; }
 	public string? AssemblyLocationYTDLP { get; set; }
+
+	public static Guid PluginSessionGUID { get; set;}
 	public Dictionary<string, string> PenumbraTempModPaths { get; set;}
 
 	// Required for LivePluginLoader support — interface member cannot be static
@@ -28,6 +30,7 @@ public class Plugin : IDalamudPlugin
 
 	public Plugin(IDalamudPluginInterface pluginInterface)
 	{
+		PluginSessionGUID = Guid.NewGuid();
 		// init services
 		pluginInterface.Create<Services>();
 
@@ -73,6 +76,8 @@ public class Plugin : IDalamudPlugin
 		DxHandler.Shutdown();
 
 		ApiProvider.DeInit();
+
+		LibResources.Dispose();
 
 		WindowSystem.RemoveAllWindows();
 

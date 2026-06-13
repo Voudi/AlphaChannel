@@ -22,6 +22,12 @@ public class Resources : IDisposable
 	public void Dispose()
 	{
 		_httpClient.Dispose();
+
+		string path = Path.Combine(_pluginDir, "resources", Plugin.PluginSessionGUID + "alphachannelscreentex.atex");
+		if(File.Exists(path))
+		{
+			File.Delete(path);
+		}
 		GC.SuppressFinalize(this);
 	}
 
@@ -34,7 +40,6 @@ public class Resources : IDisposable
 			{"chara/monster/m8373/obj/body/b0001/texture/tv_s_m7002b0001.tex", "tv_s_m7002b0001.tex"},
 			{"chara/monster/m8373/obj/body/b0001/texture/tv_d_m7002b0001.tex", "tv_d_m7002b0001.tex"},
 			{"chara/monster/m8373/obj/body/b0001/texture/tv_id_m7002b0001.tex", "tv_s_m7002b0001.tex"},
-			{"chara/monster/m8373/obj/body/b0001/vfx/texture/alphachannelscreentex.atex", "alphachannelscreentex.atex"},
 			{"chara/monster/m8373/obj/body/b0001/vfx/eff/alphachannelscreen.avfx", "alphachannelscreen.avfx"},
 			{"chara/monster/m8373/obj/body/b0001/vfx/eff/vm0001.avfx", "removecampfire.avfx"}
 		};
@@ -50,7 +55,19 @@ public class Resources : IDisposable
 				paths[key] = Path.Combine(_pluginDir, "resources", paths[key]);
 			}
 		}
-		return paths;
+		string oldPath = Path.Combine(_pluginDir, "resources", "alphachannelscreentex.atex");
+		if (File.Exists(oldPath))
+		{
+			string path = Path.Combine(_pluginDir, "resources",  Plugin.PluginSessionGUID + "alphachannelscreentex.atex");
+			File.Copy(oldPath, path);
+			paths.Add("chara/monster/m8373/obj/body/b0001/vfx/texture/alphachannelscreentex.atex", path);
+
+			return paths;
+		}
+		else
+		{
+			throw new FileNotFoundException($"Required resource not found: {oldPath}");
+		}
 	}
 
 	public string? GetLocationMPV()

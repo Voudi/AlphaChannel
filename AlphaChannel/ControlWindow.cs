@@ -150,14 +150,6 @@ public class ControlWindow : Window, IDisposable
 			}
 
 		}
-		if (!_core.IsTVTurnedOff() && !_core.TextureExists() && _lastTextureDebugMsg.AddSeconds(5) < DateTime.Now)
-		{
-			ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " Error: Cannot Fetch Screen Texture");
-			ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 1. Keep the plugin activated");
-			ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 2. Restart the game client, or");
-			ImGui.TextColored(new Vector4(0.8f, 0.3f, 0.3f, 1.0f), " 3. Teleport to another zone");
-			ImGui.Separator();
-		}
 
 		foreach (var item in _playerList)
 		{

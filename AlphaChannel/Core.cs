@@ -10,6 +10,7 @@ using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
 using FFXIVClientStructs.FFXIV.Client.System.Resource;
 using FFXIVClientStructs.FFXIV.Client.System.Resource.Handle;
 using InteropGenerator.Runtime;
+using SharpDX;
 using SharpDX.Direct3D;
 using SharpDX.Direct3D11;
 using SharpDX.DXGI;
@@ -355,7 +356,7 @@ public class Core : IDisposable
 			}
 			else
 			{
-				RefreshActorVFX(Services.Objects?.LocalPlayer?.Address ?? companion.Address, companion.Address); //This TV is active, play its VFX
+				RefreshActorVFX(companion.Address, companion.Address); //This TV is active, play its VFX
 			}
 		}
 	}
@@ -375,6 +376,7 @@ public class Core : IDisposable
 	private delegate IntPtr ActorVfxCreateDelegate(string path, IntPtr a2, IntPtr a3, float a4, char a5, ushort a6, char a7);
 	private ActorVfxCreateDelegate _actorVfxCreate;
 
+
 	private Hook<ResourceManager.Delegates.GetResourceSync> _getResourceSyncHook;
 	private Hook<Texture.Delegates.InitializeContents> _textureOnLoadHook;
 
@@ -384,9 +386,10 @@ public class Core : IDisposable
 		if (path.ToString().Contains(TEXPath))
 		{
 			_textureOnLoadHook.Enable(); //Enable Texturehook only for the duration of the Resource Load, as hooking Textures from Kernel is unsafe and expensive
+			Services.Log.Debug("Screen Texture load attempt.");
 			var ret = _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown, unkDebugPtr, unkDebugInt);
 			_textureOnLoadHook.Disable();
-
+			
 			return ret;
 		}
 		else
@@ -394,6 +397,7 @@ public class Core : IDisposable
 			return _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown, unkDebugPtr, unkDebugInt);
 		}
 	}
+	
 	private readonly Lock _screenTextureLock = new();
 	private unsafe bool TexOnLoadDetour(Texture* thisPtr, void* contents)
 	{
@@ -455,8 +459,25 @@ public class Core : IDisposable
 						_views[key] = newView;
 					}
 
+					nint oldTexPtr = (nint)thisPtr->D3D11Texture2D;
+					nint oldSrvPtr = (nint)thisPtr->D3D11ShaderResourceView;
+
 					thisPtr->D3D11Texture2D = (void*)_screenTexture.NativePointer;
 					thisPtr->D3D11ShaderResourceView = (void*)newView.NativePointer;
+
+					Marshal.AddRef(oldTexPtr);
+					int texCount = Marshal.Release(oldTexPtr);
+					Marshal.AddRef(oldSrvPtr);
+					int srvCount = Marshal.Release(oldSrvPtr);
+
+					Services.Log.Debug("Releasing old Tex?: " + texCount + " - " + srvCount);
+					if (texCount == 1) {
+						Marshal.Release(oldTexPtr);
+					}
+					if (srvCount == 1) { 
+						Marshal.Release(oldSrvPtr);
+					}
+
 					_screenTextureLoaded = true;
 			}
 
@@ -488,10 +509,8 @@ public class Core : IDisposable
 		_textureOnLoadHook.Dispose();
 		_getResourceSyncHook.Dispose();
 
-		foreach (var v in _views.Values)
-		{
-			v.Dispose();
-		}
+		//Do not clean up Texture2D and ShaderResourceView as they may still be part of the currently running VFX
+		//Instead just let it stay in the game until it eventually closes, its not growing anyway
 		_views.Clear();
 
 		Services.CommandManager.ProcessCommand("/honorific force clear");
