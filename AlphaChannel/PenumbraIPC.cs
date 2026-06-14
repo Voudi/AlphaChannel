@@ -39,10 +39,11 @@ public static class PenumbraIPC
 
     public static void RemoveTempMod(string key)
     {
-        if (!_collectionIds.TryGetValue(key, out Guid colId))
+        if (_collectionIds.TryGetValue(key, out Guid colId))
         {
             var assign = new RemoveTemporaryMod(Services.PluginInterface);
             assign.Invoke(Tag + key, colId, int.MaxValue);
+            _collectionIds.Remove(key);
         }
     }
 

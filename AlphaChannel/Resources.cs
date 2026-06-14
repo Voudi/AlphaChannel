@@ -61,24 +61,40 @@ public class Resources : IDisposable
 	public Dictionary<string, string> LoadPenumbraModResources()
 	{
 		Dictionary<string, string> paths = new () {
-			{"chara/monster/m8373/obj/body/b0001/model/m8373b0001.mdl", "m8373b0001.mdl"},
-			{"chara/monster/m8373/obj/body/b0001/material/v0001/mt_m8373b0001_b.mtrl", "mt_m8373b0001_b.mtrl"},
-			{"chara/monster/m8373/obj/body/b0001/texture/tv_n_m7002b0001.tex", "tv_n_m7002b0001.tex"},
-			{"chara/monster/m8373/obj/body/b0001/texture/tv_s_m7002b0001.tex", "tv_s_m7002b0001.tex"},
-			{"chara/monster/m8373/obj/body/b0001/texture/tv_d_m7002b0001.tex", "tv_d_m7002b0001.tex"},
-			{"chara/monster/m8373/obj/body/b0001/texture/tv_id_m7002b0001.tex", "tv_s_m7002b0001.tex"},
-			{"chara/monster/m8373/obj/body/b0001/vfx/eff/vm0001.avfx", "removecampfire.avfx"}
+			{"chara/monster/m8373/obj/body/b0001/model/m8373b0001.mdl", "campfire/m8373b0001.mdl"}, //Campfire Files
+			{"chara/monster/m8373/obj/body/b0001/material/v0001/mt_m8373b0001_b.mtrl", "campfire/mt_m8373b0001_b.mtrl"},
+			{"chara/monster/m8373/obj/body/b0001/texture/tv_n_m7002b0001.tex", "campfire/tv_n_m7002b0001.tex"},
+			{"chara/monster/m8373/obj/body/b0001/texture/tv_s_m7002b0001.tex", "campfire/tv_s_m7002b0001.tex"},
+			{"chara/monster/m8373/obj/body/b0001/texture/tv_d_m7002b0001.tex", "campfire/tv_d_m7002b0001.tex"},
+			{"chara/monster/m8373/obj/body/b0001/texture/tv_id_m7002b0001.tex", "campfire/tv_s_m7002b0001.tex"},
+			{"chara/monster/m8373/obj/body/b0001/vfx/eff/vm0001.avfx", "campfire/removecampfire.avfx"},
+			{"chara/monster/m7002/animation/a0001/bt_common/resident/monster.pap", "carbuncle/monster.pap"}, //Carbuncle Files
+			{"chara/monster/m7002/obj/body/b0001/material/v0001/mt_m7002b0001_a.mtrl", "carbuncle/mt_m7002b0001_a.mtrl"},
+			{"chara/monster/m7002/obj/body/b0001/material/v0002/mt_m7002b0001_a.mtrl", "carbuncle/mt_m7002b0001_a.mtrl"},
+			{"chara/monster/m7002/obj/body/b0001/material/v0003/mt_m7002b0001_a.mtrl", "carbuncle/mt_m7002b0001_a.mtrl"},
+			{"chara/monster/m7002/obj/body/b0001/material/v0004/mt_m7002b0001_a.mtrl", "carbuncle/mt_m7002b0001_a.mtrl"},
+			{"chara/monster/m7002/obj/body/b0001/material/v0005/mt_m7002b0001_a.mtrl", "carbuncle/mt_m7002b0001_a.mtrl"},
+			{"chara/monster/m7002/obj/body/b0001/material/v0006/mt_m7002b0001_a.mtrl", "carbuncle/mt_m7002b0001_a.mtrl"},
+			{"chara/monster/m7002/obj/body/b0001/model/m7002b0001.mdl", "carbuncle/m7002b0001.mdl"},
+			{"chara/monster/m7002/obj/body/b0001/texture/tv_d.tex", "carbuncle/tv_d.tex"},
+			{"chara/monster/m7002/obj/body/b0001/texture/tv_id.tex", "carbuncle/tv_id.tex"},
+			{"chara/monster/m7002/obj/body/b0001/texture/tv_n.tex", "carbuncle/tv_n.tex"},
+			{"chara/monster/m7002/obj/body/b0001/texture/tv_s.tex", "carbuncle/tv_id.tex"},
+			{"chara/monster/m7002/obj/body/b0001/vfx/texture/flas001bt.atex", "carbuncle/flas001bt.atex"},
+			{"chara/monster/m7002/obj/body/b0001/vfx/texture/pk_x001a_h.atex", "carbuncle/pk_x001a_h.atex"},
+			{"chara/monster/m7002/obj/body/b0001/vfx/texture/glow002bf.atex", "carbuncle/glow002bf.atex"},
+			{"chara/monster/m7002/obj/body/b0001/vfx/texture/flas001ct.atex", "carbuncle/flas001bt.atex"}
 		};
 		foreach(string key in paths.Keys)
 		{
-			string fullPath = Path.Combine(_pluginDir, "resources/campfire", paths[key]);
+			string fullPath = Path.Combine(_pluginDir, "resources", paths[key]);
 			if (!File.Exists(fullPath))
 			{
 				throw new FileNotFoundException($"Required resource not found: {fullPath}");
 			}
 			else
 			{
-				paths[key] = Path.Combine(_pluginDir, "resources/campfire", paths[key]);
+				paths[key] = Path.Combine(_pluginDir, "resources", paths[key]);
 			}
 		}
 

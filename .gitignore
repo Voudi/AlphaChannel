@@ -9,3 +9,5 @@ packages/
 .gitignore
 *.bat
 *.sh
+AlphaChannel/resources/alphachannelscreenCampfire.avfx
+AlphaChannel/resources/alphachannelscreenCarbuncle.avfx

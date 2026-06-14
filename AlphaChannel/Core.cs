@@ -243,7 +243,7 @@ public class Core : IDisposable
 
 			foreach (var item in Services.Objects.Where(x => x is ICharacter))
 			{
-				if (item.BaseId == 414 && item.ObjectKind.Equals(Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Companion)) //Companion: Wanderers Campfire
+				if (item.BaseId == 13498 && item.ObjectKind.Equals(Dalamud.Game.ClientState.Objects.Enums.ObjectKind.BattleNpc)) //Wanderers Campfire: (item.BaseId == 414 && item.ObjectKind.Equals(Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Companion)) 
 				{
 					if (item.Address == IntPtr.Zero)
 					{
@@ -261,8 +261,8 @@ public class Core : IDisposable
 								uint ownerId = character->CompanionOwnerId;
 								_companionOwners.TryAdd(ownerId, item);
 								visitedCompanions.Add(ownerId);
-								if (tvDraw->Models[0] is not null) //TODO: Detect TV Mod based on sync, not by checking their material
-								{
+								if (tvDraw->Models[0] is not null) //TODO: find a better checking method
+								{ //Actually, its not so bad checking it like this, wysiwyg
 									if (tvDraw->Models[0]->MaterialCount >= 1)
 									{
 										if (tvDraw->Models[0]->Materials[0] is not null)
@@ -358,8 +358,6 @@ public class Core : IDisposable
 		}
 	}
 
-	private const string VFXPath = "chara/monster/m8373/obj/body/b0001/vfx/eff/alphachannelscreen.avfx";
-
 	private void RefreshActorVFX(nint addrCaster, nint addrTarget)
 	{
 		if (!PenumbraIPC.CheckTempMod("screenvfx"))
@@ -368,7 +366,7 @@ public class Core : IDisposable
 		}
 		lock (_screenTextureLock)
 		{
-			_actorVfxCreate?.Invoke(VFXPath, addrCaster, addrTarget, -1, (char)0, 0, (char)0);
+			_actorVfxCreate?.Invoke("chara/monster/m8373/obj/body/b0001/vfx/texture/alphachannelscreen_"+Plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
 		}
 	}
 
@@ -381,10 +379,9 @@ public class Core : IDisposable
 	private Hook<ResourceManager.Delegates.GetResourceSync> _getResourceSyncHook;
 	private Hook<Texture.Delegates.InitializeContents> _textureOnLoadHook;
 
-	private const string TEXPath = "chara/monster/m8373/obj/body/b0001/vfx/texture/alphachannelscreentex.atex";
 	private unsafe ResourceHandle* GetResourceSyncDetour(ResourceManager* thisPtr, ResourceCategory* category, uint* type, uint* hash, CStringPointer path, void* unknown, void* unkDebugPtr, uint unkDebugInt)
 	{
-		if (path.ToString().Contains(TEXPath))
+		if (path.ToString().Contains("chara/monster/m8373/obj/body/b0001/vfx/texture/alphachannelscreentex.atex"))
 		{
 			_textureOnLoadHook.Enable(); //Enable Texturehook only for the duration of the Resource Load, as hooking Textures from Kernel is unsafe and expensive
 			Services.Log.Debug("Screen Texture load attempt.");
@@ -466,7 +463,7 @@ public class Core : IDisposable
 					thisPtr->D3D11Texture2D = (void*)_screenTexture.NativePointer;
 					thisPtr->D3D11ShaderResourceView = (void*)newView.NativePointer;
 
-
+					
 					//Release the old TX and SRV
 					Marshal.AddRef(oldTexPtr);
 					int texCount = Marshal.Release(oldTexPtr);

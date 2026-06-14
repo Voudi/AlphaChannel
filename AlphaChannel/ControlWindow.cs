@@ -460,7 +460,7 @@ public class ControlWindow : Window, IDisposable
 				if (isPlayer)
 				{
 					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: You have not summoned");
-					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " your Wanderer's Campfire.");
+					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " your Blue Carbuncle.");
 					ImGui.Separator();
 				}
 			}
