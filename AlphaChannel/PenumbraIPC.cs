@@ -5,11 +5,16 @@ namespace AlphaChannel;
 
 public static class PenumbraIPC
 {
-    private const string Tag = "AlphaChannelTemporaryTVMod";
+    private const string Tag = "AlphaChannelTemporaryMod";
 
-    private static Guid _collectionId = Guid.Empty;
+    private static readonly Dictionary<string, Guid> _collectionIds = [];
 
-    public static void ApplyTempMod(int? actorIndex, Dictionary<string, string> gamePaths)
+    public static bool CheckTempMod(string key)
+    {
+        return _collectionIds.TryGetValue(key, out _);
+    }
+
+    public static void ApplyTempMod(string key, int? actorIndex, Dictionary<string, string> gamePaths)
     {
         if(actorIndex == null)
         {
@@ -17,40 +22,44 @@ public static class PenumbraIPC
         }
         else
         {
-            if (_collectionId == Guid.Empty)
+            if (!_collectionIds.TryGetValue(key, out Guid colId))
             {
                 var createCollection = new CreateTemporaryCollection(Services.PluginInterface);
-                createCollection.Invoke(Tag, Tag, out _collectionId);
+                createCollection.Invoke(Tag + key, Tag + key, out colId);
+                _collectionIds[key] = colId;
             }
 
             var addMod = new AddTemporaryMod(Services.PluginInterface);
-            addMod.Invoke(Tag, _collectionId, gamePaths, string.Empty, int.MaxValue);
+            addMod.Invoke(Tag + key, colId, gamePaths, string.Empty, int.MaxValue);
 
             var assign = new AssignTemporaryCollection(Services.PluginInterface);
-            assign.Invoke(_collectionId, (int)actorIndex, true);
+            assign.Invoke(colId, (int)actorIndex, true);
         }
     }
 
-    public static void RemoveTempMod()
+    public static void RemoveTempMod(string key)
     {
-        if (_collectionId != Guid.Empty)
+        if (!_collectionIds.TryGetValue(key, out Guid colId))
         {
             var assign = new RemoveTemporaryMod(Services.PluginInterface);
-            assign.Invoke(Tag, _collectionId, int.MaxValue);
+            assign.Invoke(Tag + key, colId, int.MaxValue);
         }
     }
 
     public static void Dispose()
     {
-        if (Services.PluginInterface == null || _collectionId == Guid.Empty) {return;}
+        if (Services.PluginInterface == null || _collectionIds.Values.Count == 0) {return;}
 
-        var removeMod = new RemoveTemporaryMod(Services.PluginInterface);
-        removeMod.Invoke(Tag, _collectionId, int.MaxValue);
+        foreach(string key in _collectionIds.Keys)
+        {
+            var removeMod = new RemoveTemporaryMod(Services.PluginInterface);
+            removeMod.Invoke(Tag + key, _collectionIds[key], int.MaxValue);
 
-        var removeCollection = new DeleteTemporaryCollection(Services.PluginInterface);
-        removeCollection.Invoke(_collectionId);
+            var removeCollection = new DeleteTemporaryCollection(Services.PluginInterface);
+            removeCollection.Invoke(_collectionIds[key]);
+        }
 
-        _collectionId = Guid.Empty;
+        _collectionIds.Clear();
 
         Redraw(-1);
     }

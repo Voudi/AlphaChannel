@@ -15,6 +15,7 @@ public class Plugin : IDalamudPlugin
 
 	public static Guid PluginSessionGUID { get; set;}
 	public Dictionary<string, string> PenumbraTempModPaths { get; set;}
+	public Dictionary<string, string> PenumbraTempScreenPaths { get; set;}
 
 	// Required for LivePluginLoader support — interface member cannot be static
 	public string Name => "AlphaChannel";
@@ -42,6 +43,7 @@ public class Plugin : IDalamudPlugin
 
 		LibResources = new Resources(_pluginDir);
 		PenumbraTempModPaths = LibResources.LoadPenumbraModResources();
+		PenumbraTempScreenPaths = LibResources.LoadPenumbraScreenResources();
 
 		// Spin up DX handling from the plugin interface
 		DxHandler.Initialise(Services.PluginInterface);
@@ -69,13 +71,13 @@ public class Plugin : IDalamudPlugin
 
 	public void Dispose()
 	{
-		PenumbraIPC.Dispose();
-
 		_mainWindow?.Dispose();
 
 		DxHandler.Shutdown();
 
 		ApiProvider.DeInit();
+
+		PenumbraIPC.Dispose();
 
 		LibResources.Dispose();
 

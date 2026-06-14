@@ -23,14 +23,41 @@ public class Resources : IDisposable
 	{
 		_httpClient.Dispose();
 
-		string path = Path.Combine(_pluginDir, "resources", Plugin.PluginSessionGUID + "alphachannelscreentex.atex");
-		if(File.Exists(path))
-		{
-			File.Delete(path);
-		}
+		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "alphachannelscreentex_*.atex").ToList().ForEach(File.Delete);
+		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "alphachannelscreen_*.avfx").ToList().ForEach(File.Delete);
 		GC.SuppressFinalize(this);
 	}
 
+	public Dictionary<string, string> LoadPenumbraScreenResources()
+	{
+		Dictionary<string, string> paths = [];
+
+		string oldPath = Path.Combine(_pluginDir, "resources", "alphachannelscreentex.atex");
+		if (File.Exists(oldPath))
+		{
+			string path = Path.Combine(_pluginDir, "resources", "alphachannelscreentex_"+Plugin.PluginSessionGUID+".atex");
+			File.Copy(oldPath, path);
+			paths.Add("chara/monster/m8373/obj/body/b0001/vfx/texture/alphachannelscreentex.atex", path);
+		}
+		else
+		{
+			throw new FileNotFoundException($"Required resource not found: {oldPath}");
+		}
+
+		oldPath = Path.Combine(_pluginDir, "resources", "alphachannelscreen.avfx");
+		if (File.Exists(oldPath))
+		{
+			string path = Path.Combine(_pluginDir, "resources", "alphachannelscreen_"+Plugin.PluginSessionGUID+".avfx");
+			File.Copy(oldPath, path);
+			paths.Add("chara/monster/m8373/obj/body/b0001/vfx/texture/alphachannelscreen_"+Plugin.PluginSessionGUID+".avfx", path);
+		}
+		else
+		{
+			throw new FileNotFoundException($"Required resource not found: {oldPath}");
+		}
+
+		return paths;
+	}
 	public Dictionary<string, string> LoadPenumbraModResources()
 	{
 		Dictionary<string, string> paths = new () {
@@ -40,34 +67,22 @@ public class Resources : IDisposable
 			{"chara/monster/m8373/obj/body/b0001/texture/tv_s_m7002b0001.tex", "tv_s_m7002b0001.tex"},
 			{"chara/monster/m8373/obj/body/b0001/texture/tv_d_m7002b0001.tex", "tv_d_m7002b0001.tex"},
 			{"chara/monster/m8373/obj/body/b0001/texture/tv_id_m7002b0001.tex", "tv_s_m7002b0001.tex"},
-			{"chara/monster/m8373/obj/body/b0001/vfx/eff/alphachannelscreen.avfx", "alphachannelscreen.avfx"},
 			{"chara/monster/m8373/obj/body/b0001/vfx/eff/vm0001.avfx", "removecampfire.avfx"}
 		};
 		foreach(string key in paths.Keys)
 		{
-			string fullPath = Path.Combine(_pluginDir, "resources", paths[key]);
+			string fullPath = Path.Combine(_pluginDir, "resources/campfire", paths[key]);
 			if (!File.Exists(fullPath))
 			{
 				throw new FileNotFoundException($"Required resource not found: {fullPath}");
 			}
 			else
 			{
-				paths[key] = Path.Combine(_pluginDir, "resources", paths[key]);
+				paths[key] = Path.Combine(_pluginDir, "resources/campfire", paths[key]);
 			}
 		}
-		string oldPath = Path.Combine(_pluginDir, "resources", "alphachannelscreentex.atex");
-		if (File.Exists(oldPath))
-		{
-			string path = Path.Combine(_pluginDir, "resources",  Plugin.PluginSessionGUID + "alphachannelscreentex.atex");
-			File.Copy(oldPath, path);
-			paths.Add("chara/monster/m8373/obj/body/b0001/vfx/texture/alphachannelscreentex.atex", path);
 
-			return paths;
-		}
-		else
-		{
-			throw new FileNotFoundException($"Required resource not found: {oldPath}");
-		}
+		return paths;
 	}
 
 	public string? GetLocationMPV()

@@ -308,11 +308,11 @@ public class ControlWindow : Window, IDisposable
 					{
 						if (_isTVPoweredOff)
 						{
-							PenumbraIPC.ApplyTempMod(Services.Objects.LocalPlayer?.ObjectIndex, _plugin.PenumbraTempModPaths);
+							PenumbraIPC.ApplyTempMod("companion", Services.Objects.LocalPlayer?.ObjectIndex, _plugin.PenumbraTempModPaths);
 						}
 						else
 						{
-							PenumbraIPC.RemoveTempMod();
+							PenumbraIPC.RemoveTempMod("companion");
 						}
 						PenumbraIPC.Redraw(_core.GetCompanion(item.EntityId)?.ObjectIndex ?? -1);
 					}

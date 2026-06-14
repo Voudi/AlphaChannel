@@ -31,10 +31,10 @@ public class Core : IDisposable
 	private readonly Dictionary<uint, IGameObject> _companionOwners = []; //PlayerEntityID, Companion
 	private readonly Texture2D _screenTexture;
 	private readonly ConcurrentDictionary<nint, ShaderResourceView> _views = new();
-	private bool _screenTextureLoaded;
 	private uint _activeEntityId;
 	private uint _playingEntityId;
 	private uint? LocalEntityId => Services.Objects?.LocalPlayer?.EntityId;
+	private Plugin _plugin;
 
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
 	{
@@ -52,6 +52,8 @@ public class Core : IDisposable
 
 	public unsafe Core(Plugin plugin)
 	{
+		_plugin = plugin;
+
 		//INIT TEXTURE
 		_screenTexture = new Texture2D(DxHandler.Device, _texture2dDescription);
 		using SharpDX.DXGI.Resource resource = _screenTexture.QueryInterface<SharpDX.DXGI.Resource>();
@@ -77,11 +79,6 @@ public class Core : IDisposable
 	public bool IsEntityTVOn(uint entityId)
 	{
 		return _activeEntityId == entityId;
-	}
-
-	public bool TextureExists()
-	{
-		return _screenTextureLoaded;
 	}
 
 	public bool TVExistsForEntity(uint entityId)
@@ -365,6 +362,10 @@ public class Core : IDisposable
 
 	private void RefreshActorVFX(nint addrCaster, nint addrTarget)
 	{
+		if (!PenumbraIPC.CheckTempMod("screenvfx"))
+		{
+			PenumbraIPC.ApplyTempMod("screenvfx", Services.Objects?.LocalPlayer?.ObjectIndex, _plugin.PenumbraTempScreenPaths);
+		}
 		lock (_screenTextureLock)
 		{
 			_actorVfxCreate?.Invoke(VFXPath, addrCaster, addrTarget, -1, (char)0, 0, (char)0);
@@ -465,20 +466,19 @@ public class Core : IDisposable
 					thisPtr->D3D11Texture2D = (void*)_screenTexture.NativePointer;
 					thisPtr->D3D11ShaderResourceView = (void*)newView.NativePointer;
 
+
+					//Release the old TX and SRV
 					Marshal.AddRef(oldTexPtr);
 					int texCount = Marshal.Release(oldTexPtr);
 					Marshal.AddRef(oldSrvPtr);
 					int srvCount = Marshal.Release(oldSrvPtr);
 
-					Services.Log.Debug("Releasing old Tex?: " + texCount + " - " + srvCount);
 					if (texCount == 1) {
 						Marshal.Release(oldTexPtr);
 					}
 					if (srvCount == 1) { 
 						Marshal.Release(oldSrvPtr);
 					}
-
-					_screenTextureLoaded = true;
 			}
 
 			return tex;
