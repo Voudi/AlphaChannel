@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using Dalamud.Game.ClientState.Objects.Types;
@@ -100,17 +101,38 @@ public class Core : IDisposable
 		_activeEntityId = entityId;
 	}
 
-	public void GoIdle()
+	public async Task<bool> IsVideo(string url)
 	{
-		_currentMpvRenderer?.Stop();
+		if (IsYTURL(url))
+		{
+			return true;
+		}
+		if(_plugin.AssemblyLocationYTDLP == null)
+		{
+			return false;
+		}
+			
+		var psi = new ProcessStartInfo(_plugin.AssemblyLocationYTDLP, $"-j --no-playlist \"{url}\"")
+		{
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+
+		using var proc = Process.Start(psi)!;
+		await proc.WaitForExitAsync();
+		return proc.ExitCode == 0;
 	}
 
 	public void StopVideo()
 	{
-		ClearTexture();
 		_currentMpvRenderer?.Stop();
+		_currentMpvRenderer?.Dispose();
+		_currentMpvRenderer = null;
 		_playingEntityId = 0;
 		_activeEntityId = 0;
+		ClearTexture();
 	}
 
 	public void PlayVideo(string url, int playbackPosition = 0, bool isPlaying = true)
@@ -120,22 +142,31 @@ public class Core : IDisposable
 			return;
 		}
 
-		int sleepTime = 0;
-		if (IsYTURL(url))
+		Task.Run(async () =>
 		{
-			var elapsed = DateTime.Now - _lastLoadYT;
-			if (elapsed.TotalSeconds < 5)
+			/*
+			bool checkVideo = await IsVideo(url);
+			if(!checkVideo)
 			{
-				sleepTime = Math.Min(Math.Max((int)(7000 - elapsed.TotalMilliseconds), 0), 7000); //Add some sleep time to avoid hitting rate limits
+				_plugin.ErrorPopup("No video found for url: " + url);
+				StopVideo();
+				return;
+			}
+			*/
+			int sleepTime = 0;
+			if (IsYTURL(url))
+			{
+				var elapsed = DateTime.Now - _lastLoadYT;
+				if (elapsed.TotalSeconds < 5)
+				{
+					sleepTime = Math.Min(Math.Max((int)(7000 - elapsed.TotalMilliseconds), 0), 7000); //Add some sleep time to avoid hitting rate limits
+				}
+
+				_lastLoadYT = DateTime.Now;
 			}
 
-			_lastLoadYT = DateTime.Now;
-		}
-
-		Task.Run(() =>
-		{
 			Thread.Sleep(sleepTime);
-			
+
 			if (_currentMpvRenderer != null)
 			{
 				_currentMpvRenderer.Play(url, playbackPosition, isPlaying);
@@ -153,6 +184,7 @@ public class Core : IDisposable
 						break;
 					}
 				}
+				Services.Log.Debug("Stopping Video Player");
 				VideoEnded?.Invoke();
 			}
 			catch (Exception e)

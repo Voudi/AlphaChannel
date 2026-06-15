@@ -93,6 +93,7 @@ public class Plugin : IDalamudPlugin
 		_mainWindow?.Refresh();
 
 		DrawUI();
+		DrawPopup();
 
 		ImGui.PopStyleVar();
 	}
@@ -102,6 +103,41 @@ public class Plugin : IDalamudPlugin
 		if (CommandRemote.Equals(command, StringComparison.Ordinal))
 		{
 			ToggleMainUI();
+		}
+	}
+
+	private static bool _showError;
+	private static string _errorMessage = "";
+	public static void ErrorPopup(string? message)
+	{
+		if(_showError || message == null)
+		{
+			return;
+		}
+		_errorMessage = message;
+		_showError = true;
+	}
+	private void DrawPopup()
+	{
+		if (_showError)
+		{
+			ImGui.SetNextWindowSizeConstraints(new Vector2(400, 150), new Vector2(800, 600));
+			ImGui.OpenPopup("AlphaChannel Error Message");
+		}
+
+		if (ImGui.BeginPopupModal("AlphaChannel Error Message", ref _showError))
+		{
+			ImGui.TextWrapped(_errorMessage);
+			ImGui.Separator();
+			ImGui.Text(string.Empty);
+			float buttonWidth = 120f;
+			ImGui.SetCursorPosX((ImGui.GetContentRegionAvail().X - buttonWidth) / 2f);
+			if (ImGui.Button("OK", new Vector2(buttonWidth, 0)))
+			{
+				_showError = false;
+				ImGui.CloseCurrentPopup();
+			}
+			ImGui.EndPopup();
 		}
 	}
 

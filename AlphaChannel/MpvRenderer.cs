@@ -247,6 +247,8 @@ namespace AlphaChannel
 				lock (_mpvLock)
 				{
 					_ = mpv_command(_mpvCtx, ["stop", null!]);
+					_closed = true;
+					_frameReady?.Set();
 				}
 			}
 		}
@@ -470,7 +472,7 @@ namespace AlphaChannel
             {
                 while (!_closed)
                 {
-                    IntPtr ev = mpv_wait_event(_mpvCtx, 0);
+                    IntPtr ev = mpv_wait_event(_mpvCtx, 1);
                     if (ev == IntPtr.Zero) {continue;}
 
                     int eventId = Marshal.ReadInt32(ev);
@@ -488,12 +490,18 @@ namespace AlphaChannel
 
                         case 2: // MPV_EVENT_LOG_MESSAGE
                             {
-                                IntPtr dataPtr = Marshal.ReadIntPtr(ev + 16);
-                                if (dataPtr != IntPtr.Zero && dataPtr.ToInt64() > 65536)
+                                IntPtr dataPtr2 = Marshal.ReadIntPtr(ev + 16);
+                                if (dataPtr2 != IntPtr.Zero && dataPtr2.ToInt64() > 65536)
                                 {
-									string? prefix = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr));
-									string? level  = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr + 8));
-									string? text   = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr + 16));
+									string? prefix = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr2));
+									string? level  = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr2 + 8));
+									string? text   = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr2 + 16));
+									if(prefix != null && prefix.Contains("ytdl") && level == "error" && text != null && text.Contains("Unsupported URL"))
+									{
+										Services.Log.Warning($"[MPV/{prefix}/{level}] {text?.Trim()}");
+										Plugin.ErrorPopup(text?.Trim());
+										Stop();
+									}
                                     Services.Log.Verbose($"[MPV/{prefix}/{level}] {text?.Trim()}");
                                 }
                                 break;
@@ -505,7 +513,7 @@ namespace AlphaChannel
                         case 6:  Services.Log.Verbose("[MPV] START_FILE");         break;
                         
                         case 7: // MPV_EVENT_END_FILE
-                            break;
+								break;
                         
                         case 8:  Services.Log.Verbose("[MPV] FILE_LOADED");      break;
                         case 14: Services.Log.Verbose("[MPV] CLIENT_MESSAGE");   break;
