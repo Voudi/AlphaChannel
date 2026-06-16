@@ -1,10 +1,14 @@
-﻿using System.Numerics;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Dalamud.Bindings.ImGui;
 
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Game.Text;
+using Dalamud.Game.Text.SeStringHandling;
+using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
 
@@ -36,6 +40,7 @@ public class ControlWindow : Window, IDisposable
 	private bool _updatingMPV;
 	private bool _updatingYTDLP;
 	private bool _uiElementActive;
+	private uint _nextLinkId = 1;
 	private DateTime _lastTextureDebugMsg = DateTime.MinValue;
 
 	private readonly Dictionary<uint, IPCVideoState> _currentStates = []; //PlayerEntityID, IPCVideoState
@@ -439,17 +444,23 @@ public class ControlWindow : Window, IDisposable
 	public void IPCSetState(nint addr, string stateJSON)
 	{
 		int pos = _seekerTimeMinutes * 60 + _seekerTimeSeconds;
-		uint player = _playerList.FirstOrDefault(player => player.Address == addr)?.EntityId ?? 0;
-		if (player == LocalEntityId)
+
+		IGameObject? player = _playerList.FirstOrDefault(player => player.Address == addr);
+		if(player == null)
 		{
 			return;
 		}
-		if (LocalEntityId != player && player != 0)
+		uint playerId = player.EntityId;
+		if (playerId == LocalEntityId)
+		{
+			return;
+		}
+		if (LocalEntityId != playerId && playerId != 0)
 		{
 			if(stateJSON == null)
 			{
-				_currentStates.Remove(player);
-				if (_core.IsEntityTVOn(player))
+				_currentStates.Remove(playerId);
+				if (_core.IsEntityTVOn(playerId))
 				{
 					StopVideo();
 				}
@@ -459,10 +470,10 @@ public class ControlWindow : Window, IDisposable
 				IPCVideoState? state = JsonSerializer.Deserialize<IPCVideoState>(stateJSON);
 				if (state != null)
 				{
-					_currentStates.TryGetValue(player, out IPCVideoState? oldState);
-					state = _currentStates[player] = new IPCVideoState(state.State, Uri.UnescapeDataString(state.Url), state.PlaybackPosition, state.Timestamp);
+					bool foundstate = _currentStates.TryGetValue(playerId, out IPCVideoState? oldState);
+					state = _currentStates[playerId] = new IPCVideoState(state.State, Uri.UnescapeDataString(state.Url), state.PlaybackPosition, state.Timestamp);
 					
-					if (oldState != null && _core.IsEntityTVOn(player))
+					if (foundstate && oldState != null && _core.IsEntityTVOn(playerId))
 					{
 						if(oldState.Url != state.Url && state.Url != string.Empty)
 						{
@@ -499,9 +510,43 @@ public class ControlWindow : Window, IDisposable
 							}
 						}
 					}
+					else if(!foundstate)
+					{
+						//First new player state received
+						DalamudLinkPayload _linkPayload;
+
+						_linkPayload = Services.Chat.AddChatLinkHandler(_nextLinkId, (commandId, msg) =>
+						{
+							// deine Funktion – läuft auf dem Framework-Thread
+							StartVideo(playerId);
+							if(!IsOpen)
+							{
+								Toggle();
+							}
+						});
+						string url = state.Url;
+						if(state.Url.Length > 30)
+						{
+							url = state.Url.Substring(0, 30);
+							url += "...";
+						}
+						SeString seString = new SeStringBuilder()
+							.AddUiForeground("[AlphaChannel] ", 35)
+							.AddText(player.Name.TextValue + " is currently hosting ")
+							.Add(_linkPayload)
+							.AddUiForeground("["+url+"]", 32)
+							.Add(RawPayload.LinkTerminator)
+							.Build();
+
+						Services.Chat.Print(new XivChatEntry
+						{
+							Message = seString,
+							Type    = XivChatType.Echo
+						});
+					}
 				}
 				else{
-					Services.Log.Error("Failed to deserialize state for player " + player + " with JSON: " + stateJSON);
+					Services.Log.Error("Failed to deserialize state for player " + playerId + " with JSON: " + stateJSON);
 				}
 			}
 			
@@ -526,13 +571,11 @@ public class ControlWindow : Window, IDisposable
 				bool urlExists = false;
 				bool urlEmpty = string.IsNullOrEmpty(_inputURL);
 
-				if (_currentStates.TryGetValue(item.EntityId, out IPCVideoState? tempURL))
+				if (_currentStates.TryGetValue(item.EntityId, out IPCVideoState? state))
 				{
-					url = tempURL.Url;
+					url = state.Url;
 					urlExists = true;
 				}
-
-
 				
 				if (isTheRunningTV)
 				{

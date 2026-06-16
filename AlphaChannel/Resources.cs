@@ -160,28 +160,34 @@ public class Resources : IDisposable
 	}
 	private async Task<string[]> CheckForUpdateAsync(string pluginDir, string nameStartsWith, string nameEndsWith, string checkURL)
 	{
-		string json = await _httpClient.GetStringAsync(checkURL);
-		var doc = JsonDocument.Parse(json);
-		long remoteId = doc.RootElement.GetProperty("id").GetInt64();
-		var asset = doc.RootElement.GetProperty("assets")
-			.EnumerateArray()
-			.First(a => a.GetProperty("name").GetString()!
-				.StartsWith(nameStartsWith, StringComparison.Ordinal) &&
-				a.GetProperty("name").GetString()!.EndsWith(nameEndsWith, StringComparison.Ordinal));
+		try{
+			string json = await _httpClient.GetStringAsync(checkURL);
+			var doc = JsonDocument.Parse(json);
+			long remoteId = doc.RootElement.GetProperty("id").GetInt64();
+			var asset = doc.RootElement.GetProperty("assets")
+				.EnumerateArray()
+				.First(a => a.GetProperty("name").GetString()!
+					.StartsWith(nameStartsWith, StringComparison.Ordinal) &&
+					a.GetProperty("name").GetString()!.EndsWith(nameEndsWith, StringComparison.Ordinal));
 
-		string assetName = asset.GetProperty("name").GetString()!;
-		string folderName = assetName.Replace(nameEndsWith, "") + "_" + remoteId;
+			string assetName = asset.GetProperty("name").GetString()!;
+			string folderName = assetName.Replace(nameEndsWith, "") + "_" + remoteId;
 
-		string localFolder = Path.Combine(pluginDir, folderName);
+			string localFolder = Path.Combine(pluginDir, folderName);
 
-		if (Directory.Exists(localFolder))
-		{
-			return [string.Empty, folderName]; //Already up to date
+			if (Directory.Exists(localFolder))
+			{
+				return [string.Empty, folderName]; //Already up to date
+			}
+
+			string downloadURL = asset.GetProperty("browser_download_url").GetString()!;
+			Services.Log.Warning("Found Update: " + downloadURL);
+			return [downloadURL, folderName];
 		}
-
-		string downloadURL = asset.GetProperty("browser_download_url").GetString()!;
-		Services.Log.Warning("Found Update: " + downloadURL);
-		return [downloadURL, folderName];
+		catch
+		{
+			return [string.Empty, string.Empty];
+		}
 	}
 
 	private async Task<bool> UpdateAsync(string pluginDir, string nameStartsWith, string nameEndsWith, string downloadURL, string folderName)

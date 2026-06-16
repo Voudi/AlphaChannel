@@ -17,16 +17,10 @@ public class Services
 	public static ICommandManager CommandManager { get; private set; } = null!;
 
 	[PluginService]
-	public static IPluginLog PluginLog { get; private set; } = null!;
-
-	[PluginService]
 	public static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
 
 	[PluginService]
-	public static IFramework Framework { get; private set; } = null!;
-
-	[PluginService]
-	public static IClientState ClientState { get; set; } = null!;
+	public static IChatGui Chat { get; set; } = null!;
 
 	[PluginService]
 	public static IGameInteropProvider InteropProvider { get; private set; } = null!;
