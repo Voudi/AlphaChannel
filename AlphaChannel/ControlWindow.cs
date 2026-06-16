@@ -7,7 +7,6 @@ using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
-using Dalamud.Utility;
 
 namespace AlphaChannel;
 
@@ -33,7 +32,9 @@ public class ControlWindow : Window, IDisposable
 	private bool _mpvIsIdle = true;
 	private string _mediaTitle = string.Empty;
 	private bool _libsLoaded;
-	private bool _updatingLibs;
+	private bool _installingLibs;
+	private bool _updatingMPV;
+	private bool _updatingYTDLP;
 	private bool _uiElementActive;
 	private DateTime _lastTextureDebugMsg = DateTime.MinValue;
 
@@ -74,7 +75,6 @@ public class ControlWindow : Window, IDisposable
 	private IEnumerable<IGameObject> _playerList = [];
 	public override void Draw()
 	{
-		Vector4 textColor;
 		bool playerIsRunningTV = _core.IsLocalPlayerTVOn();
 
 		if (Services.DutyState.IsDutyStarted)
@@ -91,7 +91,7 @@ public class ControlWindow : Window, IDisposable
 			_libsLoaded = !needsFirstInstall;
 			if (!_libsLoaded)
 			{
-				if (_updatingLibs)
+				if (_installingLibs)
 				{
 					ImGui.Text("Installing dependencies...");
 					return;
@@ -139,7 +139,7 @@ public class ControlWindow : Window, IDisposable
 						});
 					}
 
-					_updatingLibs = true;
+					_installingLibs = true;
 				}
 				if (!updatesAvailable)
 				{
@@ -154,430 +154,19 @@ public class ControlWindow : Window, IDisposable
 		{
 			if (ImGui.BeginTabItem("Join"))
     		{
-				int count = 0;
-				foreach (var item in _playerList)
-				{
-					if(item.EntityId == LocalEntityId)
-					{
-						continue;
-					}
-
-					if (_core.TVExistsForEntity(item.EntityId)) //Checks if TV exists or if it's the player and the TV is powered off
-					{
-						count++;
-						bool isTheRunningTV = _core.IsEntityTVOn(item.EntityId);
-						string url = string.Empty;
-						bool urlExists = false;
-						bool urlEmpty = string.IsNullOrEmpty(_inputURL);
-
-						if (_currentStates.TryGetValue(item.EntityId, out IPCVideoState? tempURL))
-						{
-							url = tempURL.Url;
-							urlExists = true;
-						}
-
-
-						
-						if (isTheRunningTV)
-						{
-							ImGui.TextColored(new Vector4(0.3f, 0.8f, 0.3f, 1.0f), url);
-						}
-						else if (!urlExists)
-						{
-							ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Not sharing anything");
-						}
-						else
-						{
-							ImGui.Text(url);
-						}
-						
-
-						if (urlExists)
-						{
-							ImGui.SameLine();
-
-							ImGui.PushFont(UiBuilder.IconFont);
-							if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##clipboard" + item.EntityId))
-							{
-								ImGui.SetClipboardText(url ?? string.Empty);
-							}
-							ImGui.PopFont();
-							if (ImGui.IsItemHovered())
-							{
-								ImGui.BeginTooltip();
-								ImGui.Text("Copy URL to clipboard");
-								ImGui.EndTooltip();
-							}
-						}
-
-						if (isTheRunningTV && _seekerExactTime > 0)
-						{
-							DrawScrollingText(_mediaTitle, 250);
-						}
-						else
-						{
-							ImGui.Text(item.Name.TextValue);
-						}
-
-						
-						if (isTheRunningTV)
-						{
-							ImGui.BeginDisabled();
-							ImGui.SetNextItemWidth(268);
-							ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1));
-							ImGui.SliderFloat("##seeker" + item.EntityId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
-							if (ImGui.IsItemActive())
-							{
-								_uiElementActive = true;
-							}
-
-							if (ImGui.IsItemDeactivatedAfterEdit())
-							{
-								SeekPlayer(_seeker);
-								_uiElementActive = false;
-							}
-							ImGui.PopStyleColor(1);
-							ImGui.EndDisabled();
-						}
-
-						if (_isTVPoweredOff)
-						{
-							ImGui.Separator();
-
-							continue;
-						}
-
-						ImGui.SameLine();
-
-						if (isTheRunningTV)
-						{
-							ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
-						}
-						else if (!urlExists)
-						{
-							ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1.0f));
-						}
-						ImGui.PushFont(UiBuilder.IconFont);
-
-						if (ImGui.Button((isTheRunningTV ?
-							FontAwesomeIcon.Stop.ToIconString()
-							: FontAwesomeIcon.Play.ToIconString()
-							) + "##play" + item.EntityId))
-						{
-							if (!isTheRunningTV)
-							{
-								if (urlExists)
-								{
-									StartVideo(item.EntityId);
-								}
-							}
-							else
-							{
-								StopVideo();
-							}
-						}
-						ImGui.PopFont();
-
-						if (isTheRunningTV || !urlExists)
-						{
-							ImGui.PopStyleColor();
-						}
-
-						if (ImGui.IsItemHovered())
-						{
-							ImGui.BeginTooltip();
-							ImGui.Text(
-
-								isTheRunningTV ? "Stop" : "Play"
-							);
-							ImGui.EndTooltip();
-						}
-
-						ImGui.Separator();
-					}
-				}
-				if(count == 0)
-				{
-					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: No hosts detected nearby.");
-				}
-				ImGui.EndTabItem();
+				DrawJoin();
 			}
 			if (ImGui.BeginTabItem("Host"))
 			{
-				IPlayerCharacter? player = Services.Objects.LocalPlayer;
-				if(player != null)
-				{
-					if (_isTVPoweredOff || _core.TVExistsForEntity(player.EntityId)) //Checks if TV exists or if it's the player and the TV is powered off
-					{
-						bool isTheRunningTV = _core.IsLocalPlayerTVOn();
-						string url = string.Empty;
-						bool urlExists = false;
-						bool urlEmpty = string.IsNullOrEmpty(_inputURL);
-
-						urlExists = ValidateURL(out _);
-
-						textColor = urlExists || (isTheRunningTV && urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f);
-
-						if (!isTheRunningTV)
-						{
-							ImGui.PushStyleColor(ImGuiCol.Border, textColor);
-						}
-
-						ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 1.0f);
-
-						ImGui.SetNextItemWidth(235);
-						ImGui.InputText("##URL", ref _inputURL, 1000, ImGuiInputTextFlags.None);
-
-						ImGui.PopStyleVar();
-						if (!isTheRunningTV)
-						{
-							ImGui.PopStyleColor();
-						}
-
-						// Detect if the input is focused
-						if (ImGui.IsItemActive())
-						{
-							_isFocused = true;
-						}
-						else if (ImGui.IsItemDeactivated())
-						{
-							_isFocused = false;
-						}
-
-						// Render placeholder if input is empty and unfocused
-						if (!_isFocused && string.IsNullOrEmpty(_inputURL) && isTheRunningTV)
-						{
-							var pos = ImGui.GetItemRectMin();
-							var max = ImGui.GetItemRectMax();
-
-							float maxWidth = max.X - pos.X;
-
-							string placeholder = _placeHolderURL;
-
-							Vector2 textSize = ImGui.CalcTextSize(placeholder);
-
-							while (textSize.X > maxWidth && placeholder.Length > 0)
-							{
-								placeholder = placeholder[..^1];
-								textSize = ImGui.CalcTextSize(placeholder + "........");
-							}
-
-							if (!placeholder.Equals(_placeHolderURL, StringComparison.Ordinal))
-							{
-								placeholder += "...";
-							}
-
-							ImGui.GetWindowDrawList().AddText(new Vector2(pos.X + 3, pos.Y + 2), ImGui.GetColorU32(new Vector4(0.6f, 0.6f, 0.6f, 1.0f)), placeholder);
-						}
-
-						if (urlExists)
-						{
-							ImGui.SameLine();
-
-							ImGui.PushFont(UiBuilder.IconFont);
-							if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##clipboard" + player.EntityId))
-							{
-								ImGui.SetClipboardText(string.IsNullOrEmpty(_inputURL) && isTheRunningTV ? _placeHolderURL : _inputURL);
-							}
-							ImGui.PopFont();
-							if (ImGui.IsItemHovered())
-							{
-								ImGui.BeginTooltip();
-								ImGui.Text("Copy URL to clipboard");
-								ImGui.EndTooltip();
-							}
-						}
-
-						if (isTheRunningTV && _seekerExactTime > 0)
-						{
-							DrawScrollingText(_mediaTitle, 250);
-						}
-						else
-						{
-							ImGui.Text(string.Empty);
-						}
-						
-						if (isTheRunningTV)
-						{
-							ImGui.SetNextItemWidth(268);
-							ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1));
-							ImGui.SliderFloat("##seeker" + player.EntityId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
-							if (ImGui.IsItemActive())
-							{
-								_uiElementActive = true;
-							}
-
-							if (ImGui.IsItemDeactivatedAfterEdit())
-							{
-								SeekPlayer(_seeker);
-								_uiElementActive = false;
-							}
-							ImGui.PopStyleColor(1);
-						}
-						
-						ImGui.PushStyleColor(ImGuiCol.Text, _isTVPoweredOff ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
-
-						ImGui.PushFont(UiBuilder.IconFont);
-
-						if(ImGui.Button(FontAwesomeIcon.PowerOff.ToIconString() + "##power" + player.EntityId))
-						{
-							if (_isTVPoweredOff)
-							{
-								PenumbraIPC.ApplyTempMod("companion", Services.Objects.LocalPlayer?.ObjectIndex, _plugin.PenumbraTempModPaths);
-							}
-							else
-							{
-								PenumbraIPC.RemoveTempMod("companion");
-							}
-							PenumbraIPC.Redraw(_core.GetCompanion(player.EntityId)?.ObjectIndex ?? -1);
-						}
-
-						ImGui.PopFont();
-						ImGui.PopStyleColor();
-
-						if (!_isTVPoweredOff)
-						{
-							ImGui.SameLine();
-
-							bool refreshNeeded = isTheRunningTV && !string.IsNullOrEmpty(_inputURL) && urlExists;
-
-							if (isTheRunningTV)
-							{
-								textColor = refreshNeeded ? new Vector4(0.0f, 1.0f, 1.0f, 1.0f) : new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
-								ImGui.PushStyleColor(ImGuiCol.Text, textColor);
-							}
-							else if (!urlExists)
-							{
-								ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1.0f));
-							}
-							ImGui.PushFont(UiBuilder.IconFont);
-
-							if (ImGui.Button((isTheRunningTV ?
-								(refreshNeeded ?
-									FontAwesomeIcon.ArrowRight.ToIconString()
-									: FontAwesomeIcon.Stop.ToIconString()
-								)
-								: FontAwesomeIcon.Play.ToIconString()
-								) + "##play" + player.EntityId))
-							{
-								try
-								{
-									if (!isTheRunningTV || refreshNeeded)
-									{
-										if (urlExists)
-										{
-											StartVideo(player.EntityId);
-										}
-
-										_placeHolderURL = _inputURL;
-										_inputURL = string.Empty;
-									}
-									else
-									{
-										StopVideo();
-									}
-
-								}
-								catch (Exception ex)
-								{
-									Services.Log.Error("FATAL ERROR: " + ex.ToString());
-								}
-							}
-							ImGui.PopFont();
-
-							if (isTheRunningTV || !urlExists)
-							{
-								ImGui.PopStyleColor();
-							}
-
-							if (ImGui.IsItemHovered())
-							{
-								ImGui.BeginTooltip();
-								ImGui.Text(
-
-									isTheRunningTV ?
-										(!string.IsNullOrEmpty(_inputURL) && urlExists ? "Visit new URL"
-										: "Stop"
-									)
-									: "Play"
-								);
-								ImGui.EndTooltip();
-							}
-
-							if (isTheRunningTV)
-							{
-								ImGui.SameLine();
-
-								ImGui.PushFont(UiBuilder.IconFont);
-								if (ImGui.Button(_mpvIsIdle ? FontAwesomeIcon.Repeat.ToIconString() : (_pauseToggle ? FontAwesomeIcon.Play.ToIconString() : FontAwesomeIcon.Pause.ToIconString()) + "##forceplay" + player.EntityId))
-								{
-									if (_mpvIsIdle)
-									{
-										SeekPlayer(0);
-										_core.Pause(false);
-										_pauseToggle = false;
-									}
-									else
-									{
-										_pauseToggle = !_pauseToggle;
-										_core.Pause(_pauseToggle);
-									}
-								}
-								ImGui.PopFont();
-								
-								if (ImGui.IsItemHovered())
-								{
-									ImGui.BeginTooltip();
-									if (_mpvIsIdle)
-									{
-										ImGui.Text("Replay");
-									}
-									else if (_pauseToggle)
-									{
-										ImGui.Text("Pause");
-									}
-									else
-									{
-										ImGui.Text("Resume");
-									}
-									ImGui.EndTooltip();
-								}
-
-								ImGui.SameLine();
-
-								ImGui.PushFont(UiBuilder.IconFont);
-								ImGui.SetNextItemWidth(100);
-								ImGui.SliderFloat("##volumebar" + player.EntityId, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
-								if (ImGui.IsItemActive())
-								{
-									_uiElementActive = true;
-								}
-
-								if (ImGui.IsItemDeactivatedAfterEdit())
-								{
-									VolumePlayer(_volume);
-									_uiElementActive = false;
-								}
-								ImGui.PopFont();
-							}
-						}
-					}
-					else
-					{
-						ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: You have not summoned");
-						ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " your Blue Carbuncle.");
-					}
-				}
-				ImGui.EndTabItem();
+				DrawHost();
 			}
 			if (ImGui.BeginTabItem("Settings"))
 			{
-				ImGui.EndTabItem();
+				DrawSettings();
 			}
 			ImGui.EndTabBar();
 		}
 	}
-
 	public void StartVideo(uint entityId)
 	{
 		if (LocalEntityId == entityId)
@@ -917,5 +506,514 @@ public class ControlWindow : Window, IDisposable
 			}
 			
 		}
+	}
+
+	private void DrawJoin()
+	{
+		int count = 0;
+		foreach (var item in _playerList)
+		{
+			if(item.EntityId == LocalEntityId)
+			{
+				continue;
+			}
+
+			if (_core.TVExistsForEntity(item.EntityId)) //Checks if TV exists or if it's the player and the TV is powered off
+			{
+				count++;
+				bool isTheRunningTV = _core.IsEntityTVOn(item.EntityId);
+				string url = string.Empty;
+				bool urlExists = false;
+				bool urlEmpty = string.IsNullOrEmpty(_inputURL);
+
+				if (_currentStates.TryGetValue(item.EntityId, out IPCVideoState? tempURL))
+				{
+					url = tempURL.Url;
+					urlExists = true;
+				}
+
+
+				
+				if (isTheRunningTV)
+				{
+					ImGui.TextColored(new Vector4(0.3f, 0.8f, 0.3f, 1.0f), url);
+				}
+				else if (!urlExists)
+				{
+					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Not sharing anything");
+				}
+				else
+				{
+					ImGui.Text(url);
+				}
+				
+
+				if (urlExists)
+				{
+					ImGui.SameLine();
+
+					ImGui.PushFont(UiBuilder.IconFont);
+					if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##clipboard" + item.EntityId))
+					{
+						ImGui.SetClipboardText(url ?? string.Empty);
+					}
+					ImGui.PopFont();
+					if (ImGui.IsItemHovered())
+					{
+						ImGui.BeginTooltip();
+						ImGui.Text("Copy URL to clipboard");
+						ImGui.EndTooltip();
+					}
+				}
+
+				if (isTheRunningTV && _seekerExactTime > 0)
+				{
+					DrawScrollingText(_mediaTitle, 250);
+				}
+				else
+				{
+					ImGui.Text(item.Name.TextValue);
+				}
+
+				
+				if (isTheRunningTV)
+				{
+					ImGui.BeginDisabled();
+					ImGui.SetNextItemWidth(268);
+					ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1));
+					ImGui.SliderFloat("##seeker" + item.EntityId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
+					if (ImGui.IsItemActive())
+					{
+						_uiElementActive = true;
+					}
+
+					if (ImGui.IsItemDeactivatedAfterEdit())
+					{
+						SeekPlayer(_seeker);
+						_uiElementActive = false;
+					}
+					ImGui.PopStyleColor(1);
+					ImGui.EndDisabled();
+				}
+
+				if (_isTVPoweredOff)
+				{
+					ImGui.Separator();
+
+					continue;
+				}
+
+				ImGui.SameLine();
+
+				if (isTheRunningTV)
+				{
+					ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
+				}
+				else if (!urlExists)
+				{
+					ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1.0f));
+				}
+				ImGui.PushFont(UiBuilder.IconFont);
+
+				if (ImGui.Button((isTheRunningTV ?
+					FontAwesomeIcon.Stop.ToIconString()
+					: FontAwesomeIcon.Play.ToIconString()
+					) + "##play" + item.EntityId))
+				{
+					if (!isTheRunningTV)
+					{
+						if (urlExists)
+						{
+							StartVideo(item.EntityId);
+						}
+					}
+					else
+					{
+						StopVideo();
+					}
+				}
+				ImGui.PopFont();
+
+				if (isTheRunningTV || !urlExists)
+				{
+					ImGui.PopStyleColor();
+				}
+
+				if (ImGui.IsItemHovered())
+				{
+					ImGui.BeginTooltip();
+					ImGui.Text(
+
+						isTheRunningTV ? "Stop" : "Play"
+					);
+					ImGui.EndTooltip();
+				}
+
+				ImGui.Separator();
+			}
+		}
+		if(count == 0)
+		{
+			ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: No hosts detected nearby.");
+		}
+		ImGui.EndTabItem();
+	}
+	private void DrawHost()
+	{
+		Vector4 textColor;
+		IPlayerCharacter? player = Services.Objects.LocalPlayer;
+		if(player != null)
+		{
+			if (_isTVPoweredOff || _core.TVExistsForEntity(player.EntityId)) //Checks if TV exists or if it's the player and the TV is powered off
+			{
+				bool isTheRunningTV = _core.IsLocalPlayerTVOn();
+				string url = string.Empty;
+				bool urlExists = false;
+				bool urlEmpty = string.IsNullOrEmpty(_inputURL);
+
+				urlExists = ValidateURL(out _);
+
+				textColor = urlExists || (isTheRunningTV && urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f);
+
+				if (!isTheRunningTV)
+				{
+					ImGui.PushStyleColor(ImGuiCol.Border, textColor);
+				}
+
+				ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 1.0f);
+
+				ImGui.SetNextItemWidth(235);
+				ImGui.InputText("##URL", ref _inputURL, 1000, ImGuiInputTextFlags.None);
+
+				ImGui.PopStyleVar();
+				if (!isTheRunningTV)
+				{
+					ImGui.PopStyleColor();
+				}
+
+				// Detect if the input is focused
+				if (ImGui.IsItemActive())
+				{
+					_isFocused = true;
+				}
+				else if (ImGui.IsItemDeactivated())
+				{
+					_isFocused = false;
+				}
+
+				// Render placeholder if input is empty and unfocused
+				if (!_isFocused && string.IsNullOrEmpty(_inputURL) && isTheRunningTV)
+				{
+					var pos = ImGui.GetItemRectMin();
+					var max = ImGui.GetItemRectMax();
+
+					float maxWidth = max.X - pos.X;
+
+					string placeholder = _placeHolderURL;
+
+					Vector2 textSize = ImGui.CalcTextSize(placeholder);
+
+					while (textSize.X > maxWidth && placeholder.Length > 0)
+					{
+						placeholder = placeholder[..^1];
+						textSize = ImGui.CalcTextSize(placeholder + "........");
+					}
+
+					if (!placeholder.Equals(_placeHolderURL, StringComparison.Ordinal))
+					{
+						placeholder += "...";
+					}
+
+					ImGui.GetWindowDrawList().AddText(new Vector2(pos.X + 3, pos.Y + 2), ImGui.GetColorU32(new Vector4(0.6f, 0.6f, 0.6f, 1.0f)), placeholder);
+				}
+
+				if (urlExists)
+				{
+					ImGui.SameLine();
+
+					ImGui.PushFont(UiBuilder.IconFont);
+					if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##clipboard" + player.EntityId))
+					{
+						ImGui.SetClipboardText(string.IsNullOrEmpty(_inputURL) && isTheRunningTV ? _placeHolderURL : _inputURL);
+					}
+					ImGui.PopFont();
+					if (ImGui.IsItemHovered())
+					{
+						ImGui.BeginTooltip();
+						ImGui.Text("Copy URL to clipboard");
+						ImGui.EndTooltip();
+					}
+				}
+
+				if (isTheRunningTV && _seekerExactTime > 0)
+				{
+					DrawScrollingText(_mediaTitle, 250);
+				}
+				else
+				{
+					ImGui.Text(string.Empty);
+				}
+				
+				if (isTheRunningTV)
+				{
+					ImGui.SetNextItemWidth(268);
+					ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1));
+					ImGui.SliderFloat("##seeker" + player.EntityId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
+					if (ImGui.IsItemActive())
+					{
+						_uiElementActive = true;
+					}
+
+					if (ImGui.IsItemDeactivatedAfterEdit())
+					{
+						SeekPlayer(_seeker);
+						_uiElementActive = false;
+					}
+					ImGui.PopStyleColor(1);
+				}
+				
+				ImGui.PushStyleColor(ImGuiCol.Text, _isTVPoweredOff ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
+
+				ImGui.PushFont(UiBuilder.IconFont);
+
+				if(ImGui.Button(FontAwesomeIcon.PowerOff.ToIconString() + "##power" + player.EntityId))
+				{
+					if (_isTVPoweredOff)
+					{
+						PenumbraIPC.ApplyTempMod("companion", Services.Objects.LocalPlayer?.ObjectIndex, _plugin.PenumbraTempModPaths);
+					}
+					else
+					{
+						PenumbraIPC.RemoveTempMod("companion");
+					}
+					PenumbraIPC.Redraw(_core.GetCompanion(player.EntityId)?.ObjectIndex ?? -1);
+				}
+
+				ImGui.PopFont();
+				ImGui.PopStyleColor();
+
+				if (!_isTVPoweredOff)
+				{
+					ImGui.SameLine();
+
+					bool refreshNeeded = isTheRunningTV && !string.IsNullOrEmpty(_inputURL) && urlExists;
+
+					if (isTheRunningTV)
+					{
+						textColor = refreshNeeded ? new Vector4(0.0f, 1.0f, 1.0f, 1.0f) : new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
+						ImGui.PushStyleColor(ImGuiCol.Text, textColor);
+					}
+					else if (!urlExists)
+					{
+						ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1.0f));
+					}
+					ImGui.PushFont(UiBuilder.IconFont);
+
+					if (ImGui.Button((isTheRunningTV ?
+						(refreshNeeded ?
+							FontAwesomeIcon.ArrowRight.ToIconString()
+							: FontAwesomeIcon.Stop.ToIconString()
+						)
+						: FontAwesomeIcon.Play.ToIconString()
+						) + "##play" + player.EntityId))
+					{
+						try
+						{
+							if (!isTheRunningTV || refreshNeeded)
+							{
+								if (urlExists)
+								{
+									StartVideo(player.EntityId);
+								}
+
+								_placeHolderURL = _inputURL;
+								_inputURL = string.Empty;
+							}
+							else
+							{
+								StopVideo();
+							}
+
+						}
+						catch (Exception ex)
+						{
+							Services.Log.Error("FATAL ERROR: " + ex.ToString());
+						}
+					}
+					ImGui.PopFont();
+
+					if (isTheRunningTV || !urlExists)
+					{
+						ImGui.PopStyleColor();
+					}
+
+					if (ImGui.IsItemHovered())
+					{
+						ImGui.BeginTooltip();
+						ImGui.Text(
+
+							isTheRunningTV ?
+								(!string.IsNullOrEmpty(_inputURL) && urlExists ? "Visit new URL"
+								: "Stop"
+							)
+							: "Play"
+						);
+						ImGui.EndTooltip();
+					}
+
+					if (isTheRunningTV)
+					{
+						ImGui.SameLine();
+
+						ImGui.PushFont(UiBuilder.IconFont);
+						if (ImGui.Button(_mpvIsIdle ? FontAwesomeIcon.Repeat.ToIconString() : (_pauseToggle ? FontAwesomeIcon.Play.ToIconString() : FontAwesomeIcon.Pause.ToIconString()) + "##forceplay" + player.EntityId))
+						{
+							if (_mpvIsIdle)
+							{
+								SeekPlayer(0);
+								_core.Pause(false);
+								_pauseToggle = false;
+							}
+							else
+							{
+								_pauseToggle = !_pauseToggle;
+								_core.Pause(_pauseToggle);
+							}
+						}
+						ImGui.PopFont();
+						
+						if (ImGui.IsItemHovered())
+						{
+							ImGui.BeginTooltip();
+							if (_mpvIsIdle)
+							{
+								ImGui.Text("Replay");
+							}
+							else if (_pauseToggle)
+							{
+								ImGui.Text("Pause");
+							}
+							else
+							{
+								ImGui.Text("Resume");
+							}
+							ImGui.EndTooltip();
+						}
+
+						ImGui.SameLine();
+
+						ImGui.PushFont(UiBuilder.IconFont);
+						ImGui.SetNextItemWidth(100);
+						ImGui.SliderFloat("##volumebar" + player.EntityId, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
+						if (ImGui.IsItemActive())
+						{
+							_uiElementActive = true;
+						}
+
+						if (ImGui.IsItemDeactivatedAfterEdit())
+						{
+							VolumePlayer(_volume);
+							_uiElementActive = false;
+						}
+						ImGui.PopFont();
+					}
+				}
+			}
+			else
+			{
+				ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: You have not summoned");
+				ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " your Blue Carbuncle.");
+			}
+		}
+		ImGui.EndTabItem();
+	}
+	private void DrawSettings()
+	{
+		bool mpvUpdateAvailable = _plugin.LibResources.MpvCheckResult[0] != string.Empty;
+		bool ytdlpUpdateAvailable = _plugin.LibResources.YtdlpCheckResult[0] != string.Empty;
+
+		ImGui.Text("Dependencies:");
+
+		ImGui.Text("mpv-winbuild");
+		ImGui.SameLine();
+		if (mpvUpdateAvailable)
+		{
+			if (_updatingMPV)
+			{
+				ImGui.BeginDisabled();
+			}
+			if (ImGui.Button((_updatingMPV ? "Updating..." : "Update") + "##mpvUpdate"))
+			{
+				if (_plugin.LibResources.MpvCheckResult[0] != string.Empty)
+				{
+					_updatingMPV = true;
+					_plugin.LibResources.DownloadMPVAsync().ContinueWith(async task =>
+					{
+						if (task.Result)
+						{
+							Services.Log.Debug("MPV downloaded successfully");
+							_plugin.AssemblyLocationMPV = _plugin.LibResources.GetLocationMPV()!;
+							_plugin.LibResources.MpvCheckResult[0] = string.Empty;
+						}
+						else
+						{
+							Services.Log.Error("Failed to download MPV");
+						}
+					});
+				}
+			}
+			if (_updatingMPV)
+			{
+				ImGui.EndDisabled();
+			}
+		}
+		else
+		{
+			ImGui.PushFont(UiBuilder.IconFont);
+			ImGui.Text(FontAwesomeIcon.CheckCircle.ToIconString());
+			ImGui.PopFont();
+		}
+
+		ImGui.Text("yt-dlp");
+		ImGui.SameLine();
+		if (ytdlpUpdateAvailable)
+		{
+			if (_updatingYTDLP)
+			{
+				ImGui.BeginDisabled();
+			}
+			if (ImGui.Button((_updatingYTDLP ? "Updating..." : "Update") + "##ytdlpUpdate"))
+			{
+				if (_plugin.LibResources.YtdlpCheckResult[0] != string.Empty)
+				{
+					_updatingYTDLP = true;
+					_plugin.LibResources.DownloadYTDLPAsync().ContinueWith(async task =>
+					{
+						if (task.Result)
+						{
+							Services.Log.Debug("YTDLP downloaded successfully");
+						_plugin.AssemblyLocationYTDLP = _plugin.LibResources.GetLocationYTDLP()!;
+						_plugin.LibResources.YtdlpCheckResult[0] = string.Empty;
+						}
+						else
+						{
+							Services.Log.Error("Failed to download YTDLP");
+						}
+					});
+				}
+			}
+			if (_updatingYTDLP)
+			{
+				ImGui.EndDisabled();
+			}
+		}
+		else
+		{
+			ImGui.PushFont(UiBuilder.IconFont);
+			ImGui.Text(FontAwesomeIcon.CheckCircle.ToIconString());
+			ImGui.PopFont();
+		}
+
+		ImGui.EndTabItem();
 	}
 }
