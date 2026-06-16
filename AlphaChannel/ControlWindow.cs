@@ -525,16 +525,16 @@ public class ControlWindow : Window, IDisposable
 							}
 						});
 						string url = state.Url;
-						if(state.Url.Length > 30)
+						if(state.Url.Length > 60)
 						{
-							url = state.Url.Substring(0, 30);
+							url = state.Url.Substring(0, 60);
 							url += "...";
 						}
 						SeString seString = new SeStringBuilder()
 							.AddUiForeground("[AlphaChannel] ", 35)
-							.AddText(player.Name.TextValue + " is currently hosting ")
+							.AddText(player.Name.TextValue + " is currently hosting " + url)
 							.Add(_linkPayload)
-							.AddUiForeground("["+url+"]", 32)
+							.AddUiForeground("[Click to start playback]", 32)
 							.Add(RawPayload.LinkTerminator)
 							.Build();
 
