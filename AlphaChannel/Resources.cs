@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Penumbra.Api.IpcSubscribers;
 using SharpCompress.Archives;
 using SharpCompress.Common;
 
@@ -22,11 +23,46 @@ public class Resources : IDisposable
 	public void Dispose()
 	{
 		_httpClient.Dispose();
-
+		foreach(var paths in _tempGamePaths)
+		{
+			foreach(string ingamePath in paths.Keys)
+			{
+				string path = paths[ingamePath];
+				if (File.Exists(path))
+				{
+					File.Delete(path);
+				}
+			}
+		}
 		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "alphachannelscreentex_*.atex").ToList().ForEach(File.Delete);
 		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "alphachannelscreen_*.avfx").ToList().ForEach(File.Delete);
 		GC.SuppressFinalize(this);
 	}
+
+	//TO BE REMOVED JUST FOR DEBUG
+    private List<Dictionary<string, string>> _tempGamePaths = [];
+    private Dictionary<string, string> TempCopyGamePaths(Dictionary<string, string> gamePaths)
+    {
+		var finalPaths = new Dictionary<string, string>();
+		
+        var getDir = new GetModDirectory(Services.PluginInterface);
+        string dir = getDir.Invoke();
+        string alphachanneltempdir = Path.Combine(dir, "AlphaChannelTemp");
+        Directory.CreateDirectory(Path.Combine(dir, "AlphaChannelTemp"));
+        foreach(string ingamePath in gamePaths.Keys)
+        {
+			string realPath = gamePaths[ingamePath];
+			string newPath = Path.Combine(alphachanneltempdir, Path.GetFileName(realPath));
+			if (!File.Exists(newPath))
+			{
+            	File.Copy(realPath, newPath);
+			}
+			finalPaths.Add(ingamePath, newPath);
+        }
+		_tempGamePaths.Add(finalPaths);
+
+		return finalPaths;
+    }
 
 	public Dictionary<string, string> LoadPenumbraScreenResources()
 	{
@@ -49,25 +85,18 @@ public class Resources : IDisposable
 		{
 			string path = Path.Combine(_pluginDir, "resources", "alphachannelscreen_"+Plugin.PluginSessionGUID+".avfx");
 			File.Copy(oldPath, path);
-			paths.Add("chara/monster/m8373/obj/body/b0001/vfx/texture/alphachannelscreen_"+Plugin.PluginSessionGUID+".avfx", path);
+			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreen_"+Plugin.PluginSessionGUID+".avfx", path);
 		}
 		else
 		{
 			throw new FileNotFoundException($"Required resource not found: {oldPath}");
 		}
 
-		return paths;
+		return TempCopyGamePaths(paths); //just return paths after the fix
 	}
 	public Dictionary<string, string> LoadPenumbraModResources()
 	{
 		Dictionary<string, string> paths = new () {
-			{"chara/monster/m8373/obj/body/b0001/model/m8373b0001.mdl", "campfire/m8373b0001.mdl"}, //Campfire Files
-			{"chara/monster/m8373/obj/body/b0001/material/v0001/mt_m8373b0001_b.mtrl", "campfire/mt_m8373b0001_b.mtrl"},
-			{"chara/monster/m8373/obj/body/b0001/texture/tv_n_m7002b0001.tex", "campfire/tv_n_m7002b0001.tex"},
-			{"chara/monster/m8373/obj/body/b0001/texture/tv_s_m7002b0001.tex", "campfire/tv_s_m7002b0001.tex"},
-			{"chara/monster/m8373/obj/body/b0001/texture/tv_d_m7002b0001.tex", "campfire/tv_d_m7002b0001.tex"},
-			{"chara/monster/m8373/obj/body/b0001/texture/tv_id_m7002b0001.tex", "campfire/tv_s_m7002b0001.tex"},
-			{"chara/monster/m8373/obj/body/b0001/vfx/eff/vm0001.avfx", "campfire/removecampfire.avfx"},
 			{"chara/monster/m7002/animation/a0001/bt_common/resident/monster.pap", "carbuncle/monster.pap"}, //Carbuncle Files
 			{"chara/monster/m7002/obj/body/b0001/material/v0001/mt_m7002b0001_a.mtrl", "carbuncle/mt_m7002b0001_a.mtrl"},
 			{"chara/monster/m7002/obj/body/b0001/material/v0002/mt_m7002b0001_a.mtrl", "carbuncle/mt_m7002b0001_a.mtrl"},
@@ -98,7 +127,7 @@ public class Resources : IDisposable
 			}
 		}
 
-		return paths;
+		return TempCopyGamePaths(paths); //just return paths after the fix
 	}
 
 	public string? GetLocationMPV()

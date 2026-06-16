@@ -403,7 +403,7 @@ public class Core : IDisposable
 		}
 		lock (_screenTextureLock)
 		{
-			_actorVfxCreate?.Invoke("chara/monster/m8373/obj/body/b0001/vfx/texture/alphachannelscreen_"+Plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
+			_actorVfxCreate?.Invoke("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreen_"+Plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
 		}
 	}
 

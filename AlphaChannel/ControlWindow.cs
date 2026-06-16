@@ -261,7 +261,7 @@ public class ControlWindow : Window, IDisposable
 
 	private void VolumePlayer(float volume)
 	{
-		int vol = (int)((float)Math.Sqrt(volume) * 10f); //Quadratic Slider Valuess
+		int vol = (int)((float)Math.Sqrt(volume) * 10f); //Quadratic slider values
 		Services.Log.Debug("Setting volume to " + vol + "%");
 		_core.VolumePlayer(vol);
 	}
@@ -312,7 +312,7 @@ public class ControlWindow : Window, IDisposable
 				}
 
 				double volume = info[2];
-				_volume = (float)volume / 100f * ((float)volume / 100f) * 100f; //Quadratic Slider Values
+				_volume = (float)volume / 100f * ((float)volume / 100f) * 100f; //Quadratic slider values
 			}
 		}
 		
@@ -321,7 +321,7 @@ public class ControlWindow : Window, IDisposable
 			_localPlayerState = null;
 			_plugin.UpdateIPCState(_localPlayerState);
 		}
-		else if(_mpvIsIdle != _core.IsIdle()) //Level 2 - TV has been turned idle
+		else if(_mpvIsIdle != _core.IsIdle()) //Level 2 - TV has been turned idle (however they managed to do that)
 		{
 			_mpvIsIdle = _core.IsIdle();
 			_pauseToggle = true;
@@ -489,7 +489,7 @@ public class ControlWindow : Window, IDisposable
 						}
 						else
 						{
-							if(pos + 7 >= state.PlaybackPosition && pos - 7 <= state.PlaybackPosition) //7s grace period to avoid unnecessary seeks due to minor desyncs
+							if(pos + 7 < state.PlaybackPosition && pos - 7 > state.PlaybackPosition) //7s grace period to avoid unnecessary seek jumps due to minor desyncs
 							{
 								_core.SeekPlayer(state.PlaybackPosition);
 							}
@@ -512,12 +512,10 @@ public class ControlWindow : Window, IDisposable
 					}
 					else if(!foundstate)
 					{
-						//First new player state received
-						DalamudLinkPayload _linkPayload;
+						//First new player state received after abandoning TV, send chat message
 
-						_linkPayload = Services.Chat.AddChatLinkHandler(_nextLinkId, (commandId, msg) =>
+						DalamudLinkPayload _linkPayload = Services.Chat.AddChatLinkHandler(_nextLinkId, (commandId, msg) =>
 						{
-							// deine Funktion – läuft auf dem Framework-Thread
 							StartVideo(playerId);
 							if(!IsOpen)
 							{
