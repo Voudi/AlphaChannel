@@ -7,11 +7,12 @@ public static class PenumbraIPC
 {
     private const string Tag = "AlphaChannelTemporaryMod";
 
-    private static readonly Dictionary<string, Guid> _collectionIds = [];
+    private static Guid _collectionId = Guid.Empty;
+    private static List<string> _keys = [];
 
     public static bool CheckTempMod(string key)
     {
-        return _collectionIds.TryGetValue(key, out _);
+        return _collectionId != Guid.Empty && _keys.Contains(key);
     }
 
     public static void ApplyTempMod(string key, int? actorIndex, Dictionary<string, string> gamePaths)
@@ -20,48 +21,50 @@ public static class PenumbraIPC
         {
             return;
         }
-        else
+        else if(!_keys.Contains(key))
         {
-            if (!_collectionIds.TryGetValue(key, out Guid colId))
+            if (_collectionId == Guid.Empty)
             {
                 var createCollection = new CreateTemporaryCollection(Services.PluginInterface);
-                createCollection.Invoke(Tag + key, Tag + key, out colId);
-                _collectionIds[key] = colId;
+                createCollection.Invoke(Tag, Tag, out _collectionId);
             }
 
             var addMod = new AddTemporaryMod(Services.PluginInterface);
-            addMod.Invoke(Tag + key, colId, gamePaths, string.Empty, int.MaxValue);
+            addMod.Invoke(Tag + key, _collectionId, gamePaths, string.Empty, int.MaxValue);
 
             var assign = new AssignTemporaryCollection(Services.PluginInterface);
-            assign.Invoke(colId, (int)actorIndex, true);
+            assign.Invoke(_collectionId, (int)actorIndex, true);
+
+            _keys.Add(key);
+
+            Services.Log.Debug("Assigned Temp Mod " + key + " to collection " + _collectionId);
         }
     }
 
     public static void RemoveTempMod(string key)
     {
-        if (_collectionIds.TryGetValue(key, out Guid colId))
+        if (_collectionId != Guid.Empty && _keys.Contains(key))
         {
             var assign = new RemoveTemporaryMod(Services.PluginInterface);
-            assign.Invoke(Tag + key, colId, int.MaxValue);
-            _collectionIds.Remove(key);
+            assign.Invoke(Tag + key, _collectionId, int.MaxValue);
+            _keys.Remove(key);
+            Services.Log.Debug("Removed Temp Mod " + key);
         }
     }
 
     public static void Dispose()
     {
-        if (Services.PluginInterface == null || _collectionIds.Values.Count == 0) {return;}
+        if (Services.PluginInterface == null || _collectionId == Guid.Empty) {return;}
 
-        foreach(string key in _collectionIds.Keys)
+        foreach(string key in _keys.ToList())
         {
-            var removeMod = new RemoveTemporaryMod(Services.PluginInterface);
-            removeMod.Invoke(Tag + key, _collectionIds[key], int.MaxValue);
-
-            var removeCollection = new DeleteTemporaryCollection(Services.PluginInterface);
-            removeCollection.Invoke(_collectionIds[key]);
+            RemoveTempMod(key);
         }
+        var removeCollection = new DeleteTemporaryCollection(Services.PluginInterface);
+        removeCollection.Invoke(_collectionId);
 
-        _collectionIds.Clear();
-
+        _collectionId = Guid.Empty;
+        _keys.Clear();
         Redraw(-1);
     }
 

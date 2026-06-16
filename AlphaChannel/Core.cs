@@ -316,6 +316,12 @@ public class Core : IDisposable
 										}
 									}
 								}
+								if (_tvOwners.TryGetValue(ownerId, out _) && ownerId != LocalEntityId) //If entity has been recognized as TV once, keep it playing until its been removed or explicitly turned off to avoid 'sync holes', except for localplayer
+								{
+									visitedTvs.Add(ownerId);
+									CheckoutCompanion(ownerId, item);
+									continue;
+								}
 
 								if (playerId == ownerId)
 								{
@@ -342,6 +348,7 @@ public class Core : IDisposable
 			_companionOwners.Where(owner => !visitedCompanions.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
 			{
 				_companionOwners.Remove(ownerId);
+				_tvOwners.Remove(ownerId);
 			});
 		}
 

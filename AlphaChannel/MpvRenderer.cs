@@ -59,6 +59,7 @@ namespace AlphaChannel
 		private Texture2D? _targetTexture;
 		private ManualResetEventSlim _frameReady = new ManualResetEventSlim(false);
 		private MpvRenderUpdateFn? _updateCallback;
+		private GCHandle _updateCallbackHandle;
 		private bool _closed = true;
 		private Thread? _eventThread;
 
@@ -119,6 +120,7 @@ namespace AlphaChannel
 			Marshal.StructureToPtr(new MpvRenderParam { Type = 0, Data = IntPtr.Zero }, _renderParamsPtr + 64, false);
 
 			_updateCallback = (ctx) => _frameReady.Set();
+			_updateCallbackHandle = GCHandle.Alloc(_updateCallback);
 			mpv_render_context_set_update_callback(_mpvRenderCtx, _updateCallback, IntPtr.Zero);
 
 			_eventThread = new Thread(EventLoop)
@@ -194,7 +196,11 @@ namespace AlphaChannel
 						mpv_render_context_free(_mpvRenderCtx);
 						_mpvRenderCtx = IntPtr.Zero;
 					}
-
+					if (_updateCallbackHandle.IsAllocated)
+					{
+						_updateCallbackHandle.Free();
+					}
+					
 					if (_mpvCtx != IntPtr.Zero)
 					{
 						mpv_terminate_destroy(_mpvCtx);

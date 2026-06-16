@@ -727,7 +727,7 @@ public class ControlWindow : Window, IDisposable
 					ImGui.GetWindowDrawList().AddText(new Vector2(pos.X + 3, pos.Y + 2), ImGui.GetColorU32(new Vector4(0.6f, 0.6f, 0.6f, 1.0f)), placeholder);
 				}
 
-				if (urlExists)
+				if (urlExists || !string.IsNullOrEmpty(_placeHolderURL))
 				{
 					ImGui.SameLine();
 
@@ -748,10 +748,6 @@ public class ControlWindow : Window, IDisposable
 				if (isTheRunningTV && _seekerExactTime > 0)
 				{
 					DrawScrollingText(_mediaTitle, 250);
-				}
-				else
-				{
-					ImGui.Text(string.Empty);
 				}
 				
 				if (isTheRunningTV)
