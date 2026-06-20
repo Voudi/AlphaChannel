@@ -39,6 +39,7 @@ public class ControlWindow : Window, IDisposable
 	private bool _installingLibs;
 	private bool _updatingMPV;
 	private bool _updatingYTDLP;
+	private bool _installingSNES9X;
 	private bool _uiElementActive;
 	private uint _nextLinkId = 1;
 
@@ -717,10 +718,9 @@ public class ControlWindow : Window, IDisposable
 			{
 				bool isTheRunningTV = _core.IsLocalPlayerTVOn();
 				string url = string.Empty;
-				bool urlExists = false;
 				bool urlEmpty = string.IsNullOrEmpty(_inputURL);
 
-				urlExists = ValidateURL(out _);
+				bool urlExists = ValidateURL(out _);
 
 				ImGui.PushStyleColor(ImGuiCol.Text, _isTVPoweredOff ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
 				ImGui.PushFont(UiBuilder.IconFont);
@@ -971,6 +971,12 @@ public class ControlWindow : Window, IDisposable
 	{
 		bool mpvUpdateAvailable = _plugin.LibResources.MpvCheckResult[0] != string.Empty;
 		bool ytdlpUpdateAvailable = _plugin.LibResources.YtdlpCheckResult[0] != string.Empty;
+		bool snesInstallAvailable = string.IsNullOrEmpty(_plugin.AssemblyLocationSnes);
+
+
+		bool installingMPV = _updatingMPV;
+		bool installingYTDLP = _updatingYTDLP;
+		bool installingSNES9X = _installingSNES9X;
 
 		ImGui.Text("Dependencies:");
 
@@ -978,11 +984,11 @@ public class ControlWindow : Window, IDisposable
 		ImGui.SameLine();
 		if (mpvUpdateAvailable)
 		{
-			if (_updatingMPV)
+			if (installingMPV)
 			{
 				ImGui.BeginDisabled();
 			}
-			if (ImGui.Button((_updatingMPV ? "Updating..." : "Update") + "##mpvUpdate"))
+			if (ImGui.Button((installingMPV ? "Updating..." : "Update") + "##mpvUpdate"))
 			{
 				if (_plugin.LibResources.MpvCheckResult[0] != string.Empty)
 				{
@@ -999,10 +1005,11 @@ public class ControlWindow : Window, IDisposable
 						{
 							Services.Log.Error("Failed to download MPV");
 						}
+						_updatingMPV = false;
 					});
 				}
 			}
-			if (_updatingMPV)
+			if (installingMPV)
 			{
 				ImGui.EndDisabled();
 			}
@@ -1018,11 +1025,11 @@ public class ControlWindow : Window, IDisposable
 		ImGui.SameLine();
 		if (ytdlpUpdateAvailable)
 		{
-			if (_updatingYTDLP)
+			if (installingYTDLP)
 			{
 				ImGui.BeginDisabled();
 			}
-			if (ImGui.Button((_updatingYTDLP ? "Updating..." : "Update") + "##ytdlpUpdate"))
+			if (ImGui.Button((installingYTDLP ? "Updating..." : "Update") + "##ytdlpUpdate"))
 			{
 				if (_plugin.LibResources.YtdlpCheckResult[0] != string.Empty)
 				{
@@ -1039,10 +1046,11 @@ public class ControlWindow : Window, IDisposable
 						{
 							Services.Log.Error("Failed to download YTDLP");
 						}
+						_updatingYTDLP = false;
 					});
 				}
 			}
-			if (_updatingYTDLP)
+			if (installingYTDLP)
 			{
 				ImGui.EndDisabled();
 			}
@@ -1053,6 +1061,44 @@ public class ControlWindow : Window, IDisposable
 			ImGui.Text(FontAwesomeIcon.CheckCircle.ToIconString());
 			ImGui.PopFont();
 		}
+
+		ImGui.Text("snes9x");
+		ImGui.SameLine();
+		if (snesInstallAvailable)
+		{
+			if (installingSNES9X)
+			{
+				ImGui.BeginDisabled();
+			}
+			if (ImGui.Button((installingSNES9X ? "Updating..." : "Update") + "##snes9xUpdate"))
+			{
+				_installingSNES9X = true;
+				_plugin.LibResources.DownloadSNES9XAsync().ContinueWith(async task =>
+				{
+					if (task.Result)
+					{
+						Services.Log.Debug("SNES9X downloaded successfully");
+						_plugin.AssemblyLocationSnes = _plugin.LibResources.GetLocationSNES9X()!;
+					}
+					else
+					{
+						Services.Log.Error("Failed to download SNES9X");
+					}
+					_installingSNES9X = false;
+				});
+			}
+			if (installingSNES9X)
+			{
+				ImGui.EndDisabled();
+			}
+		}
+		else
+		{
+			ImGui.PushFont(UiBuilder.IconFont);
+			ImGui.Text(FontAwesomeIcon.CheckCircle.ToIconString());
+			ImGui.PopFont();
+		}
+
 
 		ImGui.EndTabItem();
 	}

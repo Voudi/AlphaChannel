@@ -37,8 +37,19 @@ public class Resources : IDisposable
 		}
 		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "alphachannelscreentex_*.atex").ToList().ForEach(File.Delete);
 		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "alphachannelscreen_*.avfx").ToList().ForEach(File.Delete);
-		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "bsnesscreentex_*.atex").ToList().ForEach(File.Delete);
-		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "bsnesscreen_*.avfx").ToList().ForEach(File.Delete);
+		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "snesscreentex_*.atex").ToList().ForEach(File.Delete);
+		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "snesscreen_*.avfx").ToList().ForEach(File.Delete);
+
+		var getDir = new GetModDirectory(Services.PluginInterface);
+        string dir = getDir.Invoke();
+        string alphachanneltempdir = Path.Combine(dir, "AlphaChannelTemp");
+		if (Directory.Exists(alphachanneltempdir))
+		{
+			foreach (string file in Directory.GetFiles(alphachanneltempdir))
+			{
+				try { File.Delete(file); } catch { }
+			}
+		}
 		GC.SuppressFinalize(this);
 	}
 
@@ -95,24 +106,24 @@ public class Resources : IDisposable
 			throw new FileNotFoundException($"Required resource not found: {oldPath}");
 		}
 
-		oldPath = Path.Combine(_pluginDir, "resources", "bsnesscreen.avfx");
+		oldPath = Path.Combine(_pluginDir, "resources", "snesscreen.avfx");
 		if (File.Exists(oldPath))
 		{
-			string path = Path.Combine(_pluginDir, "resources", "bsnesscreen_"+Plugin.PluginSessionGUID+".avfx");
+			string path = Path.Combine(_pluginDir, "resources", "snesscreen_"+Plugin.PluginSessionGUID+".avfx");
 			File.Copy(oldPath, path);
-			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/bsnesscreen_"+Plugin.PluginSessionGUID+".avfx", path);
+			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreen_"+Plugin.PluginSessionGUID+".avfx", path);
 		}
 		else
 		{
 			throw new FileNotFoundException($"Required resource not found: {oldPath}");
 		}
 
-		oldPath = Path.Combine(_pluginDir, "resources", "bsnesscreentex.atex");
+		oldPath = Path.Combine(_pluginDir, "resources", "snesscreentex.atex");
 		if (File.Exists(oldPath))
 		{
-			string path = Path.Combine(_pluginDir, "resources", "bsnesscreentex_"+Plugin.PluginSessionGUID+".atex");
+			string path = Path.Combine(_pluginDir, "resources", "snesscreentex_"+Plugin.PluginSessionGUID+".atex");
 			File.Copy(oldPath, path);
-			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/bsnesscreentex.atex", path);
+			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreentex.atex", path);
 		}
 		else
 		{
@@ -184,6 +195,62 @@ public class Resources : IDisposable
 			return null;
 		}
 	}
+
+	public string? GetLocationSNES9X()
+	{
+		string directoryName = "snes9x";
+		string? dir = Directory.GetDirectories(_pluginDir, $"{directoryName}*").FirstOrDefault();
+		if (dir != null)
+		{
+			string file = Path.Combine(_pluginDir, directoryName, "snes9x_libretro.dll");
+			if(File.Exists(file))
+			{
+				return file;
+			}
+		}
+		else
+		{
+			Directory.CreateDirectory(Path.Combine(_pluginDir, "snes9x"));
+		}
+		
+		return null;
+	}
+
+	public async Task<bool> DownloadSNES9XAsync()
+	{
+		try
+		{
+			string directoryName = "snes9x";
+			string temp = Path.GetTempFileName() + ".zip";
+			var response = await _httpClient.GetAsync("https://buildbot.libretro.com/nightly/windows/x86_64/latest/snes9x_libretro.dll.zip", HttpCompletionOption.ResponseHeadersRead);
+			await using (var fs = File.OpenWrite(temp))
+			{
+				await response.Content.CopyToAsync(fs);
+			}
+
+			string localFolder = Path.Combine(_pluginDir, directoryName);
+			Directory.CreateDirectory(localFolder);
+			using (var archive = ArchiveFactory.OpenArchive(temp))
+			{
+				foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
+				{
+					entry.WriteToDirectory(localFolder, new ExtractionOptions
+					{
+						ExtractFullPath = true,
+						Overwrite = true
+					});
+				}
+			}
+
+			File.Delete(temp);
+			return true;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
 	public async Task CheckMPVAsync()
 	{
 		string filenameStart = "mpv-dev-lgpl-x86_64-";

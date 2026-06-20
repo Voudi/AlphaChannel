@@ -38,6 +38,11 @@ internal sealed class Compatibility
 		{
 			_plugin.AssemblyLocationYTDLP = ytdlpLocation;
 		}
+		string? snes9xLocation = _plugin.LibResources.GetLocationSNES9X();
+		if(snes9xLocation != null)
+		{
+			_plugin.AssemblyLocationSnes = snes9xLocation;
+		}
 
 		_plugin.LibResources.CheckMPVAsync().ContinueWith(task =>
 		{

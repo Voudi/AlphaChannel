@@ -49,11 +49,7 @@ public class Plugin : IDalamudPlugin
 		PenumbraTempModPaths = LibResources.LoadPenumbraModResources();
 		PenumbraTempScreenPaths = LibResources.LoadPenumbraScreenResources();
 		
-		AssemblyLocationSnesDir = Path.Combine(_pluginDir, "resources", "bsnes");
-		AssemblyLocationSnes = Path.Combine(AssemblyLocationSnesDir, "snes9x_libretro.dll");
-		Services.Log.Debug("Loaded AssemblyLocationBsnesDir:" + AssemblyLocationSnesDir);
-		Services.Log.Debug("Loaded AssemblyLocationBsnes:" + AssemblyLocationSnes);
-
+		AssemblyLocationSnesDir = Path.Combine(_pluginDir, "resources", "snes");
 
 		MpvRenderer.Setup(this);
 		Resources.NativeLoader.Register(this);
@@ -88,9 +84,9 @@ public class Plugin : IDalamudPlugin
 
 		ApiProvider.DeInit();
 
-		PenumbraIPC.Dispose();
-
 		LibResources.Dispose();
+
+		PenumbraIPC.Dispose();
 
 		WindowSystem.RemoveAllWindows();
 

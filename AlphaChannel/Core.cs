@@ -20,7 +20,7 @@ namespace AlphaChannel;
 public class Core : IDisposable
 {
 	private MpvRenderer? _currentMpvRenderer;
-	private Snes9xRenderer? _bsnesRenderer;
+	private Snes9xRenderer? _snesRenderer;
 	private CancellationTokenSource _renderCancellation = new CancellationTokenSource();
 	private DateTime _lastLoadYT = DateTime.MinValue;
 	private static readonly Regex _ytRegex = new Regex(@"^\w+://[^/]*youtube\.\w+/|^\w+://youtu\.be/", RegexOptions.Compiled);
@@ -30,13 +30,13 @@ public class Core : IDisposable
 	private readonly Dictionary<uint, IGameObject> _tvOwners = []; //PlayerEntityID, Companion
 	private readonly Dictionary<uint, IGameObject> _companionOwners = []; //PlayerEntityID, Companion
 	private readonly Texture2D _screenTexture;
-	private readonly Texture2D _bsnesScreenTexture;
+	private readonly Texture2D _snesScreenTexture;
 	private readonly ConcurrentDictionary<nint, ShaderResourceView> _views = new();
 	private uint _activeEntityId;
 	private uint _playingEntityId;
 	private uint? LocalEntityId => Services.Objects?.LocalPlayer?.EntityId;
 	
-	private bool _isPlayingBsnes;
+	private bool _isPlayingSnes;
 	private Plugin _plugin;
 
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
@@ -52,7 +52,7 @@ public class Core : IDisposable
 		Usage = ResourceUsage.Default,
 		OptionFlags = ResourceOptionFlags.Shared
 	};
-	private static Texture2DDescription _bsnesTexture2dDescription = new Texture2DDescription
+	private static Texture2DDescription _snesTexture2dDescription = new Texture2DDescription
 	{
 		Width = Plugin.ResolutionWidth,
 		Height = Plugin.ResolutionHeight,
@@ -72,12 +72,12 @@ public class Core : IDisposable
 
 		//INIT TEXTURE
 		_screenTexture = new Texture2D(DxHandler.Device, _texture2dDescription);
-		_bsnesScreenTexture = new Texture2D(DxHandler.Device, _bsnesTexture2dDescription);
+		_snesScreenTexture = new Texture2D(DxHandler.Device, _snesTexture2dDescription);
 
 		using SharpDX.DXGI.Resource resource = _screenTexture.QueryInterface<SharpDX.DXGI.Resource>();
 		ClearTexture();
 
-		using SharpDX.DXGI.Resource bsnesResource = _bsnesScreenTexture.QueryInterface<SharpDX.DXGI.Resource>();
+		using SharpDX.DXGI.Resource snesResource = _snesScreenTexture.QueryInterface<SharpDX.DXGI.Resource>();
 		ClearTexture();
 
 		//INIT HOOKS
@@ -147,10 +147,10 @@ public class Core : IDisposable
 
 	public void StopVideo()
 	{
-		if (_isPlayingBsnes)
+		if (_isPlayingSnes)
 		{
-			_bsnesRenderer?.Unload();
-			_isPlayingBsnes = false;
+			_snesRenderer?.Unload();
+			_isPlayingSnes = false;
 		}
 		_currentMpvRenderer?.Stop();
 		_currentMpvRenderer?.Dispose();
@@ -292,21 +292,21 @@ public class Core : IDisposable
 	{
 		Task.Run(async () =>
 		{
-			if (_bsnesRenderer == null)
+			if (_snesRenderer == null)
 			{
-				_bsnesRenderer = new Snes9xRenderer(_plugin);
+				_snesRenderer = new Snes9xRenderer(_plugin);
 			}
 			try
 			{
 				if(_plugin.AssemblyLocationSnesDir != null)
 				{
-					_isPlayingBsnes = _bsnesRenderer.Load(_bsnesScreenTexture, Path.Combine(_plugin.AssemblyLocationSnesDir, "SuperMetroid.sfc"));
+					_isPlayingSnes = _snesRenderer.Load(_snesScreenTexture, Path.Combine(_plugin.AssemblyLocationSnesDir, "SuperMetroid.sfc"));
 				}
 				Services.Log.Debug("Starting ROM");
 			}
 			catch (Exception e)
 			{
-				Services.Log.Error($"[BSNES] Generic error: {e.Message} {e.StackTrace}");
+				Services.Log.Error($"[SNES9X] Generic error: {e.Message} {e.StackTrace}");
 			}
 		});
 	}
@@ -453,9 +453,9 @@ public class Core : IDisposable
 		}
 		lock (_screenTextureLock)
 		{
-			if(_isPlayingBsnes)
+			if(_isPlayingSnes)
 			{
-				_actorVfxCreate?.Invoke("chara/monster/m7002/obj/body/b0001/vfx/texture/bsnesscreen_"+Plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
+				_actorVfxCreate?.Invoke("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreen_"+Plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
 			}
 			else
 			{
@@ -479,7 +479,7 @@ public class Core : IDisposable
 		{
 			_texCase = 1;
 		}
-		else if (path.ToString().Contains("chara/monster/m7002/obj/body/b0001/vfx/texture/bsnesscreentex"))
+		else if (path.ToString().Contains("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreentex"))
 		{
 			_texCase = 2;
 		}
@@ -529,7 +529,7 @@ public class Core : IDisposable
 
 			lock (_screenTextureLock)
 			{
-					var texture = _texCase == 2 ? _bsnesScreenTexture : _screenTexture;
+					var texture = _texCase == 2 ? _snesScreenTexture : _screenTexture;
 
 					if (texture is not { IsDisposed: false })
 					{
@@ -604,12 +604,12 @@ public class Core : IDisposable
 	public void Dispose()
 	{
 		_currentMpvRenderer?.StopRender();
-		_bsnesRenderer?.Dispose();
+		_snesRenderer?.Dispose();
 
 		_textureOnLoadHook.Disable();
 		_textureOnLoadHook.Dispose();
 		_getResourceSyncHook.Dispose();
-		_bsnesRenderer?.Dispose();
+		_snesRenderer?.Dispose();
 
 		//Do not clean up Texture2D and ShaderResourceView as they may still be part of the currently running VFX
 		//Instead just let it stay in the game until it eventually closes, its not growing anyway
