@@ -14,6 +14,8 @@ using SharpDX.Direct3D;
 using SharpDX.Direct3D11;
 using SharpDX.DXGI;
 using SharpDX.Mathematics.Interop;
+using Dalamud.Game.ClientState.Keys;
+using Dalamud.Plugin;
 
 namespace AlphaChannel;
 
@@ -25,7 +27,6 @@ public class Core : IDisposable
 	private DateTime _lastLoadYT = DateTime.MinValue;
 	private static readonly Regex _ytRegex = new Regex(@"^\w+://[^/]*youtube\.\w+/|^\w+://youtu\.be/", RegexOptions.Compiled);
 	private static bool IsYTURL(string url) => _ytRegex.IsMatch(url);
-	public event Action? VideoEnded;
 
 	private readonly Dictionary<uint, IGameObject> _tvOwners = []; //PlayerEntityID, Companion
 	private readonly Dictionary<uint, IGameObject> _companionOwners = []; //PlayerEntityID, Companion
@@ -37,7 +38,11 @@ public class Core : IDisposable
 	private uint? LocalEntityId => Services.Objects?.LocalPlayer?.EntityId;
 	
 	private bool _isPlayingSnes;
+	private bool _snesControlsEnabled;
 	private Plugin _plugin;
+
+	// Snes Key Inputs
+	public Dictionary<Snes9xInput, VirtualKey> SnesKeys { get; set; } = [];
 
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
 	{
@@ -86,6 +91,22 @@ public class Core : IDisposable
 		nint actorVfxCreateAddress = Services.SigScanner.ScanText(ActorVfxCreateSig);
 		_actorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
 		_getResourceSyncHook.Enable();
+
+
+		List<Snes9xInput> keyOrder = [Snes9xInput.UP, Snes9xInput.DOWN, Snes9xInput.LEFT, Snes9xInput.RIGHT, Snes9xInput.A, Snes9xInput.B, Snes9xInput.X, Snes9xInput.Y, Snes9xInput.L, Snes9xInput.R, Snes9xInput.START, Snes9xInput.SELECT];
+		foreach(Snes9xInput key in keyOrder)
+		{
+			if(plugin.Config.KeyMappings.TryGetValue(key, out VirtualKey virtualKey))
+			{
+				SnesKeys.Add(key, virtualKey);
+			}
+			else
+			{
+				SnesKeys.Add(key, VirtualKey.NO_KEY);
+			}
+		}
+
+		
 	}
 
 	public bool IsTVTurnedOff()
@@ -210,7 +231,6 @@ public class Core : IDisposable
 					}
 				}
 				Services.Log.Debug("Stopping Video Player");
-				VideoEnded?.Invoke();
 			}
 			catch (Exception e)
 			{
@@ -288,32 +308,46 @@ public class Core : IDisposable
 		return _currentMpvRenderer?.GetCurrentUrl();
 	}
 
-	public void PlayGame()
+
+	public bool IsPlayingSnes()
 	{
-		Task.Run(async () =>
+		return _isPlayingSnes;
+	}
+
+	public bool IsSnesControlsEnabled()
+	{
+		return _snesControlsEnabled;
+	}
+	public void EnableSnesControls(bool enabled)
+	{
+		_snesControlsEnabled = enabled;
+	}
+	public bool PlayGame(string path)
+	{
+		if (_snesRenderer == null)
 		{
-			if (_snesRenderer == null)
+			_snesRenderer = new Snes9xRenderer(_plugin);
+		}
+		try
+		{
+			if(Plugin.ROMSLocationSnesDir != null)
 			{
-				_snesRenderer = new Snes9xRenderer(_plugin);
+				_snesControlsEnabled = true;
+				_isPlayingSnes = _snesRenderer.Load(_snesScreenTexture, path);
 			}
-			try
-			{
-				if(_plugin.AssemblyLocationSnesDir != null)
-				{
-					_isPlayingSnes = _snesRenderer.Load(_snesScreenTexture, Path.Combine(_plugin.AssemblyLocationSnesDir, "SuperMetroid.sfc"));
-				}
-				Services.Log.Debug("Starting ROM");
-			}
-			catch (Exception e)
-			{
-				Services.Log.Error($"[SNES9X] Generic error: {e.Message} {e.StackTrace}");
-			}
-		});
+			Services.Log.Debug("Starting ROM");
+		}
+		catch (Exception e)
+		{
+			Services.Log.Error($"[SNES9X] Generic error: {e.Message} {e.StackTrace}");
+		}
+
+		return _isPlayingSnes;
 	}
 	public unsafe bool ScanForCompanions()
 	{
 		uint? playerId = LocalEntityId;
-		bool isTVPoweredOff = false;
+		bool playerCarbuncleFound = false;
 
 		bool hookEnabled = !_getResourceSyncHook.IsDisposed && _getResourceSyncHook.IsEnabled;
 		if (hookEnabled) //Only check for stuff while the hook is activated, which is outside from duties
@@ -375,7 +409,7 @@ public class Core : IDisposable
 
 								if (playerId == ownerId)
 								{
-									isTVPoweredOff = true;
+									playerCarbuncleFound = true;
 								}
 							}
 							catch (Exception) { }
@@ -423,7 +457,7 @@ public class Core : IDisposable
 			}
 		}
 
-		return isTVPoweredOff;
+		return playerCarbuncleFound;
 	}
 
 	private void CheckoutCompanion(uint ownerId, IGameObject companion)
@@ -619,4 +653,103 @@ public class Core : IDisposable
 		GC.SuppressFinalize(this);
 	}
 
+	private readonly Dictionary<VirtualKey, bool> _heldState = new();
+
+	internal void OnFrameworkUpdate()
+	{
+		HashSet<int> KeyUpEvents = _plugin.WindowKeyUpReader.Consume();
+		
+		if (!_isPlayingSnes || !_snesControlsEnabled)
+		{
+			return;
+		}
+		foreach(Snes9xInput key in SnesKeys.Keys)
+		{
+			if(SnesKeys.TryGetValue(key, out VirtualKey virtualKey) && virtualKey != VirtualKey.NO_KEY)
+			{
+				bool pressed = Services.KeyState[virtualKey];
+
+				_heldState.TryGetValue(virtualKey, out bool held);
+				if (pressed) { held = true; }
+				if (KeyUpEvents.Contains((int)virtualKey)) { held = false; }
+				_heldState[virtualKey] = held;
+
+				_snesRenderer?.SetButton(0, (int)key, held);
+
+				if (pressed)
+				{
+					Services.KeyState[virtualKey] = false; //Disable Key for Game
+				}
+			}
+		}
+		_snesRenderer?.OnFrameworkUpdate();
+	}
+
+	internal void VolumeSnes(int vol)
+	{
+		_snesRenderer?.SetVolume(vol);
+	}
+
+	//Reading KeyUp Events from the window itself since Dalamud is consuming the entire KeyState when disabling KeyDown
+	public class WndProcKeyUpReader : IDisposable
+	{
+		[DllImport("user32.dll", SetLastError = true)]
+		private static extern IntPtr SetWindowLongPtrW(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+		[DllImport("user32.dll")]
+		private static extern IntPtr CallWindowProcW(IntPtr lpPrevWndFunc, IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+		private const int GWLP_WNDPROC = -4;
+		private const uint WM_KEYUP = 0x0101;
+
+
+		[UnmanagedFunctionPointer(CallingConvention.Winapi)]
+		private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+		private readonly IntPtr _hwnd;
+		private readonly WndProcDelegate _hook;
+		private IntPtr _oldWndProc;
+		private bool _installed;
+
+		private readonly HashSet<int> _releasedKeys = new();
+		private readonly Lock _lock = new();
+
+		public WndProcKeyUpReader(IntPtr hwnd)
+		{
+			_hwnd = hwnd;
+			_hook = WndProcHook;
+			_oldWndProc = SetWindowLongPtrW(_hwnd, GWLP_WNDPROC, Marshal.GetFunctionPointerForDelegate(_hook));
+			_installed = _oldWndProc != IntPtr.Zero;
+		}
+
+		private IntPtr WndProcHook(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
+		{
+			if (msg == WM_KEYUP)
+			{
+				lock (_lock) { _releasedKeys.Add((int)(wParam.ToInt64() & 0xFFFF)); }
+			}
+
+			return CallWindowProcW(_oldWndProc, hWnd, msg, wParam, lParam);
+		}
+
+		public HashSet<int> Consume()
+		{
+			lock (_lock) 
+			{ 
+				var result = _releasedKeys.ToHashSet();
+				_releasedKeys.Clear();
+				return result;
+			}
+		}
+
+		public void Dispose()
+		{
+			if (_installed && _oldWndProc != IntPtr.Zero)
+			{
+				SetWindowLongPtrW(_hwnd, GWLP_WNDPROC, _oldWndProc);
+				_oldWndProc = IntPtr.Zero;
+				_installed = false;
+			}
+			GC.SuppressFinalize(this);
+		}
+	}
 }

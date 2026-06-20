@@ -1,22 +1,24 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Dalamud.Bindings.ImGui;
-
+using Dalamud.Game.ClientState.Keys;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Interface;
+using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Windowing;
 
 namespace AlphaChannel;
 
 public class ControlWindow : Window, IDisposable
 {
-	private bool _isTVPoweredOff;
+	private bool _playerCarbuncleFound;
 	private bool _pauseToggle;
 	private Plugin _plugin;
 	private Compatibility _compat;
@@ -26,6 +28,7 @@ public class ControlWindow : Window, IDisposable
 	//Render Vars
 	private string _inputURL = "";
 	private float _volume = 25;
+	private float _volumesnes = 25;
 	private float _seeker;
 	private double _seekerExactTime;
 	private int _seekerTimeSeconds;
@@ -42,21 +45,22 @@ public class ControlWindow : Window, IDisposable
 	private bool _installingSNES9X;
 	private bool _uiElementActive;
 	private uint _nextLinkId = 1;
+	private readonly FileDialogManager _fileDialog = new();
+	private int _waitingForKey = -1;
 
 	private readonly Dictionary<uint, IPCVideoState> _currentStates = []; //PlayerEntityID, IPCVideoState
 	public sealed record IPCVideoState([property: JsonRequired] string State, [property: JsonRequired] string Url, [property: JsonRequired] int PlaybackPosition, [property: JsonRequired] long Timestamp);
 
 	private IPCVideoState? _localPlayerState;
 
-	public ControlWindow(Plugin plugin, string title)
+	public ControlWindow(Plugin plugin, Core core, string title)
 		: base(title, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
 	{
 		_plugin = plugin;
 
 		_compat = new Compatibility(_plugin);
 
-		_core = new Core(_plugin);
-		_core.VideoEnded += StopVideo;
+		_core = core;
 
 		SizeConstraints = new WindowSizeConstraints
 		{
@@ -70,7 +74,6 @@ public class ControlWindow : Window, IDisposable
 	public void Dispose()
 	{
 		_plugin.UpdateIPCState(null);
-		_core.VideoEnded -= StopVideo;
 		_core.Dispose();
 		GC.SuppressFinalize(this);
 	}
@@ -166,20 +169,28 @@ public class ControlWindow : Window, IDisposable
 			{
 				DrawHost();
 			}
+			if(ImGui.BeginTabItem("Snes9x"))
+			{
+				DrawGame();
+			}
 			if (ImGui.BeginTabItem("Settings"))
 			{
 				DrawSettings();
 			}
 			ImGui.EndTabBar();
 		}
+
+		_fileDialog.Draw();
 	}
 
-	private void StartGame()
+	private void StartGame(string path)
 	{
 		if(LocalEntityId.HasValue)
 		{
-			_core.SetCurrentTV(LocalEntityId.Value);
-			_core.PlayGame();
+			if (_core.PlayGame(path))
+			{
+				_core.SetCurrentTV(LocalEntityId.Value);
+			}
 		}
 	}
 
@@ -262,7 +273,7 @@ public class ControlWindow : Window, IDisposable
 		{
 			_lastMilliSecond1000ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-			_isTVPoweredOff = _core.ScanForCompanions();
+			_playerCarbuncleFound = _core.ScanForCompanions();
 
 			_playerList = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => (x.EntityId == LocalEntityId) ? "@" : x.Name.TextValue);
 		}
@@ -273,6 +284,12 @@ public class ControlWindow : Window, IDisposable
 		int vol = (int)((float)Math.Sqrt(volume) * 10f); //Quadratic slider values
 		Services.Log.Debug("Setting volume to " + vol + "%");
 		_core.VolumePlayer(vol);
+	}
+	private void VolumeSnes(float volume)
+	{
+		int vol = (int)volume;
+		Services.Log.Debug("Setting volume to " + vol + "%");
+		_core.VolumeSnes(vol);
 	}
 
 	private void SeekPlayer(double percentage)
@@ -350,6 +367,7 @@ public class ControlWindow : Window, IDisposable
 	private int _phase;
 	private string? _lastText;
 	private double _lastTime = ImGui.GetTime();
+
 	private void DrawScrollingText(string text, float maxWidth)
 	{
 		var textSize = ImGui.CalcTextSize(text);
@@ -570,7 +588,7 @@ public class ControlWindow : Window, IDisposable
 				continue;
 			}
 
-			if (_core.TVExistsForEntity(item.EntityId)) //Checks if TV exists or if it's the player and the TV is powered off
+			if (_core.TVExistsForEntity(item.EntityId)) //Checks if TV exists
 			{
 				count++;
 				bool isTheRunningTV = _core.IsEntityTVOn(item.EntityId);
@@ -646,7 +664,7 @@ public class ControlWindow : Window, IDisposable
 					ImGui.EndDisabled();
 				}
 
-				if (_isTVPoweredOff)
+				if (_playerCarbuncleFound)
 				{
 					ImGui.Separator();
 
@@ -714,19 +732,17 @@ public class ControlWindow : Window, IDisposable
 		IPlayerCharacter? player = Services.Objects.LocalPlayer;
 		if(player != null)
 		{
-			if (_isTVPoweredOff || _core.TVExistsForEntity(player.EntityId)) //Checks if TV exists or if it's the player and the TV is powered off
+			if (_playerCarbuncleFound || _core.TVExistsForEntity(player.EntityId)) //Checks if players Carbuncle or TV exists
 			{
-				bool isTheRunningTV = _core.IsLocalPlayerTVOn();
-				string url = string.Empty;
+				bool playerTVRunning = _core.IsLocalPlayerTVOn();
 				bool urlEmpty = string.IsNullOrEmpty(_inputURL);
-
 				bool urlExists = ValidateURL(out _);
 
-				ImGui.PushStyleColor(ImGuiCol.Text, _isTVPoweredOff ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
+				ImGui.PushStyleColor(ImGuiCol.Text, _playerCarbuncleFound ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
 				ImGui.PushFont(UiBuilder.IconFont);
 				if(ImGui.Button(FontAwesomeIcon.PowerOff.ToIconString() + "##power" + player.EntityId))
 				{
-					if (_isTVPoweredOff)
+					if (_playerCarbuncleFound)
 					{
 						PenumbraIPC.ApplyTempMod("companion", Services.Objects.LocalPlayer?.ObjectIndex, _plugin.PenumbraTempModPaths);
 					}
@@ -739,9 +755,9 @@ public class ControlWindow : Window, IDisposable
 				ImGui.PopFont();
 				ImGui.PopStyleColor();
 
-				if (!_isTVPoweredOff)
+				if (!_playerCarbuncleFound && !_core.IsPlayingSnes())
 				{
-					if (!isTheRunningTV)
+					if (!playerTVRunning)
 					{
 						ImGui.Text("Play Video:");
 					}
@@ -749,7 +765,7 @@ public class ControlWindow : Window, IDisposable
 					ImGui.PushFont(UiBuilder.IconFont);
 					if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##clipboard" + player.EntityId))
 					{
-						ImGui.SetClipboardText(string.IsNullOrEmpty(_inputURL) && isTheRunningTV ? _placeHolderURL : _inputURL);
+						ImGui.SetClipboardText(string.IsNullOrEmpty(_inputURL) && playerTVRunning ? _placeHolderURL : _inputURL);
 					}
 					ImGui.PopFont();
 					if (ImGui.IsItemHovered())
@@ -761,7 +777,7 @@ public class ControlWindow : Window, IDisposable
 					ImGui.SameLine();
 
 					textColor = (urlExists || urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f);
-					if (!isTheRunningTV && !urlEmpty)
+					if (!playerTVRunning && !urlEmpty)
 					{
 						ImGui.PushStyleColor(ImGuiCol.Border, textColor);
 					}
@@ -769,7 +785,7 @@ public class ControlWindow : Window, IDisposable
 					ImGui.SetNextItemWidth(200);
 					ImGui.InputText("##URL", ref _inputURL, 1000, ImGuiInputTextFlags.None);
 					ImGui.PopStyleVar();
-					if (!isTheRunningTV && !urlEmpty)
+					if (!playerTVRunning && !urlEmpty)
 					{
 						ImGui.PopStyleColor();
 					}
@@ -810,8 +826,8 @@ public class ControlWindow : Window, IDisposable
 
 					ImGui.SameLine();
 
-					bool refreshNeeded = isTheRunningTV && !string.IsNullOrEmpty(_inputURL) && urlExists;
-					if (isTheRunningTV)
+					bool refreshNeeded = playerTVRunning && !string.IsNullOrEmpty(_inputURL) && urlExists;
+					if (playerTVRunning)
 					{
 						textColor = refreshNeeded ? new Vector4(0.0f, 1.0f, 1.0f, 1.0f) : new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
 						ImGui.PushStyleColor(ImGuiCol.Text, textColor);
@@ -821,7 +837,7 @@ public class ControlWindow : Window, IDisposable
 						ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1.0f));
 					}
 					ImGui.PushFont(UiBuilder.IconFont);
-					if (ImGui.Button((isTheRunningTV ?
+					if (ImGui.Button((playerTVRunning ?
 						(refreshNeeded ?
 							FontAwesomeIcon.ArrowRight.ToIconString()
 							: FontAwesomeIcon.Stop.ToIconString()
@@ -831,7 +847,7 @@ public class ControlWindow : Window, IDisposable
 					{
 						try
 						{
-							if (!isTheRunningTV || refreshNeeded)
+							if (!playerTVRunning || refreshNeeded)
 							{
 								if (urlExists)
 								{
@@ -853,7 +869,7 @@ public class ControlWindow : Window, IDisposable
 						}
 					}
 					ImGui.PopFont();
-					if (isTheRunningTV || !urlExists)
+					if (playerTVRunning || !urlExists)
 					{
 						ImGui.PopStyleColor();
 					}
@@ -862,7 +878,7 @@ public class ControlWindow : Window, IDisposable
 						ImGui.BeginTooltip();
 						ImGui.Text(
 
-							isTheRunningTV ?
+							playerTVRunning ?
 								(!string.IsNullOrEmpty(_inputURL) && urlExists ? "Visit new URL"
 								: "Stop"
 							)
@@ -871,7 +887,7 @@ public class ControlWindow : Window, IDisposable
 						ImGui.EndTooltip();
 					}
 
-					if (isTheRunningTV)
+					if (playerTVRunning)
 					{
 						ImGui.SetNextItemWidth(265);
 						ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1));
@@ -945,18 +961,6 @@ public class ControlWindow : Window, IDisposable
 							ImGui.EndTooltip();
 						}
 					}
-					if (!isTheRunningTV)
-					{
-						ImGui.Text("Play Game:");
-						if(ImGui.Button("Load ROM"))
-						{
-							if(LocalEntityId.HasValue)
-							{
-								_core.SetCurrentTV(LocalEntityId.Value);
-								_core.PlayGame();
-							}
-						}
-					}
 				}
 			}
 			else
@@ -967,6 +971,168 @@ public class ControlWindow : Window, IDisposable
 		}
 		ImGui.EndTabItem();
 	}
+	
+	private void DrawGame()
+	{
+		uint entityId = LocalEntityId ?? 0;
+		bool snesExists = !string.IsNullOrEmpty(_plugin.AssemblyLocationSnes);
+
+		if (_playerCarbuncleFound || _core.TVExistsForEntity(entityId))
+		{
+			bool playerTVRunning = _core.IsLocalPlayerTVOn();
+
+			ImGui.PushStyleColor(ImGuiCol.Text, _playerCarbuncleFound ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
+			ImGui.PushFont(UiBuilder.IconFont);
+			if(ImGui.Button(FontAwesomeIcon.PowerOff.ToIconString() + "##power" + entityId))
+			{
+				if (_playerCarbuncleFound)
+				{
+					PenumbraIPC.ApplyTempMod("companion", Services.Objects.LocalPlayer?.ObjectIndex, _plugin.PenumbraTempModPaths);
+				}
+				else
+				{
+					PenumbraIPC.RemoveTempMod("companion");
+				}
+				PenumbraIPC.Redraw(_core.GetCompanion(entityId)?.ObjectIndex ?? -1);
+			}
+			ImGui.PopFont();
+			ImGui.PopStyleColor();
+			if (!_playerCarbuncleFound)
+			{
+				if (playerTVRunning)
+				{
+					ImGui.SameLine();
+					Vector4 textColor = new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
+					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
+
+					ImGui.PushFont(UiBuilder.IconFont);
+					if (ImGui.Button(FontAwesomeIcon.Stop.ToIconString()+ "##stopgame" + entityId))
+					{
+						StopVideo();
+					}
+					ImGui.PopFont();
+					ImGui.PopStyleColor();
+
+					ImGui.SameLine();
+					
+					ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(12, 8));
+					ImGui.PushStyleColor(ImGuiCol.Text, _core.IsPlayingSnes() && _core.IsSnesControlsEnabled() ? new Vector4(0.0f, 1.0f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
+					ImGui.PushFont(UiBuilder.IconFont);
+					if(ImGui.Button(FontAwesomeIcon.Gamepad.ToIconString() + "##alphaenablecontrols"))
+					{
+						_core.EnableSnesControls(!_core.IsSnesControlsEnabled());
+					}
+					ImGui.PopFont();
+					ImGui.PopStyleColor();
+					ImGui.PopStyleVar();
+					if (ImGui.IsItemHovered())
+					{
+						ImGui.BeginTooltip();
+						ImGui.Text((_core.IsPlayingSnes() && _core.IsSnesControlsEnabled()) ? "Unplug Controls" : "Plug in Controls");
+						ImGui.EndTooltip();
+					}
+					
+					ImGui.SameLine();
+
+					ImGui.PushFont(UiBuilder.IconFont);
+					ImGui.SetNextItemWidth(100);
+					ImGui.SliderFloat("##volumebarsnes", ref _volumesnes, 0, 100, _volumesnes < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volumesnes <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
+					if (ImGui.IsItemActive())
+					{
+						_uiElementActive = true;
+					}
+					if (ImGui.IsItemDeactivatedAfterEdit())
+					{
+						VolumeSnes(_volumesnes);
+						_uiElementActive = false;
+					}
+					ImGui.PopFont();
+				}
+
+				if (snesExists)
+				{
+					if (ImGui.Button("Open Folder"))
+					{
+						Process.Start(new ProcessStartInfo
+						{
+							FileName = Plugin.ROMSLocationSnesDir,
+							UseShellExecute = true
+						});
+					}
+					ImGui.SameLine();
+					if(ImGui.Button("Load ROM"))
+					{
+						_fileDialog.OpenFileDialog(
+							"load SNES ROM",
+							"SNES ROMs{.sfc,.smc},All Files{.*}",
+							(success, paths) =>
+							{
+								if (!success || paths.Count == 0) { return; }
+								string romPath = paths[0];
+								
+								StartGame(romPath);
+
+							},
+							1,
+							Plugin.ROMSLocationSnesDir,
+							false);
+					}
+				}
+				else
+				{
+					ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: Snes9x not found");
+				}
+
+				ImGui.Text("Configure Keys:");
+
+				string pressAKey = "Press a key... (ESC to abort)";
+
+				foreach(Snes9xInput key in _core.SnesKeys.Keys)
+				{
+					if(_core.SnesKeys.TryGetValue(key, out VirtualKey virtualKey))
+					{
+						float pos = ImGui.GetCursorPosX();
+						ImGui.Text(key.ToString());
+						ImGui.SameLine();
+						ImGui.SetCursorPosX(pos + 80);
+						string label = (_waitingForKey == (int)key ? pressAKey : virtualKey == VirtualKey.NO_KEY ? "Unmapped" : virtualKey.ToString()) + "##keymap"+key;
+
+						if (ImGui.Button(label))
+						{
+							_waitingForKey = (int)key;
+						}
+
+						if (_waitingForKey == (int)key)
+						{
+							foreach (VirtualKey vk in Services.KeyState.GetValidVirtualKeys())
+							{
+								if (Services.KeyState[vk])
+								{
+									if (vk == VirtualKey.ESCAPE)
+									{
+										_waitingForKey = -1;
+										break;
+									}
+									_core.SnesKeys[key] = vk;
+									_plugin.Config.KeyMappings[key] = vk;
+									_plugin.Config.Save();
+									_waitingForKey = -1;
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		else
+		{
+			ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: You have not summoned");
+			ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " your Blue Carbuncle.");
+		}
+		ImGui.EndTabItem();
+	}
+	
 	private void DrawSettings()
 	{
 		bool mpvUpdateAvailable = _plugin.LibResources.MpvCheckResult[0] != string.Empty;

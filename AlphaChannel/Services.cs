@@ -30,4 +30,10 @@ public class Services
 
 	[PluginService]
 	public static IDutyState DutyState { get; private set; } = null!;
+
+	[PluginService]
+	public static IFramework Framework { get; private set; } = null!;
+
+	[PluginService]
+	public static IKeyState KeyState { get; private set; } = null!;
 }

@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.Diagnostics;
-using System.Runtime;
 using System.Runtime.InteropServices;
+using Newtonsoft.Json;
 using SharpDX;
 using SharpDX.D3DCompiler;
 using SharpDX.Direct3D;
@@ -19,8 +19,6 @@ public sealed class Snes9xRenderer : IDisposable
 
 		private static Snes9xRenderer? _instance;
 
-		private static string _dirPath = AppContext.BaseDirectory;
-
 		private static readonly RetroEnvironmentT _envCb = EnvironmentCb;
 		private static readonly RetroVideoRefreshT _videoCb = VideoRefreshCb;
 		private static readonly RetroAudioSampleT _audioCb = AudioSampleCb;
@@ -30,6 +28,7 @@ public sealed class Snes9xRenderer : IDisposable
 
 		private static IntPtr _sysDirPtr;
 		private static IntPtr _romPathPtr;
+		private static string _srmPath = string.Empty;
 
 		private readonly Plugin _plugin;
 		private readonly short[,] _input = new short[2, 16];
@@ -67,6 +66,8 @@ public sealed class Snes9xRenderer : IDisposable
 		private static RetroSerializeSizeFn _serializeSize = null!;
 		private static RetroSerializeFn _serialize = null!;
 		private static RetroUnserializeFn _unserialize = null!;
+		private static RetroGetMemoryDataFn _getMemoryData = null!;
+		private static RetroGetMemorySizeFn _getMemorySize = null!;
 
 		private static T Get<T>(string name) where T : Delegate =>
 			Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(_lib, name));
@@ -92,6 +93,8 @@ public sealed class Snes9xRenderer : IDisposable
 			_serializeSize = Get<RetroSerializeSizeFn>("retro_serialize_size");
 			_serialize = Get<RetroSerializeFn>("retro_serialize");
 			_unserialize = Get<RetroUnserializeFn>("retro_unserialize");
+			_getMemoryData = Get<RetroGetMemoryDataFn>("retro_get_memory_data");
+			_getMemorySize = Get<RetroGetMemorySizeFn>("retro_get_memory_size");
 		}
 
 		private static void FreeNative()
@@ -133,6 +136,8 @@ public sealed class Snes9xRenderer : IDisposable
 		[UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate nuint RetroAudioSampleBatchT(IntPtr data, nuint frames);
 		[UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void RetroInputPollT();
 		[UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate short RetroInputStateT(uint port, uint device, uint index, uint id);
+		[UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate IntPtr RetroGetMemoryDataFn(uint id);
+		[UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate nuint RetroGetMemorySizeFn(uint id);
 
 		[StructLayout(LayoutKind.Sequential)]
 		private struct RetroSystemInfo
@@ -202,8 +207,6 @@ public sealed class Snes9xRenderer : IDisposable
 					_scaler = new CrtLottesScaler(DxHandler.DrawDevice, _targetTexture);
 				}
 
-				_dirPath = _plugin.AssemblyLocationSnesDir ?? AppContext.BaseDirectory;
-
 				LoadNative(_plugin.AssemblyLocationSnes);
 
 				_setEnvironment(_envCb);
@@ -219,6 +222,7 @@ public sealed class Snes9xRenderer : IDisposable
 				_getSystemInfo(out RetroSystemInfo si);
 				Services.Log.Debug($"[SNES9X] core {Marshal.PtrToStringAnsi(si.Library_name)} {Marshal.PtrToStringAnsi(si.Library_version)}");
 
+				Services.Log.Debug($"[SNES9X] need_fullpath={si.Need_fullpath}, romPath={romPath}");
 				var info = new RetroGameInfo();
 				IntPtr dataPtr = IntPtr.Zero;
 				try
@@ -255,10 +259,15 @@ public sealed class Snes9xRenderer : IDisposable
 					}
 				}
 
+				_srmPath = Path.ChangeExtension(romPath, ".srm");
+				LoadSram();
+
 				_getSystemAvInfo(out RetroSystemAvInfo av);
 				_fps = av.Timing.Fps > 1 ? av.Timing.Fps : 60.0;
 				_audio = new Snes9xAudio((int)av.Timing.Sample_rate);
 				_setControllerPortDevice(0, RETRO_DEVICE_JOYPAD);
+				
+				SetVolume(25);
 
 				Services.Log.Debug($"[SNES9X] loaded {Path.GetFileName(romPath)} @ {_fps:0.##}fps, {av.Timing.Sample_rate:0}Hz");
 			}
@@ -292,11 +301,18 @@ public sealed class Snes9xRenderer : IDisposable
 		{
 			if (_coreInited)
 			{
-				try { _unloadGame(); } catch { }
-				try { _deinit(); } catch { }
+				SaveSram();
+				Services.Log.Debug("[SNES9X] calling unload_game");
+				try { Services.Log.Debug("before unload");
+_unloadGame();
+Services.Log.Debug("after unload"); }
+				catch (Exception e) { Services.Log.Error($"[SNES9X] unload_game threw: {e}"); }
+
+				try { _deinit(); }
+				catch (Exception e) { Services.Log.Error($"[SNES9X] deinit threw: {e}"); }
 				_coreInited = false;
 			}
-
+			
 			_audio?.Dispose(); _audio = null;
 			_scaler?.Dispose(); _scaler = null;
 			_targetTexture?.Dispose(); _targetTexture = null;
@@ -315,9 +331,61 @@ public sealed class Snes9xRenderer : IDisposable
 		{
 			if (_sysDirPtr == IntPtr.Zero)
 			{
-				_sysDirPtr = Marshal.StringToHGlobalAnsi(_dirPath);
+				_sysDirPtr = Marshal.StringToHGlobalAnsi(Plugin.ROMSLocationSnesDir);
 			}
 			return _sysDirPtr;
+		}
+
+		private DateTime _lastSramCheck = DateTime.UtcNow;
+		internal void OnFrameworkUpdate()
+		{
+			if ((DateTime.UtcNow - _lastSramCheck).TotalSeconds >= 1)
+			{
+				_lastSramCheck = DateTime.UtcNow;
+				SaveSramIfChanged();
+			}
+			SaveSramIfChanged();
+		}
+
+		private byte[]? _lastSram;
+		private void SaveSramIfChanged()
+		{
+			if (!_coreInited) { return; }
+			nuint size = _getMemorySize(RETRO_MEMORY_SAVE_RAM);
+			IntPtr ptr = _getMemoryData(RETRO_MEMORY_SAVE_RAM);
+			if (size == 0 || ptr == IntPtr.Zero) { return; }
+
+			byte[] sram = new byte[(int)size];
+			Marshal.Copy(ptr, sram, 0, (int)size);
+
+			if (_lastSram != null && sram.AsSpan().SequenceEqual(_lastSram)) { return; }
+			_lastSram = sram;
+			File.WriteAllBytes(_srmPath, sram);
+		}
+
+		private const uint RETRO_MEMORY_SAVE_RAM = 0;
+		private void SaveSram()
+		{
+			if (!_coreInited) { return; }
+			nuint size = _getMemorySize(RETRO_MEMORY_SAVE_RAM);
+			IntPtr ptr = _getMemoryData(RETRO_MEMORY_SAVE_RAM);
+			if (size == 0 || ptr == IntPtr.Zero) { return; }
+
+			byte[] sram = new byte[(int)size];
+			Marshal.Copy(ptr, sram, 0, (int)size);
+			File.WriteAllBytes(_srmPath, sram);
+		}
+		private void LoadSram()
+		{
+			if (!File.Exists(_srmPath)) { return; }
+			nuint size = _getMemorySize(RETRO_MEMORY_SAVE_RAM);
+			IntPtr ptr = _getMemoryData(RETRO_MEMORY_SAVE_RAM);
+			if (size == 0 || ptr == IntPtr.Zero) { return; }
+
+			byte[] sram = File.ReadAllBytes(_srmPath);
+			int n = Math.Min(sram.Length, (int)size);
+			Marshal.Copy(sram, 0, ptr, n);
+			_lastSram = sram;
 		}
 
 		public void SetButton(int port, int id, bool pressed)
@@ -378,9 +446,11 @@ public sealed class Snes9xRenderer : IDisposable
 					Marshal.WriteByte(data, 1);
 					return true;
 				case ENV_GET_SYSTEM_DIRECTORY:
-				case ENV_GET_SAVE_DIRECTORY:
+					Services.Log.Debug($"[SNES9X] dir requested (cmd {cmd}): {Plugin.ROMSLocationSnesDir}");
 					Marshal.WriteIntPtr(data, GetDir());
 					return true;
+				case ENV_GET_SAVE_DIRECTORY:
+					return false;
 				case ENV_GET_VARIABLE_UPDATE:
 					Marshal.WriteByte(data, 0);
 					return true;
@@ -422,6 +492,8 @@ public sealed class Snes9xRenderer : IDisposable
 			catch { }
 			return 0;
 		}
+
+		public void SetVolume(int volume) => _audio?.SetVolume(volume);
 	}
 	
 	internal sealed class Snes9xAudio : IDisposable
@@ -441,7 +513,11 @@ public sealed class Snes9xRenderer : IDisposable
 			_source.BufferEnd += OnBufferEnd;
 			_source.Start();
 		}
-
+		public void SetVolume(int volume)
+		{
+			float vol = volume / 100.0f;
+			_source.SetVolume(Math.Clamp(vol, 0f, 2f));
+		}
 		public void Submit(IntPtr data, int frames)
 		{
 			int bytes = frames * 4;
@@ -498,13 +574,12 @@ public sealed class Snes9xRenderer : IDisposable
 		}
 	}
 
-	public static class Snes9xInput
+	public enum Snes9xInput
 	{
-		public const int B = 0, Y = 1, SELECT = 2, START = 3,
-			UP = 4, DOWN = 5, LEFT = 6, RIGHT = 7,
-			A = 8, X = 9, L = 10, R = 11;
+		B = 0, Y = 1, SELECT = 2, START = 3,
+		UP = 4, DOWN = 5, LEFT = 6, RIGHT = 7,
+		A = 8, X = 9, L = 10, R = 11
 	}
-
 
 	//probably not gonna go for crt royale
 	internal sealed class CrtLottesScaler : IDisposable

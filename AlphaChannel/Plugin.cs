@@ -4,6 +4,8 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
+using Dalamud.Plugin.Services;
+using SharpCompress.Compressors.ZStandard.Unsafe;
 
 namespace AlphaChannel;
 
@@ -13,7 +15,7 @@ public class Plugin : IDalamudPlugin
 	public string? AssemblyLocationMPV { get; set; }
 	public string? AssemblyLocationYTDLP { get; set; }
 	public string? AssemblyLocationSnes { get; set; }
-	public string? AssemblyLocationSnesDir { get; set; }
+	public static string? ROMSLocationSnesDir { get; set; }
 	
 
 	public static Guid PluginSessionGUID { get; set;}
@@ -30,8 +32,11 @@ public class Plugin : IDalamudPlugin
 	public static readonly int ResolutionWidth = 1920;
 	public static readonly int ResolutionHeight = 1080;
 	private readonly ControlWindow _mainWindow;
+	private readonly Core _core;
 	private readonly string _pluginDir;
 	public Resources LibResources { get; }
+	public Configuration Config { get; }
+	public Core.WndProcKeyUpReader WindowKeyUpReader { get; }
 
 	public Plugin(IDalamudPluginInterface pluginInterface)
 	{
@@ -45,11 +50,14 @@ public class Plugin : IDalamudPlugin
 			throw new InvalidOperationException("Could not determine plugin directory");
 		}
 
+		Config = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
+		Config.Initialize(pluginInterface);
+		
 		LibResources = new Resources(_pluginDir);
 		PenumbraTempModPaths = LibResources.LoadPenumbraModResources();
 		PenumbraTempScreenPaths = LibResources.LoadPenumbraScreenResources();
 		
-		AssemblyLocationSnesDir = Path.Combine(_pluginDir, "resources", "snes");
+		ROMSLocationSnesDir = Path.Combine(_pluginDir, "resources", "snes")!;
 
 		MpvRenderer.Setup(this);
 		Resources.NativeLoader.Register(this);
@@ -65,7 +73,8 @@ public class Plugin : IDalamudPlugin
 		#if IS_TEST
 				title += " (Test)";
 		#endif
-		_mainWindow = new ControlWindow(this, title);
+		_core = new Core(this);
+		_mainWindow = new ControlWindow(this, _core, title);
 		WindowSystem.AddWindow(_mainWindow);
 
 		pluginInterface.UiBuilder.OpenConfigUi += ToggleMainUI;
@@ -74,6 +83,15 @@ public class Plugin : IDalamudPlugin
 		Services.CommandManager.AddHandler(CommandRemote, new CommandInfo(HandleCommand) { HelpMessage = "Toggles the Remote Window", ShowInHelp = true });
 
 		ApiProvider.Init(this);
+
+		Services.Framework.Update += OnFrameworkUpdate;
+
+		WindowKeyUpReader = new Core.WndProcKeyUpReader(pluginInterface.UiBuilder.WindowHandlePtr);
+	}
+
+	private void OnFrameworkUpdate(IFramework framework)
+	{
+		_core?.OnFrameworkUpdate();
 	}
 
 	public void Dispose()
@@ -84,11 +102,13 @@ public class Plugin : IDalamudPlugin
 
 		ApiProvider.DeInit();
 
-		LibResources.Dispose();
+		LibResources?.Dispose();
 
 		PenumbraIPC.Dispose();
 
-		WindowSystem.RemoveAllWindows();
+		WindowSystem?.RemoveAllWindows();
+
+		WindowKeyUpReader?.Dispose();
 
 		GC.SuppressFinalize(this);
 	}
