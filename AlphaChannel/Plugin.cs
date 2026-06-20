@@ -12,10 +12,14 @@ public class Plugin : IDalamudPlugin
 	// Required for LivePluginLoader support
 	public string? AssemblyLocationMPV { get; set; }
 	public string? AssemblyLocationYTDLP { get; set; }
+	public string? AssemblyLocationSnes { get; set; }
+	public string? AssemblyLocationSnesDir { get; set; }
+	
 
 	public static Guid PluginSessionGUID { get; set;}
 	public Dictionary<string, string> PenumbraTempModPaths { get; set;}
 	public Dictionary<string, string> PenumbraTempScreenPaths { get; set;}
+	
 
 	// Required for LivePluginLoader support — interface member cannot be static
 	public string Name => "AlphaChannel";
@@ -25,7 +29,7 @@ public class Plugin : IDalamudPlugin
 
 	public static readonly int ResolutionWidth = 1920;
 	public static readonly int ResolutionHeight = 1080;
-	private ControlWindow _mainWindow;
+	private readonly ControlWindow _mainWindow;
 	private readonly string _pluginDir;
 	public Resources LibResources { get; }
 
@@ -44,16 +48,21 @@ public class Plugin : IDalamudPlugin
 		LibResources = new Resources(_pluginDir);
 		PenumbraTempModPaths = LibResources.LoadPenumbraModResources();
 		PenumbraTempScreenPaths = LibResources.LoadPenumbraScreenResources();
+		
+		AssemblyLocationSnesDir = Path.Combine(_pluginDir, "resources", "bsnes");
+		AssemblyLocationSnes = Path.Combine(AssemblyLocationSnesDir, "snes9x_libretro.dll");
+		Services.Log.Debug("Loaded AssemblyLocationBsnesDir:" + AssemblyLocationSnesDir);
+		Services.Log.Debug("Loaded AssemblyLocationBsnes:" + AssemblyLocationSnes);
+
+
+		MpvRenderer.Setup(this);
+		Resources.NativeLoader.Register(this);
 
 		// Spin up DX handling from the plugin interface
 		DxHandler.Initialise(Services.PluginInterface);
 
 		// Hook up render hook
 		pluginInterface.UiBuilder.Draw += Render;
-
-		//IpcProvider.Init(this);
-
-		MpvRenderer.Setup(this);
 
 		// Create Main Window
 		string title = "AlphaChannel Remote ";
@@ -67,6 +76,8 @@ public class Plugin : IDalamudPlugin
 		pluginInterface.UiBuilder.OpenMainUi += ToggleMainUI;
 
 		Services.CommandManager.AddHandler(CommandRemote, new CommandInfo(HandleCommand) { HelpMessage = "Toggles the Remote Window", ShowInHelp = true });
+
+		ApiProvider.Init(this);
 	}
 
 	public void Dispose()

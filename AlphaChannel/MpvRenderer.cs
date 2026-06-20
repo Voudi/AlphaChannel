@@ -5,44 +5,28 @@ namespace AlphaChannel
 {
 	public class MpvRenderer : IDisposable
 	{
+		private const string DLL = "libmpv-2";
 		private static Plugin? _pluginInstance;
 		public static void Setup(Plugin plugin)
 		{
 			_pluginInstance = plugin;
-			NativeLibrary.SetDllImportResolver(typeof(MpvRenderer).Assembly, (name, assembly, path) =>
-			{
-				if (name == "libmpv-2")
-				{
-					if (_pluginInstance.AssemblyLocationMPV != null && NativeLibrary.TryLoad(_pluginInstance.AssemblyLocationMPV, out nint handle))
-					{
-						return handle;
-					}
-					else
-					{
-						Services.Log.Error($"[MPV] Failed to load libmpv from path: {_pluginInstance.AssemblyLocationMPV}");
-						return IntPtr.Zero;
-					}
-				}
-				Services.Log.Error($"[MPV] Failed to resolve native library: {name}");
-				return IntPtr.Zero;
-			});
 		}
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr mpv_create();
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_initialize(IntPtr ctx);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_set_option_string(IntPtr ctx, string name, string data);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_command(IntPtr ctx, string[] args);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_render_context_create(ref IntPtr res, IntPtr ctx, IntPtr parms);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_render_context_render(IntPtr ctx, IntPtr parms);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern void mpv_render_context_free(IntPtr ctx);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern void mpv_render_context_set_update_callback(IntPtr ctx, MpvRenderUpdateFn callback, IntPtr callback_ctx);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern ulong mpv_render_context_update(IntPtr ctx);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr mpv_wait_event(IntPtr ctx, double timeout);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_request_log_messages(IntPtr ctx, string min_level);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern void mpv_terminate_destroy(IntPtr ctx);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_get_property(IntPtr ctx, string name, int format, out double data);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_get_property(IntPtr ctx, string name, int format, IntPtr data);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr mpv_get_property_string(IntPtr ctx, string name);
-		[DllImport("libmpv-2", CallingConvention = CallingConvention.Cdecl)] private static extern void mpv_free(IntPtr data);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr mpv_create();
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_initialize(IntPtr ctx);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_set_option_string(IntPtr ctx, string name, string data);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_command(IntPtr ctx, string[] args);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_render_context_create(ref IntPtr res, IntPtr ctx, IntPtr parms);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_render_context_render(IntPtr ctx, IntPtr parms);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern void mpv_render_context_free(IntPtr ctx);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern void mpv_render_context_set_update_callback(IntPtr ctx, MpvRenderUpdateFn callback, IntPtr callback_ctx);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern ulong mpv_render_context_update(IntPtr ctx);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr mpv_wait_event(IntPtr ctx, double timeout);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_request_log_messages(IntPtr ctx, string min_level);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern void mpv_terminate_destroy(IntPtr ctx);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_get_property(IntPtr ctx, string name, int format, out double data);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_get_property(IntPtr ctx, string name, int format, IntPtr data);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr mpv_get_property_string(IntPtr ctx, string name);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern void mpv_free(IntPtr data);
 
 		[StructLayout(LayoutKind.Sequential)]
 		private struct MpvRenderParam { public int Type; public IntPtr Data; }

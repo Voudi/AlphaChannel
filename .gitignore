@@ -9,5 +9,7 @@ packages/
 .gitignore
 *.bat
 *.sh
+*.sfc
+snes9x_libretro.dll
 AlphaChannel/resources/alphachannelscreenCampfire.avfx
 AlphaChannel/resources/alphachannelscreenCarbuncle.avfx

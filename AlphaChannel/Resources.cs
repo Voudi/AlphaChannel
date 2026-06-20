@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Penumbra.Api.IpcSubscribers;
 using SharpCompress.Archives;
@@ -36,6 +37,8 @@ public class Resources : IDisposable
 		}
 		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "alphachannelscreentex_*.atex").ToList().ForEach(File.Delete);
 		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "alphachannelscreen_*.avfx").ToList().ForEach(File.Delete);
+		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "bsnesscreentex_*.atex").ToList().ForEach(File.Delete);
+		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "bsnesscreen_*.avfx").ToList().ForEach(File.Delete);
 		GC.SuppressFinalize(this);
 	}
 
@@ -73,7 +76,7 @@ public class Resources : IDisposable
 		{
 			string path = Path.Combine(_pluginDir, "resources", "alphachannelscreentex_"+Plugin.PluginSessionGUID+".atex");
 			File.Copy(oldPath, path);
-			paths.Add("chara/monster/m8373/obj/body/b0001/vfx/texture/alphachannelscreentex.atex", path);
+			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreentex.atex", path);
 		}
 		else
 		{
@@ -86,6 +89,30 @@ public class Resources : IDisposable
 			string path = Path.Combine(_pluginDir, "resources", "alphachannelscreen_"+Plugin.PluginSessionGUID+".avfx");
 			File.Copy(oldPath, path);
 			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreen_"+Plugin.PluginSessionGUID+".avfx", path);
+		}
+		else
+		{
+			throw new FileNotFoundException($"Required resource not found: {oldPath}");
+		}
+
+		oldPath = Path.Combine(_pluginDir, "resources", "bsnesscreen.avfx");
+		if (File.Exists(oldPath))
+		{
+			string path = Path.Combine(_pluginDir, "resources", "bsnesscreen_"+Plugin.PluginSessionGUID+".avfx");
+			File.Copy(oldPath, path);
+			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/bsnesscreen_"+Plugin.PluginSessionGUID+".avfx", path);
+		}
+		else
+		{
+			throw new FileNotFoundException($"Required resource not found: {oldPath}");
+		}
+
+		oldPath = Path.Combine(_pluginDir, "resources", "bsnesscreentex.atex");
+		if (File.Exists(oldPath))
+		{
+			string path = Path.Combine(_pluginDir, "resources", "bsnesscreentex_"+Plugin.PluginSessionGUID+".atex");
+			File.Copy(oldPath, path);
+			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/bsnesscreentex.atex", path);
 		}
 		else
 		{
@@ -289,6 +316,38 @@ public class Resources : IDisposable
 		{
 			Services.Log.Error($"Error updating {nameStartsWith}: {e.Message} {e.StackTrace}");
 			return false;
+		}
+	}
+
+	internal static class NativeLoader
+	{
+		private static Plugin? _plugin;
+
+		public static void Register(Plugin plugin)
+		{
+			_plugin = plugin;
+			NativeLibrary.SetDllImportResolver(typeof(NativeLoader).Assembly, Resolve);
+		}
+
+		private static IntPtr Resolve(string name, System.Reflection.Assembly assembly, DllImportSearchPath? path)
+		{
+			switch (name)
+			{
+				case "libmpv-2":
+					return TryLoad(_plugin?.AssemblyLocationMPV, "MPV");
+				default:
+					return IntPtr.Zero;
+			}
+		}
+
+		private static IntPtr TryLoad(string? location, string tag)
+		{
+			if (location != null && NativeLibrary.TryLoad(location, out nint handle))
+			{
+				return handle;
+			}
+			Services.Log.Error($"[{tag}] Failed to load native lib from: {location}");
+			return IntPtr.Zero;
 		}
 	}
 }
