@@ -10,7 +10,7 @@ public class Configuration : IPluginConfiguration
     public int Version { get; set; }
     int IPluginConfiguration.Version { get => Version; set => throw new NotImplementedException(); }
 
-    public Dictionary<Snes9xInput, VirtualKey> KeyMappings { get; set; } = new();
+    internal Dictionary<Snes9xInput, VirtualKey> KeyMappings { get; set; } = new();
 	
 
 	[NonSerialized] private IDalamudPluginInterface _pi = null!;

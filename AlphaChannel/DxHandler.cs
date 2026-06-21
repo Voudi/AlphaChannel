@@ -6,11 +6,11 @@ namespace AlphaChannel;
 
 internal static class DxHandler
 {
-	public static D3D11.Device? Device { get; private set; }
-	public static D3D11.Device? DrawDevice { get; private set; }
-	public static long AdapterLuid { get; private set; }
+	internal static D3D11.Device? Device { get; private set; }
+	internal static D3D11.Device? DrawDevice { get; private set; }
+	internal static long AdapterLuid { get; private set; }
 
-	public static void Initialise(IDalamudPluginInterface pluginInterface)
+	internal static void Initialise(IDalamudPluginInterface pluginInterface)
 	{
 		Device = new D3D11.Device(pluginInterface.UiBuilder.DeviceHandle);
 
@@ -53,7 +53,8 @@ internal static class DxHandler
 
 		return new D3D11.Device(gameAdapter, flags);
 	}
-	public static void Shutdown()
+	
+	public static void Dispose()
 	{
 		Device = null; //Do not dispose this device, as it's owned by the game process.
 		DrawDevice?.Dispose();

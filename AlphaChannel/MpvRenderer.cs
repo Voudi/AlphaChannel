@@ -65,7 +65,7 @@ namespace AlphaChannel
 			_ = mpv_set_option_string(_mpvCtx, "profile", "sw-fast");
 			_ = mpv_set_option_string(_mpvCtx, "ytdl", "yes");
 			_ = mpv_set_option_string(_mpvCtx, "script-opts", $"ytdl_hook-ytdl_path={_pluginInstance?.AssemblyLocationYTDLP}");
-			_ = mpv_set_option_string(_mpvCtx, "ytdl-format", $"bestvideo[height<={Plugin.ResolutionHeight}][ext=mp4]+bestaudio/best[height<={Plugin.ResolutionHeight}]");
+			_ = mpv_set_option_string(_mpvCtx, "ytdl-format", $"bestvideo[height<={Plugin.ScreenHeight}][ext=mp4]+bestaudio/best[height<={Plugin.ScreenHeight}]");
 			_ = mpv_set_option_string(_mpvCtx, "terminal", "yes");
 			_ = mpv_set_option_string(_mpvCtx, "volume", "25");
 			_ = mpv_set_option_string(_mpvCtx, "msg-level", "all=warn,ffmpeg=error");
@@ -450,6 +450,7 @@ namespace AlphaChannel
 		
 		public void Dispose()
 		{
+			StopRender();
 			_frameReady.Dispose();
 			GC.SuppressFinalize(this);
 		}

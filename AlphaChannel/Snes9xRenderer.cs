@@ -13,7 +13,7 @@ using SharpDX.XAudio2;
 
 namespace AlphaChannel
 {
-public sealed class Snes9xRenderer : IDisposable
+internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 	{
 		private const uint RETRO_DEVICE_JOYPAD = 1;
 
@@ -30,7 +30,7 @@ public sealed class Snes9xRenderer : IDisposable
 		private static IntPtr _romPathPtr;
 		private static string _srmPath = string.Empty;
 
-		private readonly Plugin _plugin;
+		private readonly Plugin _plugin = plugin;
 		private readonly short[,] _input = new short[2, 16];
 		private readonly Lock _lock = new();
 
@@ -42,7 +42,6 @@ public sealed class Snes9xRenderer : IDisposable
 		private volatile bool _running;
 		private bool _coreInited;
 		private double _fps = 60.0;
-		public Snes9xRenderer(Plugin plugin) => _plugin = plugin;
 
 		#region native loading (manual, so the DLL can be unloaded for a clean re-init)
 		//Global c++ state, not safe to init twice in one process, un/load dll during runtime with native lib to avoid dangling
@@ -142,33 +141,33 @@ public sealed class Snes9xRenderer : IDisposable
 		[StructLayout(LayoutKind.Sequential)]
 		private struct RetroSystemInfo
 		{
-			public IntPtr Library_name;
-			public IntPtr Library_version;
-			public IntPtr Valid_extensions;
-			[MarshalAs(UnmanagedType.U1)] public bool Need_fullpath;
-			[MarshalAs(UnmanagedType.U1)] public bool Block_extract;
+			internal IntPtr Library_name;
+			internal IntPtr Library_version;
+			internal IntPtr Valid_extensions;
+			[MarshalAs(UnmanagedType.U1)] internal bool Need_fullpath;
+			[MarshalAs(UnmanagedType.U1)] internal bool Block_extract;
 		}
 
 		[StructLayout(LayoutKind.Sequential)]
 		private struct RetroGameGeometry
 		{
-			public uint Base_width, Base_height, Max_width, Max_height;
-			public float Aspect_ratio;
+			internal uint Base_width, Base_height, Max_width, Max_height;
+			internal float Aspect_ratio;
 		}
 
 		[StructLayout(LayoutKind.Sequential)]
-		private struct RetroSystemTiming { public double Fps, Sample_rate; }
+		private struct RetroSystemTiming { internal double Fps, Sample_rate; }
 
 		[StructLayout(LayoutKind.Sequential)]
-		private struct RetroSystemAvInfo { public RetroGameGeometry Geometry; public RetroSystemTiming Timing; }
+		private struct RetroSystemAvInfo { internal RetroGameGeometry Geometry; internal RetroSystemTiming Timing; }
 
 		[StructLayout(LayoutKind.Sequential)]
 		private struct RetroGameInfo
 		{
-			public IntPtr Path;
-			public IntPtr Data;
-			public nuint Size;
-			public IntPtr Meta;
+			internal IntPtr Path;
+			internal IntPtr Data;
+			internal nuint Size;
+			internal IntPtr Meta;
 		}
 
 		private const uint ENV_GET_CAN_DUPE = 3;
@@ -180,7 +179,7 @@ public sealed class Snes9xRenderer : IDisposable
 		private const int PIXFMT_RGB565 = 2; //0=0RGB1555 1=XRGB8888 2=RGB565
 		#endregion
 
-		public bool Load(Texture2D targetTexture, string romPath)
+		internal bool Load(Texture2D targetTexture, string romPath)
 		{
 			if (_running)
 			{
@@ -278,7 +277,7 @@ public sealed class Snes9xRenderer : IDisposable
 			return true;
 		}
 
-		public void Unload()
+		internal void Unload()
 		{
 			_running = false;
 			_cancel?.Cancel();
@@ -303,9 +302,9 @@ public sealed class Snes9xRenderer : IDisposable
 			{
 				SaveSramIfChanged();
 				Services.Log.Debug("[SNES9X] calling unload_game");
-				try { Services.Log.Debug("before unload");
-_unloadGame();
-Services.Log.Debug("after unload"); }
+				try { 
+					_unloadGame();
+				}
 				catch (Exception e) { Services.Log.Error($"[SNES9X] unload_game threw: {e}"); }
 
 				try { _deinit(); }
@@ -317,7 +316,6 @@ Services.Log.Debug("after unload"); }
 			_scaler?.Dispose(); _scaler = null;
 			_targetTexture?.Dispose(); _targetTexture = null;
 
-			//free dlls
 			FreeNative();
 
 			_cancel?.Dispose(); _cancel = null;
@@ -327,11 +325,11 @@ Services.Log.Debug("after unload"); }
 			}
 		}
 
-		private static IntPtr GetDir()
+		private IntPtr GetDir()
 		{
 			if (_sysDirPtr == IntPtr.Zero)
 			{
-				_sysDirPtr = Marshal.StringToHGlobalAnsi(Plugin.ROMSLocationSnesDir);
+				_sysDirPtr = Marshal.StringToHGlobalAnsi(_plugin.ROMSLocationSnesDir);
 			}
 			return _sysDirPtr;
 		}
@@ -376,7 +374,7 @@ Services.Log.Debug("after unload"); }
 			_lastSram = sram;
 		}
 
-		public void SetButton(int port, int id, bool pressed)
+		internal void SetButton(int port, int id, bool pressed)
 		{
 			if (port is < 0 or > 1 || id is < 0 or > 15)
 			{
@@ -420,6 +418,8 @@ Services.Log.Debug("after unload"); }
 		private static void InputPollCb() { }
 		private static bool EnvironmentCb(uint cmd, IntPtr data)
 		{
+			var self = _instance;
+			if (self == null || data == IntPtr.Zero) { return false; }
 			switch (cmd)
 			{
 				case ENV_SET_PIXEL_FORMAT:
@@ -434,8 +434,7 @@ Services.Log.Debug("after unload"); }
 					Marshal.WriteByte(data, 1);
 					return true;
 				case ENV_GET_SYSTEM_DIRECTORY:
-					Services.Log.Debug($"[SNES9X] dir requested (cmd {cmd}): {Plugin.ROMSLocationSnesDir}");
-					Marshal.WriteIntPtr(data, GetDir());
+					Marshal.WriteIntPtr(data, self.GetDir());
 					return true;
 				case ENV_GET_SAVE_DIRECTORY:
 					return false;
@@ -481,7 +480,7 @@ Services.Log.Debug("after unload"); }
 			return 0;
 		}
 
-		public void SetVolume(int volume) => _audio?.SetVolume(volume);
+		internal void SetVolume(int volume) => _audio?.SetVolume(volume);
 	}
 	
 	internal sealed class Snes9xAudio : IDisposable
@@ -492,7 +491,7 @@ Services.Log.Debug("after unload"); }
 		private readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, DataStream> _pending = new();
 		private int _ctr;
 
-		public Snes9xAudio(int sampleRate)
+		internal Snes9xAudio(int sampleRate)
 		{
 			_xaudio = new XAudio2();
 			_master = new MasteringVoice(_xaudio);
@@ -501,12 +500,12 @@ Services.Log.Debug("after unload"); }
 			_source.BufferEnd += OnBufferEnd;
 			_source.Start();
 		}
-		public void SetVolume(int volume)
+		internal void SetVolume(int volume)
 		{
 			float vol = volume / 100.0f;
 			_source.SetVolume(Math.Clamp(vol, 0f, 2f));
 		}
-		public void Submit(IntPtr data, int frames)
+		internal void Submit(IntPtr data, int frames)
 		{
 			int bytes = frames * 4;
 			if (bytes <= 0) 
@@ -562,7 +561,7 @@ Services.Log.Debug("after unload"); }
 		}
 	}
 
-	public enum Snes9xInput
+	internal enum Snes9xInput
 	{
 		B = 0, Y = 1, SELECT = 2, START = 3,
 		UP = 4, DOWN = 5, LEFT = 6, RIGHT = 7,
@@ -585,20 +584,20 @@ Services.Log.Debug("after unload"); }
 		private readonly Texture2D _privateRt;
 		private readonly Texture2D _shared;
 
-		public float MaskStrength = 0.30f; //intensity
-		public float ScanBeam = 2.5f;
+		internal float MaskStrength = 0.30f; //intensity
+		internal float ScanBeam = 2.5f;
 
 		[StructLayout(LayoutKind.Sequential)]
 		private struct CrtParams
 		{
-			public RawVector2 UvScale;
-			public RawVector2 SrcSize;
-			public RawVector2 OutSize;
-			public float MaskStrength;
-			public float ScanBeam;
+			internal RawVector2 UvScale;
+			internal RawVector2 SrcSize;
+			internal RawVector2 OutSize;
+			internal float MaskStrength;
+			internal float ScanBeam;
 		}
 
-		public CrtLottesScaler(SharpDX.Direct3D11.Device dev, Texture2D displayTarget)
+		internal CrtLottesScaler(SharpDX.Direct3D11.Device dev, Texture2D displayTarget)
 		{
 			_dstW = displayTarget.Description.Width;
 			_dstH = displayTarget.Description.Height;
@@ -703,7 +702,7 @@ Services.Log.Debug("after unload"); }
 				BindFlags.ConstantBuffer, CpuAccessFlags.None, ResourceOptionFlags.None, 0);
 		}
 
-		public void Blit(DeviceContext ctx, IntPtr data, int w, int h, int pitch)
+		internal void Blit(DeviceContext ctx, IntPtr data, int w, int h, int pitch)
 		{
 			var region = new ResourceRegion(0, 0, 0, w, h, 1);
 			ctx.UpdateSubresource(_src, 0, region, data, pitch, 0);
@@ -720,7 +719,7 @@ Services.Log.Debug("after unload"); }
 
 			ctx.OutputMerger.SetRenderTargets(_rtv);
 			ctx.ClearRenderTargetView(_rtv, new RawColor4(0, 0, 0, 1));
-			float arW = Plugin.ResolutionHeight * 4f / 3f;
+			float arW = Plugin.ScreenHeight * 4f / 3f;
 			float x = (_dstW - arW) / 2f;
 			ctx.Rasterizer.SetViewport(x, 0, arW, _dstH);
 			ctx.InputAssembler.InputLayout = null;

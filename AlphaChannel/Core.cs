@@ -15,39 +15,27 @@ using SharpDX.Direct3D11;
 using SharpDX.DXGI;
 using SharpDX.Mathematics.Interop;
 using Dalamud.Game.ClientState.Keys;
-using Dalamud.Plugin;
+using Dalamud.Game.ClientState.Objects.Enums;
 
 namespace AlphaChannel;
 
-public class Core : IDisposable
+internal sealed class Core : IDisposable
 {
-	private MpvRenderer? _currentMpvRenderer;
-	private Snes9xRenderer? _snesRenderer;
-	private CancellationTokenSource _renderCancellation = new CancellationTokenSource();
-	private DateTime _lastLoadYT = DateTime.MinValue;
-	private static readonly Regex _ytRegex = new Regex(@"^\w+://[^/]*youtube\.\w+/|^\w+://youtu\.be/", RegexOptions.Compiled);
-	private static bool IsYTURL(string url) => _ytRegex.IsMatch(url);
-
-	private readonly Dictionary<uint, IGameObject> _tvOwners = []; //PlayerEntityID, Companion
-	private readonly Dictionary<uint, IGameObject> _companionOwners = []; //PlayerEntityID, Companion
-	private readonly Texture2D _screenTexture;
-	private readonly Texture2D _snesScreenTexture;
-	private readonly ConcurrentDictionary<nint, ShaderResourceView> _views = new();
-	private uint _activeEntityId;
-	private uint _playingEntityId;
-	private uint? LocalEntityId => Services.Objects?.LocalPlayer?.EntityId;
-	
-	private bool _isPlayingSnes;
-	private bool _snesControlsEnabled;
 	private Plugin _plugin;
 
-	// Snes Key Inputs
-	public Dictionary<Snes9xInput, VirtualKey> SnesKeys { get; set; } = [];
+	private uint _activeEntityId; //Currently running TV PlayerId
+	private readonly Dictionary<uint, IGameObject> _tvOwners = []; //PlayerEntityID, Companion
+	private readonly Dictionary<uint, IGameObject> _companionOwners = []; //PlayerEntityID, Companion
+	private readonly ConcurrentDictionary<nint, ShaderResourceView> _views = new();
 
+	private MpvRenderer? _mpvRenderer;
+	private Snes9xRenderer? _snesRenderer;
+	private readonly Texture2D _screenTexture;
+	private readonly Texture2D _snesScreenTexture;
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
 	{
-		Width = Plugin.ResolutionWidth,
-		Height = Plugin.ResolutionHeight,
+		Width = Plugin.ScreenWidth,
+		Height = Plugin.ScreenHeight,
 		MipLevels = 1,
 		ArraySize = 1,
 		Format = Format.B8G8R8A8_UNorm,
@@ -59,8 +47,8 @@ public class Core : IDisposable
 	};
 	private static Texture2DDescription _snesTexture2dDescription = new Texture2DDescription
 	{
-		Width = Plugin.ResolutionWidth,
-		Height = Plugin.ResolutionHeight,
+		Width = Plugin.ScreenWidth,
+		Height = Plugin.ScreenHeight,
 		MipLevels = 1,
 		ArraySize = 1,
 		Format = Format.B5G6R5_UNorm,
@@ -70,162 +58,119 @@ public class Core : IDisposable
 		Usage = ResourceUsage.Default,
 		OptionFlags = ResourceOptionFlags.Shared
 	};
+	private CancellationTokenSource _renderCancellation = new();
 
-	public unsafe Core(Plugin plugin)
+	private DateTime _lastLoadYT = DateTime.MinValue;
+	private static readonly Regex _ytRegex = new(@"^\w+://[^/]*youtube\.\w+/|^\w+://youtu\.be/", RegexOptions.Compiled);
+	private static bool IsYTURL(string url) => _ytRegex.IsMatch(url);
+	
+	private bool _isPlayingSnes;
+	private bool _snesControlsEnabled;
+	internal Dictionary<Snes9xInput, VirtualKey> SnesKeyMap { get; set; } = [];
+
+	internal unsafe Core(Plugin plugin)
 	{
 		_plugin = plugin;
 
-		//INIT TEXTURE
 		_screenTexture = new Texture2D(DxHandler.Device, _texture2dDescription);
 		_snesScreenTexture = new Texture2D(DxHandler.Device, _snesTexture2dDescription);
 
-		using SharpDX.DXGI.Resource resource = _screenTexture.QueryInterface<SharpDX.DXGI.Resource>();
-		ClearTexture();
-
-		using SharpDX.DXGI.Resource snesResource = _snesScreenTexture.QueryInterface<SharpDX.DXGI.Resource>();
-		ClearTexture();
-
-		//INIT HOOKS
 		_getResourceSyncHook = Services.InteropProvider.HookFromAddress<ResourceManager.Delegates.GetResourceSync>(ResourceManager.Addresses.GetResourceSync.Value, GetResourceSyncDetour);
 		_textureOnLoadHook = Services.InteropProvider.HookFromAddress<Texture.Delegates.InitializeContents>(Texture.Addresses.InitializeContents.Value, TexOnLoadDetour);
 		nint actorVfxCreateAddress = Services.SigScanner.ScanText(ActorVfxCreateSig);
 		_actorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
-		_getResourceSyncHook.Enable();
 
+		_getResourceSyncHook.Enable();
 
 		List<Snes9xInput> keyOrder = [Snes9xInput.UP, Snes9xInput.DOWN, Snes9xInput.LEFT, Snes9xInput.RIGHT, Snes9xInput.A, Snes9xInput.B, Snes9xInput.X, Snes9xInput.Y, Snes9xInput.L, Snes9xInput.R, Snes9xInput.START, Snes9xInput.SELECT];
 		foreach(Snes9xInput key in keyOrder)
 		{
 			if(plugin.Config.KeyMappings.TryGetValue(key, out VirtualKey virtualKey))
 			{
-				SnesKeys.Add(key, virtualKey);
+				SnesKeyMap.Add(key, virtualKey);
 			}
 			else
 			{
-				SnesKeys.Add(key, VirtualKey.NO_KEY);
+				SnesKeyMap.Add(key, VirtualKey.NO_KEY);
 			}
 		}
-
-		
 	}
 
-	public bool IsTVTurnedOff()
-	{
-		return _activeEntityId == 0;
-	}
-
-	public bool IsLocalPlayerTVOn()
-	{
-		return _activeEntityId == LocalEntityId;
-	}
-	public bool IsEntityTVOn(uint entityId)
+	internal bool TVIsActive(uint entityId)
 	{
 		return _activeEntityId == entityId;
 	}
 
-	public bool TVExistsForEntity(uint entityId)
+	internal bool TVIsVisible(uint? entityId)
 	{
-		return _tvOwners.TryGetValue(entityId, out _);
-	}
-
-	public IGameObject? GetCompanion(uint entityId)
-	{
-		if(!_companionOwners.TryGetValue(entityId, out IGameObject? result))
-		{
-			Services.Log.Warning("Could not find companion for entity " + entityId);
-		}
-		return result;
-	}
-
-	public void SetCurrentTV(uint entityId)
-	{
-		_activeEntityId = entityId;
-	}
-
-	public async Task<bool> IsVideo(string url)
-	{
-		if (IsYTURL(url))
-		{
-			return true;
-		}
-		if(_plugin.AssemblyLocationYTDLP == null)
+		if(entityId == null)
 		{
 			return false;
 		}
-			
-		var psi = new ProcessStartInfo(_plugin.AssemblyLocationYTDLP, $"-j --no-playlist \"{url}\"")
-		{
-			RedirectStandardOutput = true,
-			RedirectStandardError = true,
-			UseShellExecute = false,
-			CreateNoWindow = true
-		};
-
-		using var proc = Process.Start(psi)!;
-		await proc.WaitForExitAsync();
-		return proc.ExitCode == 0;
+		return _tvOwners.TryGetValue(entityId.Value, out _);
 	}
 
-	public void StopVideo()
+	internal ushort GetCompanionIndex(uint entityId)
+	{
+		if(!_companionOwners.TryGetValue(entityId, out IGameObject? result))
+		{
+			return ushort.MaxValue;
+		}
+		return result.ObjectIndex;
+	}
+
+	internal void StopVideo()
 	{
 		if (_isPlayingSnes)
 		{
 			_snesRenderer?.Unload();
 			_isPlayingSnes = false;
 		}
-		_currentMpvRenderer?.Stop();
-		_currentMpvRenderer?.Dispose();
-		_currentMpvRenderer = null;
-		_playingEntityId = 0;
+		else
+		{
+			_mpvRenderer?.Stop();
+			_mpvRenderer = null;
+		}
 		_activeEntityId = 0;
-		ClearTexture();
 	}
 
-	public void PlayVideo(string url, int playbackPosition = 0, bool isPlaying = true)
+	internal void PlayVideo(uint entityId, string url, int playbackPosition = 0, bool isPlaying = true)
 	{
-		if (_currentMpvRenderer != null && _currentMpvRenderer.GetCurrentUrl() == url && !_currentMpvRenderer.IsIdle())
+		if (_mpvRenderer != null && _mpvRenderer.GetCurrentUrl() == url && !_mpvRenderer.IsIdle())
 		{
 			return;
 		}
 
+		ClearTexture(_screenTexture);
+
 		Task.Run(async () =>
 		{
-			/*
-			bool checkVideo = await IsVideo(url);
-			if(!checkVideo)
-			{
-				_plugin.ErrorPopup("No video found for url: " + url);
-				StopVideo();
-				return;
-			}
-			*/
-			int sleepTime = 0;
 			if (IsYTURL(url))
 			{
-				var elapsed = DateTime.Now - _lastLoadYT;
-				if (elapsed.TotalSeconds < 5)
+				TimeSpan elapsed = DateTime.Now - _lastLoadYT;
+				if (elapsed.TotalSeconds < 7)
 				{
-					sleepTime = Math.Min(Math.Max((int)(7000 - elapsed.TotalMilliseconds), 0), 7000); //Add some sleep time to avoid hitting rate limits
+					int sleepTime = Math.Min(Math.Max((int)(7000 - elapsed.TotalMilliseconds), 0), 7000); //Add some sleep time to avoid hitting rate limits
+					Thread.Sleep(sleepTime);
 				}
-
 				_lastLoadYT = DateTime.Now;
 			}
-
-			Thread.Sleep(sleepTime);
-
-			if (_currentMpvRenderer != null)
-			{
-				_currentMpvRenderer.Play(url, playbackPosition, isPlaying);
-				return;
-			}
+			
 			try
 			{
-				_currentMpvRenderer = new MpvRenderer();
-				_currentMpvRenderer.Initialize(Plugin.ResolutionWidth, Plugin.ResolutionHeight, _screenTexture, _renderCancellation);
-				_currentMpvRenderer.Play(url, playbackPosition, isPlaying);
+				if (_mpvRenderer != null)
+				{
+					_mpvRenderer.Play(url, playbackPosition, isPlaying);
+					_activeEntityId = entityId;
+					return;
+				}
+				_mpvRenderer = new MpvRenderer();
+				_mpvRenderer.Initialize(Plugin.ScreenWidth, Plugin.ScreenHeight, _screenTexture, _renderCancellation);
+				_mpvRenderer.Play(url, playbackPosition, isPlaying);
+				_activeEntityId = entityId;
 				while (true)
 				{
-					if (!_currentMpvRenderer.RenderFrame())
+					if (!_mpvRenderer.RenderFrame())
 					{
 						break;
 					}
@@ -239,101 +184,114 @@ public class Core : IDisposable
 		});
 	}
 
-	public void Pause(bool pause)
+	internal void Pause(bool pause)
 	{
 		if (!_renderCancellation.Token.IsCancellationRequested)
 		{
-			_currentMpvRenderer?.Pause(pause);
+			_mpvRenderer?.Pause(pause);
 		}
 	}
 
-	public bool IsIdle()
+	internal bool GetIdle()
 	{
 		if (!_renderCancellation.Token.IsCancellationRequested)
 		{
-			return _currentMpvRenderer?.IsEofReached() ?? true;
+			return _mpvRenderer?.IsEofReached() ?? true;
 		}
 
 		return true;
 	}
 
-	public bool GetPaused()
+	internal bool GetPaused()
 	{
 		if (!_renderCancellation.Token.IsCancellationRequested)
 		{
-			return _currentMpvRenderer?.GetPaused() ?? false;
+			return _mpvRenderer?.GetPaused() ?? false;
 		}
 
 		return false;
 	}
 
-	public double[] GetInfo()
+	internal double[] GetInfo()
 	{
 		if (!_renderCancellation.Token.IsCancellationRequested)
 		{
-			return _currentMpvRenderer?.GetProperties() ?? [0, 0, 0];
+			return _mpvRenderer?.GetProperties() ?? [0, 0, 0];
 		}
 
 		return [0, 0, 0];
 	}
 
-	public void SeekPlayer(int seconds)
+	internal void Seek(int seconds)
 	{
 		if (!_renderCancellation.Token.IsCancellationRequested)
 		{
-			_currentMpvRenderer?.Seek(seconds);
+			_mpvRenderer?.Seek(seconds);
 		}
 	}
 
-	public void VolumePlayer(int vol)
+	internal void SetVolume(int vol)
+	{
+		if (_isPlayingSnes)
+		{
+			_snesRenderer?.SetVolume(vol);
+		}
+		else
+		{
+			if (!_renderCancellation.Token.IsCancellationRequested)
+			{
+				_mpvRenderer?.SetVolume(vol);
+			}
+		}
+
+	}
+
+	internal string GetMediaTitle()
 	{
 		if (!_renderCancellation.Token.IsCancellationRequested)
 		{
-			_currentMpvRenderer?.SetVolume(vol);
+			return _mpvRenderer?.GetMediaTitle() ?? string.Empty;
 		}
+		return string.Empty;
 	}
 
-	public string GetMediaTitle()
+	internal string? GetCurrentUrl()
 	{
-		if (!_renderCancellation.Token.IsCancellationRequested)
+		return _mpvRenderer?.GetCurrentUrl();
+	}
+
+	internal bool ValidateURL(string inputUrl, out Uri? url)
+	{
+		string formattedUrl = inputUrl;
+
+		if (!formattedUrl.StartsWith("http://", StringComparison.Ordinal) && !formattedUrl.StartsWith("https://", StringComparison.Ordinal))
 		{
-			return _currentMpvRenderer?.GetMediaTitle() ?? "";
+			formattedUrl = "https://" + formattedUrl;
 		}
 
-		return "";
-	}
+		bool result = Uri.TryCreate(formattedUrl, UriKind.Absolute, out url) && (url?.Scheme == Uri.UriSchemeHttp || url?.Scheme == Uri.UriSchemeHttps) && url.Host.Contains('.') && !url.Host.EndsWith('.') && Uri.CheckHostName(url.Host) == UriHostNameType.Dns;
 
-	public string? GetCurrentUrl()
-	{
-		return _currentMpvRenderer?.GetCurrentUrl();
-	}
-
-
-	public bool IsPlayingSnes()
-	{
-		return _isPlayingSnes;
-	}
-
-	public bool IsSnesControlsEnabled()
-	{
-		return _snesControlsEnabled;
-	}
-	public void EnableSnesControls(bool enabled)
-	{
-		_snesControlsEnabled = enabled;
-	}
-	public bool PlayGame(string path)
-	{
-		if (_snesRenderer == null)
+		if (!result)
 		{
-			_snesRenderer = new Snes9xRenderer(_plugin);
+			return false;
 		}
+
+		return result;
+	}
+
+	internal bool PlaySnes(uint entityId, string path)
+	{
 		try
 		{
-			if(Plugin.ROMSLocationSnesDir != null)
+			ClearTexture(_snesScreenTexture);
+
+			_snesRenderer ??= new Snes9xRenderer(_plugin);
+
+			if(_plugin.ROMSLocationSnesDir != null)
 			{
 				_snesControlsEnabled = true;
 				_isPlayingSnes = _snesRenderer.Load(_snesScreenTexture, path);
+				_activeEntityId = entityId;
 			}
 			Services.Log.Debug("Starting ROM");
 		}
@@ -344,9 +302,61 @@ public class Core : IDisposable
 
 		return _isPlayingSnes;
 	}
-	public unsafe bool ScanForCompanions()
+	internal bool IsPlayingSnes()
 	{
-		uint? playerId = LocalEntityId;
+		return _isPlayingSnes;
+	}
+	internal bool IsSnesControlsEnabled()
+	{
+		return _snesControlsEnabled;
+	}
+	internal void EnableSnesControls(bool enabled)
+	{
+		_snesControlsEnabled = enabled;
+	}
+	internal bool IsSnesKeyMappable(VirtualKey vk)
+	{
+		return (vk >= VirtualKey.KEY_0 && vk <= VirtualKey.KEY_9)   // 0-9
+			|| (vk >= VirtualKey.A && vk <= VirtualKey.Z)            // A-Z
+			|| (vk >= VirtualKey.NUMPAD0 && vk <= VirtualKey.DIVIDE) // Numpad
+			|| (vk >= VirtualKey.F1 && vk <= VirtualKey.F12)         // F-Keys
+			|| vk == VirtualKey.SPACE
+			|| (vk >= VirtualKey.LEFT && vk <= VirtualKey.DOWN);     // Arrows
+	}
+	private readonly Dictionary<VirtualKey, bool> _heldState = new();
+	internal void OnFrameworkUpdate()
+	{
+		HashSet<int> KeyUpEvents = _plugin.WindowKeyUpReader.Consume();
+		
+		if (!_isPlayingSnes || !_snesControlsEnabled)
+		{
+			return;
+		}
+		foreach(Snes9xInput key in SnesKeyMap.Keys)
+		{
+			if(SnesKeyMap.TryGetValue(key, out VirtualKey virtualKey) && virtualKey != VirtualKey.NO_KEY)
+			{
+				bool pressed = Services.KeyState[virtualKey];
+
+				_heldState.TryGetValue(virtualKey, out bool held);
+				if (pressed) { held = true; }
+				if (KeyUpEvents.Contains((int)virtualKey)) { held = false; }
+				_heldState[virtualKey] = held;
+
+				_snesRenderer?.SetButton(0, (int)key, held);
+
+				if (pressed)
+				{
+					Services.KeyState[virtualKey] = false; //Disable Key for Game
+				}
+			}
+		}
+		_snesRenderer?.OnFrameworkUpdate();
+	}
+
+	internal unsafe bool ScanForCompanions()
+	{
+		uint? localPlayerId = Services.Objects.LocalPlayer?.EntityId;
 		bool playerCarbuncleFound = false;
 
 		bool hookEnabled = !_getResourceSyncHook.IsDisposed && _getResourceSyncHook.IsEnabled;
@@ -355,65 +365,62 @@ public class Core : IDisposable
 			List<uint> visitedTvs = [];
 			List<uint> visitedCompanions = [];
 
-			foreach (var item in Services.Objects.Where(x => x is ICharacter))
+			foreach (var item in Services.Objects.Where(x => x is IBattleNpc && x.BaseId == 13498 && x.ObjectKind is ObjectKind.BattleNpc))
 			{
-				if (item.BaseId == 13498 && item.ObjectKind.Equals(Dalamud.Game.ClientState.Objects.Enums.ObjectKind.BattleNpc)) //Wanderers Campfire: (item.BaseId == 414 && item.ObjectKind.Equals(Dalamud.Game.ClientState.Objects.Enums.ObjectKind.Companion)) 
+				if (item.Address == IntPtr.Zero)
 				{
-					if (item.Address == IntPtr.Zero)
+					continue;
+				}
+
+				var character = (Character*)item.Address;
+				if (character != null && character->DrawObject != null)
+				{
+					if (character->DrawObject->GetObjectType() == FFXIVClientStructs.FFXIV.Client.Graphics.Scene.ObjectType.CharacterBase)
 					{
-						continue;
-					}
-					
-					var character = (Character*)item.Address;
-					if (character != null && character->DrawObject != null)
-					{
-						if (character->DrawObject->GetObjectType() == FFXIVClientStructs.FFXIV.Client.Graphics.Scene.ObjectType.CharacterBase)
+						try
 						{
-							try
-							{
-								var tvDraw = (CharacterBase*)character->DrawObject;
-								uint ownerId = character->CompanionOwnerId;
-								_companionOwners.TryAdd(ownerId, item);
-								visitedCompanions.Add(ownerId);
-								if (tvDraw->Models[0] is not null) //TODO: find a better checking method
-								{ //Actually, its not so bad checking it like this, wysiwyg
-									if (tvDraw->Models[0]->MaterialCount >= 1)
+							var tvDraw = (CharacterBase*)character->DrawObject;
+							uint ownerId = character->CompanionOwnerId;
+							_companionOwners.TryAdd(ownerId, item);
+							visitedCompanions.Add(ownerId);
+							if (tvDraw->Models[0] is not null) //TODO: find a better checking method
+							{ //Actually, its not so bad checking it like this, wysiwyg
+								if (tvDraw->Models[0]->MaterialCount >= 1)
+								{
+									if (tvDraw->Models[0]->Materials[0] is not null)
 									{
-										if (tvDraw->Models[0]->Materials[0] is not null)
+										if (tvDraw->Models[0]->Materials[0]->TextureCount >= 4)
 										{
-											if (tvDraw->Models[0]->Materials[0]->TextureCount >= 4)
+											if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture is not null)
 											{
-												if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture is not null)
+												if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture is not null)
 												{
-													if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture is not null)
+													if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualHeight == 1024
+														&& tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualWidth == 1024)
 													{
-														if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualHeight == 1024
-															&& tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualWidth == 1024)
-														{
-															visitedTvs.Add(ownerId);
-															CheckoutCompanion(ownerId, item);
-															continue;
-														}
+														visitedTvs.Add(ownerId);
+														CheckoutCompanion(ownerId, item);
+														continue;
 													}
 												}
 											}
 										}
 									}
 								}
-								if (_tvOwners.TryGetValue(ownerId, out _) && ownerId != LocalEntityId) //If entity has been recognized as TV once, keep it playing until its been removed or explicitly turned off to avoid 'sync holes', except for localplayer
-								{
-									visitedTvs.Add(ownerId);
-									CheckoutCompanion(ownerId, item);
-									continue;
-								}
-
-								if (playerId == ownerId)
-								{
-									playerCarbuncleFound = true;
-								}
 							}
-							catch (Exception) { }
+							if (_tvOwners.TryGetValue(ownerId, out _) && ownerId != localPlayerId) //If entity has been recognized as TV once, keep it playing until its been removed or explicitly turned off to avoid 'sync holes', except for localplayer
+							{
+								visitedTvs.Add(ownerId);
+								CheckoutCompanion(ownerId, item);
+								continue;
+							}
+
+							if (localPlayerId == ownerId)
+							{
+								playerCarbuncleFound = true;
+							}
 						}
+						catch (Exception) { }
 					}
 				}
 			}
@@ -466,16 +473,9 @@ public class Core : IDisposable
 		{
 			_tvOwners.Add(ownerId, companion);
 		}
-		if (_activeEntityId == ownerId) //This TV is supposed to be active...
+		if (_activeEntityId == ownerId)
 		{
-			if (_playingEntityId != _activeEntityId) //...But it's not active, activate it
-			{
-				_playingEntityId = ownerId;
-			}
-			else
-			{
-				RefreshActorVFX(companion.Address, companion.Address); //This TV is active, play its VFX
-			}
+			RefreshActorVFX(companion.Address, companion.Address); //This TV is active, play its VFX
 		}
 	}
 
@@ -483,17 +483,17 @@ public class Core : IDisposable
 	{
 		if (!PenumbraIPC.CheckTempMod("screenvfx"))
 		{
-			PenumbraIPC.ApplyTempMod("screenvfx", Services.Objects?.LocalPlayer?.ObjectIndex, _plugin.PenumbraTempScreenPaths);
+			PenumbraIPC.ApplyTempMod("screenvfx", Services.Objects.LocalPlayer?.ObjectIndex, _plugin.PenumbraTempScreenPaths);
 		}
 		lock (_screenTextureLock)
 		{
 			if(_isPlayingSnes)
 			{
-				_actorVfxCreate?.Invoke("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreen_"+Plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
+				_actorVfxCreate?.Invoke("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreen_"+_plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
 			}
 			else
 			{
-				_actorVfxCreate?.Invoke("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreen_"+Plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
+				_actorVfxCreate?.Invoke("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreen_"+_plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
 			}
 		}
 	}
@@ -501,11 +501,11 @@ public class Core : IDisposable
 	//https://github.com/0ceal0t/Dalamud-VFXEditor/blob/main/VFXEditor/Interop/Constants.cs
 	private const string ActorVfxCreateSig = "40 53 55 56 57 48 81 EC ?? ?? ?? ?? 0F 29 B4 24 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 0F B6 AC 24 ?? ?? ?? ?? 0F 28 F3 49 8B F8";
 	private delegate IntPtr ActorVfxCreateDelegate(string path, IntPtr a2, IntPtr a3, float a4, char a5, ushort a6, char a7);
-	private ActorVfxCreateDelegate _actorVfxCreate;
+	private readonly ActorVfxCreateDelegate _actorVfxCreate;
 
 
-	private Hook<ResourceManager.Delegates.GetResourceSync> _getResourceSyncHook;
-	private Hook<Texture.Delegates.InitializeContents> _textureOnLoadHook;
+	private readonly Hook<ResourceManager.Delegates.GetResourceSync> _getResourceSyncHook;
+	private readonly Hook<Texture.Delegates.InitializeContents> _textureOnLoadHook;
 
 	private unsafe ResourceHandle* GetResourceSyncDetour(ResourceManager* thisPtr, ResourceCategory* category, uint* type, uint* hash, CStringPointer path, void* unknown, void* unkDebugPtr, uint unkDebugInt)
 	{
@@ -519,8 +519,8 @@ public class Core : IDisposable
 		}
 		if (_texCase > 0)
 		{
-			_textureOnLoadHook.Enable(); //Enable Texturehook only for the duration of the Resource Load, as hooking Textures from Kernel is unsafe and expensive
-			var ret = _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown, unkDebugPtr, unkDebugInt);
+			_textureOnLoadHook.Enable(); //Enable Texturehook only for the duration of the specific Resource Load, as hooking Textures from Kernel is unsafe and expensive
+			ResourceHandle* ret = _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown, unkDebugPtr, unkDebugInt);
 			_textureOnLoadHook.Disable();
 			Services.Log.Debug("Screen Texture load attempt:" + path.ToString());
 			_texCase = 0;
@@ -623,80 +623,46 @@ public class Core : IDisposable
 			return false;
 		}
 	}
-	private void ClearTexture()
+
+	private void ClearTexture(Texture2D texture)
 	{
-		if (_screenTexture == null || DxHandler.Device == null)
+		DeviceContext? ctx = DxHandler.DrawDevice?.ImmediateContext;
+		if (ctx == null || texture == null) { return; }
+
+		int w = texture.Description.Width;
+		int h = texture.Description.Height;
+
+		byte[] gray = new byte[w * h * 4];
+		for (int i = 0; i < gray.Length; i += 4)
 		{
-			return;
+			gray[i] = 77;
+			gray[i+1] = 77;
+			gray[i+2] = 77;
+			gray[i+3] = 255;
 		}
 
-		var rtv = new RenderTargetView(DxHandler.Device, _screenTexture);
-		var clearColor = new RawColor4(0.3f, 0.3f, 0.3f, 1);
-		DxHandler.Device?.ImmediateContext.ClearRenderTargetView(rtv, clearColor);
+		var handle = GCHandle.Alloc(gray, GCHandleType.Pinned);
+		try
+		{
+			ctx.UpdateSubresource(texture, 0, null, handle.AddrOfPinnedObject(), w * 4, 0);
+			ctx.Flush();
+		}
+		finally { handle.Free(); }
 	}
 
 	public void Dispose()
 	{
-		_currentMpvRenderer?.StopRender();
+		_mpvRenderer?.Dispose();
 		_snesRenderer?.Dispose();
 
 		_textureOnLoadHook.Disable();
 		_textureOnLoadHook.Dispose();
 		_getResourceSyncHook.Dispose();
-		_snesRenderer?.Dispose();
 
 		//Do not clean up Texture2D and ShaderResourceView as they may still be part of the currently running VFX
 		//Instead just let it stay in the game until it eventually closes, its not growing anyway
 		_views.Clear();
 
-		Services.CommandManager.ProcessCommand("/honorific force clear");
 		GC.SuppressFinalize(this);
-	}
-
-
-	public bool IsKeyMappable(VirtualKey vk)
-	{
-		return (vk >= VirtualKey.KEY_0 && vk <= VirtualKey.KEY_9)   // 0-9
-			|| (vk >= VirtualKey.A && vk <= VirtualKey.Z)            // A-Z
-			|| (vk >= VirtualKey.NUMPAD0 && vk <= VirtualKey.DIVIDE) // Numpad
-			|| (vk >= VirtualKey.F1 && vk <= VirtualKey.F12)         // F-Keys
-			|| vk == VirtualKey.SPACE
-			|| (vk >= VirtualKey.LEFT && vk <= VirtualKey.DOWN);     // Arrows
-	}
-	private readonly Dictionary<VirtualKey, bool> _heldState = new();
-
-	internal void OnFrameworkUpdate()
-	{
-		HashSet<int> KeyUpEvents = _plugin.WindowKeyUpReader.Consume();
-		
-		if (!_isPlayingSnes || !_snesControlsEnabled)
-		{
-			return;
-		}
-		foreach(Snes9xInput key in SnesKeys.Keys)
-		{
-			if(SnesKeys.TryGetValue(key, out VirtualKey virtualKey) && virtualKey != VirtualKey.NO_KEY)
-			{
-				bool pressed = Services.KeyState[virtualKey];
-
-				_heldState.TryGetValue(virtualKey, out bool held);
-				if (pressed) { held = true; }
-				if (KeyUpEvents.Contains((int)virtualKey)) { held = false; }
-				_heldState[virtualKey] = held;
-
-				_snesRenderer?.SetButton(0, (int)key, held);
-
-				if (pressed)
-				{
-					Services.KeyState[virtualKey] = false; //Disable Key for Game
-				}
-			}
-		}
-		_snesRenderer?.OnFrameworkUpdate();
-	}
-
-	internal void VolumeSnes(int vol)
-	{
-		_snesRenderer?.SetVolume(vol);
 	}
 }

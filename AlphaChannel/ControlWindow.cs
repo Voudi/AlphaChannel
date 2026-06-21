@@ -16,16 +16,22 @@ using Dalamud.Interface.Windowing;
 
 namespace AlphaChannel;
 
-public class ControlWindow : Window, IDisposable
+internal sealed class ControlWindow : Window, IDisposable
 {
-	private bool _playerCarbuncleFound;
-	private bool _pauseToggle;
-	private Plugin _plugin;
-	private Compatibility _compat;
-	private Core _core;
-	private uint? LocalEntityId => Services.Objects?.LocalPlayer?.EntityId;
+	private readonly Plugin _plugin;
+	private readonly Core _core;
 
-	//Render Vars
+	private uint LocalEntityId => Services.Objects?.LocalPlayer?.EntityId ?? 0;
+	private bool _playerCarbuncleFound;
+	
+	//Resource vars
+	private bool _libsLoaded;
+	private bool _installingLibs;
+	private bool _updatingMPV;
+	private bool _updatingYTDLP;
+	private bool _updatingSNES9X;
+
+	//Video player vars
 	private string _inputURL = "";
 	private float _volume = 25;
 	private float _volumesnes = 25;
@@ -36,29 +42,29 @@ public class ControlWindow : Window, IDisposable
 	private int _seekerDurationSeconds;
 	private int _seekerDurationMinutes;
 	private int _seekerMaxSeconds;
-	private bool _mpvIsIdle = true;
+	private bool _pauseToggle;
+	private bool _mpvIsIdle;
 	private string _mediaTitle = string.Empty;
-	private bool _libsLoaded;
-	private bool _installingLibs;
-	private bool _updatingMPV;
-	private bool _updatingYTDLP;
-	private bool _installingSNES9X;
-	private bool _uiElementActive;
+
+	//Controls vars
+	private bool _sliderActive;
+	private bool _urlInputActive;
 	private uint _nextLinkId = 1;
 	private readonly FileDialogManager _fileDialog = new();
-	private int _waitingForKey = -1;
+	private int _awaitKeyPress = -1;
+	private const string UrlPlaceholderDefault = "Enter the Video URL...";
+	private string _urlPlaceholder = UrlPlaceholderDefault;
+	private IEnumerable<IGameObject> _visiblePlayers = [];
 
+	//IPC vars
 	private readonly Dictionary<uint, IPCVideoState> _currentStates = []; //PlayerEntityID, IPCVideoState
-	public sealed record IPCVideoState([property: JsonRequired] string State, [property: JsonRequired] string Url, [property: JsonRequired] int PlaybackPosition, [property: JsonRequired] long Timestamp);
-
+	internal sealed record IPCVideoState([property: JsonRequired] string State, [property: JsonRequired] string Url, [property: JsonRequired] int PlaybackPosition, [property: JsonRequired] long Timestamp);
 	private IPCVideoState? _localPlayerState;
 
-	public ControlWindow(Plugin plugin, Core core, string title)
+	internal ControlWindow(Plugin plugin, Core core, string title)
 		: base(title, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
 	{
 		_plugin = plugin;
-
-		_compat = new Compatibility(_plugin);
 
 		_core = core;
 
@@ -67,24 +73,11 @@ public class ControlWindow : Window, IDisposable
 			MinimumSize = new Vector2(275, 235),
 			MaximumSize = new Vector2(275, 1080)
 		};
-
-		_compat.CheckForUpdates();
 	}
 
-	public void Dispose()
-	{
-		_plugin.UpdateIPCState(null);
-		_core.Dispose();
-		GC.SuppressFinalize(this);
-	}
-
-	private bool _isFocused;
-	private static readonly string _placeHolderDefault = "Enter the Video URL...";
-	private string _placeHolderURL = _placeHolderDefault;
-	private IEnumerable<IGameObject> _playerList = [];
 	public override void Draw()
 	{
-		bool playerIsRunningTV = _core.IsLocalPlayerTVOn();
+		ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(5, 5));
 
 		if (Services.DutyState.IsDutyStarted)
 		{
@@ -92,69 +85,17 @@ public class ControlWindow : Window, IDisposable
 			ImGui.Text("inside duties.");
 			return;
 		}
+		
 		if (!_libsLoaded)
 		{
-			bool needsFirstInstall = _plugin.AssemblyLocationMPV == null || _plugin.AssemblyLocationYTDLP == null;
-			bool updatesAvailable = (_plugin.LibResources.MpvCheckResult[0] != string.Empty) || (_plugin.LibResources.YtdlpCheckResult[0] != string.Empty);
+			bool needsFirstInstall = string.IsNullOrWhiteSpace(_plugin.AssemblyLocationMPV) || string.IsNullOrWhiteSpace(_plugin.AssemblyLocationYTDLP);
 
 			_libsLoaded = !needsFirstInstall;
 			if (!_libsLoaded)
 			{
-				if (_installingLibs)
-				{
-					ImGui.Text("Installing dependencies...");
-					return;
-				}
-				ImGui.Text("Please download the required dependencies to use AlphaChannel:");
-				if (!updatesAvailable)
-				{
-					ImGui.BeginDisabled();
-				}
+				DrawFirstInstall();
 
-				if (ImGui.Button(updatesAvailable ? "Install dependencies" : "Checking for updates..."))
-				{
-					Services.Log.Debug("Installing AlphaChannel Dependencies...");
-					if (_plugin.AssemblyLocationMPV == null || _plugin.LibResources.MpvCheckResult[0] != string.Empty)
-					{
-						_plugin.LibResources.DownloadMPVAsync().ContinueWith(async task =>
-						{
-							if (task.Result)
-							{
-								Services.Log.Debug("MPV downloaded successfully");
-								_plugin.AssemblyLocationMPV = _plugin.LibResources.GetLocationMPV()!;
-								_plugin.LibResources.MpvCheckResult[0] = string.Empty;
-							}
-							else
-							{
-								Services.Log.Error("Failed to download MPV");
-							}
-						});
-					}
-
-					if (_plugin.AssemblyLocationYTDLP == null || _plugin.LibResources.YtdlpCheckResult[0] != string.Empty)
-					{
-						_plugin.LibResources.DownloadYTDLPAsync().ContinueWith(async task =>
-						{
-							if (task.Result)
-							{
-								Services.Log.Debug("YTDLP downloaded successfully");
-								_plugin.AssemblyLocationYTDLP = _plugin.LibResources.GetLocationYTDLP()!;
-								_plugin.LibResources.YtdlpCheckResult[0] = string.Empty;
-							}
-							else
-							{
-								Services.Log.Error("Failed to download YTDLP");
-							}
-						});
-					}
-
-					_installingLibs = true;
-				}
-				if (!updatesAvailable)
-				{
-					ImGui.EndDisabled();
-				}
-
+				ImGui.PopStyleVar();
 				return;
 			}
 		}
@@ -180,32 +121,21 @@ public class ControlWindow : Window, IDisposable
 			ImGui.EndTabBar();
 		}
 
+		ImGui.PopStyleVar();
 		_fileDialog.Draw();
-	}
-
-	private void StartGame(string path)
-	{
-		if(LocalEntityId.HasValue)
-		{
-			if (_core.PlayGame(path))
-			{
-				_core.SetCurrentTV(LocalEntityId.Value);
-			}
-		}
 	}
 
 	private void StartVideo(uint entityId)
 	{
 		if (LocalEntityId == entityId)
 		{
-			if (ValidateURL(out Uri? uri) && uri != null)
+			if (_core.ValidateURL(_inputURL, out Uri? uri) && uri != null)
 			{
-				_core.SetCurrentTV(entityId);
 
 				_localPlayerState = new("playing", Uri.EscapeDataString(uri.ToString()), 0, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 				_plugin.UpdateIPCState(_localPlayerState);
 				
-				_core.PlayVideo(uri.ToString());
+				_core.PlayVideo(entityId, uri.ToString());
 			}
 		}
 		else
@@ -213,8 +143,6 @@ public class ControlWindow : Window, IDisposable
 			if (_currentStates.TryGetValue(entityId, out IPCVideoState? stateInfo))
 			{
 				string url = stateInfo.Url;
-
-				_core.SetCurrentTV(entityId);
 
 				bool result = Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri?.Scheme == Uri.UriSchemeHttp || uri?.Scheme == Uri.UriSchemeHttps) && uri.Host.Contains('.') && !uri.Host.EndsWith('.') && Uri.CheckHostName(uri.Host) == UriHostNameType.Dns;
 
@@ -225,43 +153,29 @@ public class ControlWindow : Window, IDisposable
 				}
 
 				int getTimeDiff = (int) (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - stateInfo.Timestamp);
-				_core.PlayVideo(url, stateInfo.PlaybackPosition + getTimeDiff, stateInfo.State == "playing");
+				_core.PlayVideo(entityId, url, stateInfo.PlaybackPosition + getTimeDiff, stateInfo.State == "playing");
 			}
 		}
 	}
 
-	public void StopVideo()
+	private void StartSnes(string path)
 	{
-		_core.StopVideo();
-		if (string.IsNullOrEmpty(_inputURL) && !string.IsNullOrEmpty(_placeHolderURL) && _placeHolderURL != _placeHolderDefault)
-		{
-			_inputURL = _placeHolderURL;
-			_placeHolderURL = _placeHolderDefault;
-		}
+		_core.PlaySnes(LocalEntityId, path);
 	}
 
-	public bool ValidateURL(out Uri? url)
+	private void StopVideo()
 	{
-		string formattedUrl = _inputURL;
-
-		if (!formattedUrl.StartsWith("http://", StringComparison.Ordinal) && !formattedUrl.StartsWith("https://", StringComparison.Ordinal))
+		_core.StopVideo();
+		if (string.IsNullOrEmpty(_inputURL) && !string.IsNullOrEmpty(_urlPlaceholder) && _urlPlaceholder != UrlPlaceholderDefault)
 		{
-			formattedUrl = "https://" + formattedUrl;
+			_inputURL = _urlPlaceholder;
+			_urlPlaceholder = UrlPlaceholderDefault;
 		}
-
-		bool result = Uri.TryCreate(formattedUrl, UriKind.Absolute, out url) && (url?.Scheme == Uri.UriSchemeHttp || url?.Scheme == Uri.UriSchemeHttps) && url.Host.Contains('.') && !url.Host.EndsWith('.') && Uri.CheckHostName(url.Host) == UriHostNameType.Dns;
-
-		if (!result)
-		{
-			return false;
-		}
-
-		return result;
 	}
 
 	private long _lastMilliSecond1000ms;
 	private long _lastMilliSecond6ms;
-	public void Refresh()
+	internal void OnFrameworkUpdate()
 	{
 		if (_lastMilliSecond6ms + 6 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 		{
@@ -275,21 +189,19 @@ public class ControlWindow : Window, IDisposable
 
 			_playerCarbuncleFound = _core.ScanForCompanions();
 
-			_playerList = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => (x.EntityId == LocalEntityId) ? "@" : x.Name.TextValue);
+			_visiblePlayers = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => (x.EntityId == LocalEntityId) ? "@" : x.Name.TextValue);
 		}
 	}
 
-	private void VolumePlayer(float volume)
-	{
-		int vol = (int)((float)Math.Sqrt(volume) * 10f); //Quadratic slider values
-		Services.Log.Debug("Setting volume to " + vol + "%");
-		_core.VolumePlayer(vol);
-	}
-	private void VolumeSnes(float volume)
+	private void SetVolume(float volume, bool quadratic = false)
 	{
 		int vol = (int)volume;
+		if(quadratic)
+		{
+			vol = (int)((float)Math.Sqrt(volume) * 10f); //Quadratic slider values
+		}
 		Services.Log.Debug("Setting volume to " + vol + "%");
-		_core.VolumeSnes(vol);
+		_core.SetVolume(vol);
 	}
 
 	private void SeekPlayer(double percentage)
@@ -305,12 +217,12 @@ public class ControlWindow : Window, IDisposable
 			_plugin.UpdateIPCState(state);
 		}
 
-		_core.SeekPlayer(seconds);
+		_core.Seek(seconds);
 	}
 
 	private void GetCoreInfo()
 	{
-		if (!_core.IsTVTurnedOff())
+		if (!_core.TVIsActive(0)) //If its 0, TV is inactive
 		{
 			double[] info = _core.GetInfo();
 			string title = _core.GetMediaTitle();
@@ -330,7 +242,7 @@ public class ControlWindow : Window, IDisposable
 				_seekerDurationSeconds = (int)(duration % 60);
 			}
 
-			if (!_uiElementActive)
+			if (!_sliderActive)
 			{
 				if (duration > 0)
 				{
@@ -342,14 +254,14 @@ public class ControlWindow : Window, IDisposable
 			}
 		}
 		
-		if(_localPlayerState != null && !_core.IsLocalPlayerTVOn()) //Level 1 - TV is has been turned completely off
+		if(_localPlayerState != null && !_core.TVIsActive(LocalEntityId)) //Level 1 - TV is has been turned completely off
 		{
 			_localPlayerState = null;
 			_plugin.UpdateIPCState(_localPlayerState);
 		}
-		else if(_mpvIsIdle != _core.IsIdle()) //Level 2 - TV has been turned idle (however they managed to do that)
+		else if(_mpvIsIdle != _core.GetIdle()) //Level 2 - TV has turned idle (end of video)
 		{
-			_mpvIsIdle = _core.IsIdle();
+			_mpvIsIdle = _core.GetIdle();
 			_pauseToggle = true;
 			_localPlayerState = IPCGetState();
 			_plugin.UpdateIPCState(_localPlayerState);
@@ -437,30 +349,30 @@ public class ControlWindow : Window, IDisposable
 		ImGui.Dummy(new Vector2(maxWidth, textSize.Y));
 	}
 
-	public void RemoveOtherPlayer(nint addr)
+	internal void RemoveOtherPlayer(nint addr)
 	{
-		uint player = _playerList.FirstOrDefault(player => player.Address == addr)?.EntityId ?? 0;
+		uint player = _visiblePlayers.FirstOrDefault(player => player.Address == addr)?.EntityId ?? 0;
 		if (LocalEntityId != player && player != 0)
 		{
 			_currentStates.Remove(player);
-			if (_core.IsEntityTVOn(player))
+			if (_core.TVIsActive(player))
 			{
 				StopVideo();
 			}
 		}
 	}
 
-	public IPCVideoState? IPCGetState()
+	internal IPCVideoState? IPCGetState()
 	{
 		string? url = _core.GetCurrentUrl();
 		int pos = _seekerTimeMinutes * 60 + _seekerTimeSeconds;
 		IPCVideoState? state = null;
 
-		if(_core.IsLocalPlayerTVOn() && !string.IsNullOrEmpty(url) && _core.GetPaused()) //LocalPlayer TV is on and video is paused
+		if(_core.TVIsActive(LocalEntityId) && !string.IsNullOrEmpty(url) && _core.GetPaused()) //LocalPlayer TV is on and video is paused
 		{
 			state = new IPCVideoState("paused", Uri.EscapeDataString(url), pos, _plugin.LibResources.NTPTimeSeconds);
 		}
-		else if(_core.IsLocalPlayerTVOn() && !string.IsNullOrEmpty(url) && !_core.GetPaused()) //LocalPlayer TV is on and video is playing
+		else if(_core.TVIsActive(LocalEntityId) && !string.IsNullOrEmpty(url) && !_core.GetPaused()) //LocalPlayer TV is on and video is playing
 		{
 			state = new IPCVideoState("playing", Uri.EscapeDataString(url), pos, _plugin.LibResources.NTPTimeSeconds);
 		}
@@ -468,11 +380,11 @@ public class ControlWindow : Window, IDisposable
 		return state;
 	}
 
-	public void IPCSetState(nint addr, string stateJSON)
+	internal void IPCSetState(nint addr, string stateJSON)
 	{
 		int pos = _seekerTimeMinutes * 60 + _seekerTimeSeconds;
 
-		IGameObject? player = _playerList.FirstOrDefault(player => player.Address == addr);
+		IGameObject? player = _visiblePlayers.FirstOrDefault(player => player.Address == addr);
 		if(player == null)
 		{
 			return;
@@ -487,7 +399,7 @@ public class ControlWindow : Window, IDisposable
 			if(stateJSON == null)
 			{
 				_currentStates.Remove(playerId);
-				if (_core.IsEntityTVOn(playerId))
+				if (_core.TVIsActive(playerId))
 				{
 					StopVideo();
 				}
@@ -498,19 +410,23 @@ public class ControlWindow : Window, IDisposable
 				if (state != null)
 				{
 					bool foundstate = _currentStates.TryGetValue(playerId, out IPCVideoState? oldState);
+					if(oldState != null && oldState.Timestamp == state.Timestamp)
+					{
+						return; //Got the same state twice
+					}
 					state = _currentStates[playerId] = new IPCVideoState(state.State, Uri.UnescapeDataString(state.Url), state.PlaybackPosition, state.Timestamp);
 					
-					if (foundstate && oldState != null && _core.IsEntityTVOn(playerId))
+					if (foundstate && oldState != null && _core.TVIsActive(playerId))
 					{
 						if(oldState.Url != state.Url && state.Url != string.Empty)
 						{
 							switch(state.State)
 							{
 								case "playing":
-									_core.PlayVideo(state.Url, state.PlaybackPosition, false);
+									_core.PlayVideo(playerId, state.Url, state.PlaybackPosition, false);
 									break;
 								case "paused":
-									_core.PlayVideo(state.Url, state.PlaybackPosition, true);
+									_core.PlayVideo(playerId, state.Url, state.PlaybackPosition, true);
 									break;
 							}
 						}
@@ -518,7 +434,7 @@ public class ControlWindow : Window, IDisposable
 						{
 							if(pos + 7 < state.PlaybackPosition && pos - 7 > state.PlaybackPosition) //7s grace period to avoid unnecessary seek jumps due to minor desyncs
 							{
-								_core.SeekPlayer(state.PlaybackPosition);
+								_core.Seek(state.PlaybackPosition);
 							}
 							switch(state.State)
 							{
@@ -541,7 +457,7 @@ public class ControlWindow : Window, IDisposable
 					{
 						//First new player state received after abandoning TV, send chat message
 
-						DalamudLinkPayload _linkPayload = Services.Chat.AddChatLinkHandler(_nextLinkId, (commandId, msg) =>
+						DalamudLinkPayload _linkPayload = Services.Chat.AddChatLinkHandler(_nextLinkId++, (commandId, msg) =>
 						{
 							StartVideo(playerId);
 							if(!IsOpen)
@@ -578,20 +494,78 @@ public class ControlWindow : Window, IDisposable
 		}
 	}
 
+	private void DrawFirstInstall()
+	{
+		bool updatesAvailable = !string.IsNullOrWhiteSpace(_plugin.LibResources.MpvCheckResult[0]) || !string.IsNullOrWhiteSpace(_plugin.LibResources.YtdlpCheckResult[0]);
+		if (_installingLibs)
+		{
+			ImGui.Text("Installing dependencies...");
+			return;
+		}
+		ImGui.Text("Please download the required dependencies to use AlphaChannel:");
+		if (!updatesAvailable)
+		{
+			ImGui.BeginDisabled();
+		}
+
+		if (ImGui.Button(updatesAvailable ? "Install dependencies" : "Checking for updates..."))
+		{
+			Services.Log.Debug("Installing AlphaChannel Dependencies...");
+			if (string.IsNullOrWhiteSpace(_plugin.AssemblyLocationMPV) || !string.IsNullOrWhiteSpace(_plugin.LibResources.MpvCheckResult[0]))
+			{
+				_plugin.LibResources.DownloadMPVAsync().ContinueWith(async task =>
+				{
+					if (task.Result)
+					{
+						Services.Log.Debug("MPV downloaded successfully");
+						_plugin.AssemblyLocationMPV = _plugin.LibResources.GetLocationMPV()!;
+						_plugin.LibResources.MpvCheckResult[0] = string.Empty;
+					}
+					else
+					{
+						Services.Log.Error("Failed to download MPV");
+					}
+				});
+			}
+
+			if (string.IsNullOrWhiteSpace(_plugin.AssemblyLocationYTDLP) || !string.IsNullOrWhiteSpace(_plugin.LibResources.YtdlpCheckResult[0]))
+			{
+				_plugin.LibResources.DownloadYTDLPAsync().ContinueWith(async task =>
+				{
+					if (task.Result)
+					{
+						Services.Log.Debug("YTDLP downloaded successfully");
+						_plugin.AssemblyLocationYTDLP = _plugin.LibResources.GetLocationYTDLP()!;
+						_plugin.LibResources.YtdlpCheckResult[0] = string.Empty;
+					}
+					else
+					{
+						Services.Log.Error("Failed to download YTDLP");
+					}
+				});
+			}
+
+			_installingLibs = true;
+		}
+		if (!updatesAvailable)
+		{
+			ImGui.EndDisabled();
+		}
+	}
 	private void DrawJoin()
 	{
 		int count = 0;
-		foreach (var item in _playerList)
+		foreach (var item in _visiblePlayers)
 		{
 			if(item.EntityId == LocalEntityId)
 			{
 				continue;
 			}
 
-			if (_core.TVExistsForEntity(item.EntityId)) //Checks if TV exists
+			if (_core.TVIsVisible(item.EntityId)) //Checks if TV exists
 			{
 				count++;
-				bool isTheRunningTV = _core.IsEntityTVOn(item.EntityId);
+				bool isTheRunningTV = _core.TVIsActive(item.EntityId);
 				string url = string.Empty;
 				bool urlExists = false;
 				bool urlEmpty = string.IsNullOrEmpty(_inputURL);
@@ -636,7 +610,7 @@ public class ControlWindow : Window, IDisposable
 
 				if (isTheRunningTV && _seekerExactTime > 0)
 				{
-					DrawScrollingText(_mediaTitle, 250);
+					DrawScrollingText(_mediaTitle, 125);
 				}
 				else
 				{
@@ -645,33 +619,41 @@ public class ControlWindow : Window, IDisposable
 
 				
 				if (isTheRunningTV)
-				{
+				{						
+					ImGui.SameLine();
+
+					ImGui.PushFont(UiBuilder.IconFont);
+					ImGui.SetNextItemWidth(100);
+					ImGui.SliderFloat("##volumebar" + item.EntityId, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
+					if (ImGui.IsItemActive())
+					{
+						_sliderActive = true;
+					}
+
+					if (ImGui.IsItemDeactivatedAfterEdit())
+					{
+						SetVolume(_volume, true);
+						_sliderActive = false;
+					}
+					ImGui.PopFont();
+
 					ImGui.BeginDisabled();
 					ImGui.SetNextItemWidth(268);
 					ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1));
 					ImGui.SliderFloat("##seeker" + item.EntityId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
 					if (ImGui.IsItemActive())
 					{
-						_uiElementActive = true;
+						_sliderActive = true;
 					}
 
 					if (ImGui.IsItemDeactivatedAfterEdit())
 					{
 						SeekPlayer(_seeker);
-						_uiElementActive = false;
+						_sliderActive = false;
 					}
 					ImGui.PopStyleColor(1);
 					ImGui.EndDisabled();
 				}
-
-				if (_playerCarbuncleFound)
-				{
-					ImGui.Separator();
-
-					continue;
-				}
-
-				ImGui.SameLine();
 
 				if (isTheRunningTV)
 				{
@@ -732,11 +714,11 @@ public class ControlWindow : Window, IDisposable
 		IPlayerCharacter? player = Services.Objects.LocalPlayer;
 		if(player != null)
 		{
-			if (_playerCarbuncleFound || _core.TVExistsForEntity(player.EntityId)) //Checks if players Carbuncle or TV exists
+			if (_playerCarbuncleFound || _core.TVIsVisible(player.EntityId)) //Checks if players Carbuncle or TV exists
 			{
-				bool playerTVRunning = _core.IsLocalPlayerTVOn();
+				bool playerTVRunning = _core.TVIsActive(LocalEntityId);
 				bool urlEmpty = string.IsNullOrEmpty(_inputURL);
-				bool urlExists = ValidateURL(out _);
+				bool urlExists = _core.ValidateURL(_inputURL, out _);
 
 				ImGui.PushStyleColor(ImGuiCol.Text, _playerCarbuncleFound ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
 				ImGui.PushFont(UiBuilder.IconFont);
@@ -750,7 +732,7 @@ public class ControlWindow : Window, IDisposable
 					{
 						PenumbraIPC.RemoveTempMod("companion");
 					}
-					PenumbraIPC.Redraw(_core.GetCompanion(player.EntityId)?.ObjectIndex ?? -1);
+					PenumbraIPC.Redraw(_core.GetCompanionIndex(player.EntityId));
 				}
 				ImGui.PopFont();
 				ImGui.PopStyleColor();
@@ -765,7 +747,7 @@ public class ControlWindow : Window, IDisposable
 					ImGui.PushFont(UiBuilder.IconFont);
 					if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##clipboard" + player.EntityId))
 					{
-						ImGui.SetClipboardText(string.IsNullOrEmpty(_inputURL) && playerTVRunning ? _placeHolderURL : _inputURL);
+						ImGui.SetClipboardText(string.IsNullOrEmpty(_inputURL) && playerTVRunning ? _urlPlaceholder : _inputURL);
 					}
 					ImGui.PopFont();
 					if (ImGui.IsItemHovered())
@@ -792,21 +774,21 @@ public class ControlWindow : Window, IDisposable
 					// Detect if the input is focused
 					if (ImGui.IsItemActive())
 					{
-						_isFocused = true;
+						_urlInputActive = true;
 					}
 					else if (ImGui.IsItemDeactivated())
 					{
-						_isFocused = false;
+						_urlInputActive = false;
 					}
 					// Render placeholder if input is empty and unfocused
-					if (!_isFocused && string.IsNullOrEmpty(_inputURL))
+					if (!_urlInputActive && string.IsNullOrEmpty(_inputURL))
 					{
 						var pos = ImGui.GetItemRectMin();
 						var max = ImGui.GetItemRectMax();
 
 						float maxWidth = max.X - pos.X;
 
-						string placeholder = _placeHolderURL;
+						string placeholder = _urlPlaceholder;
 
 						Vector2 textSize = ImGui.CalcTextSize(placeholder);
 
@@ -816,7 +798,7 @@ public class ControlWindow : Window, IDisposable
 							textSize = ImGui.CalcTextSize(placeholder + "........");
 						}
 
-						if (!placeholder.Equals(_placeHolderURL, StringComparison.Ordinal))
+						if (!placeholder.Equals(_urlPlaceholder, StringComparison.Ordinal))
 						{
 							placeholder += "...";
 						}
@@ -854,7 +836,7 @@ public class ControlWindow : Window, IDisposable
 									StartVideo(player.EntityId);
 								}
 
-								_placeHolderURL = _inputURL;
+								_urlPlaceholder = _inputURL;
 								_inputURL = string.Empty;
 							}
 							else
@@ -894,13 +876,13 @@ public class ControlWindow : Window, IDisposable
 						ImGui.SliderFloat("##seeker" + player.EntityId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
 						if (ImGui.IsItemActive())
 						{
-							_uiElementActive = true;
+							_sliderActive = true;
 						}
 
 						if (ImGui.IsItemDeactivatedAfterEdit())
 						{
 							SeekPlayer(_seeker);
-							_uiElementActive = false;
+							_sliderActive = false;
 						}
 						ImGui.PopStyleColor(1);
 
@@ -917,13 +899,13 @@ public class ControlWindow : Window, IDisposable
 						ImGui.SliderFloat("##volumebar" + player.EntityId, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
 						if (ImGui.IsItemActive())
 						{
-							_uiElementActive = true;
+							_sliderActive = true;
 						}
 
 						if (ImGui.IsItemDeactivatedAfterEdit())
 						{
-							VolumePlayer(_volume);
-							_uiElementActive = false;
+							SetVolume(_volume, true);
+							_sliderActive = false;
 						}
 						ImGui.PopFont();
 						ImGui.SameLine();
@@ -974,12 +956,12 @@ public class ControlWindow : Window, IDisposable
 	
 	private void DrawGame()
 	{
-		uint entityId = LocalEntityId ?? 0;
+		uint entityId = LocalEntityId;
 		bool snesExists = !string.IsNullOrEmpty(_plugin.AssemblyLocationSnes);
 
-		if (_playerCarbuncleFound || _core.TVExistsForEntity(entityId))
+		if (_playerCarbuncleFound || _core.TVIsVisible(entityId))
 		{
-			bool playerTVRunning = _core.IsLocalPlayerTVOn();
+			bool playerTVRunning = _core.TVIsActive(LocalEntityId);
 
 			ImGui.PushStyleColor(ImGuiCol.Text, _playerCarbuncleFound ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
 			ImGui.PushFont(UiBuilder.IconFont);
@@ -993,7 +975,7 @@ public class ControlWindow : Window, IDisposable
 				{
 					PenumbraIPC.RemoveTempMod("companion");
 				}
-				PenumbraIPC.Redraw(_core.GetCompanion(entityId)?.ObjectIndex ?? -1);
+				PenumbraIPC.Redraw(_core.GetCompanionIndex(entityId));
 			}
 			ImGui.PopFont();
 			ImGui.PopStyleColor();
@@ -1039,12 +1021,12 @@ public class ControlWindow : Window, IDisposable
 					ImGui.SliderFloat("##volumebarsnes", ref _volumesnes, 0, 100, _volumesnes < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volumesnes <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
 					if (ImGui.IsItemActive())
 					{
-						_uiElementActive = true;
+						_sliderActive = true;
 					}
 					if (ImGui.IsItemDeactivatedAfterEdit())
 					{
-						VolumeSnes(_volumesnes);
-						_uiElementActive = false;
+						SetVolume(_volumesnes);
+						_sliderActive = false;
 					}
 					ImGui.PopFont();
 				}
@@ -1055,7 +1037,7 @@ public class ControlWindow : Window, IDisposable
 					{
 						Process.Start(new ProcessStartInfo
 						{
-							FileName = Plugin.ROMSLocationSnesDir,
+							FileName = _plugin.ROMSLocationSnesDir,
 							UseShellExecute = true
 						});
 					}
@@ -1070,11 +1052,11 @@ public class ControlWindow : Window, IDisposable
 								if (!success || paths.Count == 0) { return; }
 								string romPath = paths[0];
 								
-								StartGame(romPath);
+								StartSnes(romPath);
 
 							},
 							1,
-							Plugin.ROMSLocationSnesDir,
+							_plugin.ROMSLocationSnesDir,
 							false);
 					}
 				}
@@ -1087,38 +1069,38 @@ public class ControlWindow : Window, IDisposable
 
 				string pressAKey = "Press a key... (Click again to abort)";
 
-				foreach(Snes9xInput key in _core.SnesKeys.Keys)
+				foreach(Snes9xInput key in _core.SnesKeyMap.Keys)
 				{
-					if(_core.SnesKeys.TryGetValue(key, out VirtualKey virtualKey))
+					if(_core.SnesKeyMap.TryGetValue(key, out VirtualKey virtualKey))
 					{
 						float pos = ImGui.GetCursorPosX();
 						ImGui.Text(key.ToString());
 						ImGui.SameLine();
 						ImGui.SetCursorPosX(pos + 80);
-						string label = (_waitingForKey == (int)key ? pressAKey : virtualKey == VirtualKey.NO_KEY ? "Unmapped" : virtualKey.ToString()) + "##keymap"+key;
+						string label = (_awaitKeyPress == (int)key ? pressAKey : virtualKey == VirtualKey.NO_KEY ? "Unmapped" : virtualKey.ToString()) + "##keymap"+key;
 
 						if (ImGui.Button(label))
 						{
-							if (_waitingForKey == (int)key)
+							if (_awaitKeyPress == (int)key)
 							{
-								_waitingForKey = -1;
+								_awaitKeyPress = -1;
 							}
 							else
 							{
-								_waitingForKey = (int)key;
+								_awaitKeyPress = (int)key;
 							}
 						}
 
-						if (_waitingForKey == (int)key)
+						if (_awaitKeyPress == (int)key)
 						{
 							foreach (VirtualKey vk in Services.KeyState.GetValidVirtualKeys())
 							{
-								if (Services.KeyState[vk] && _core.IsKeyMappable(vk))
+								if (Services.KeyState[vk] && _core.IsSnesKeyMappable(vk))
 								{
-									_core.SnesKeys[key] = vk;
+									_core.SnesKeyMap[key] = vk;
 									_plugin.Config.KeyMappings[key] = vk;
 									_plugin.Config.Save();
-									_waitingForKey = -1;
+									_awaitKeyPress = -1;
 									break;
 								}
 							}
@@ -1144,7 +1126,7 @@ public class ControlWindow : Window, IDisposable
 
 		bool installingMPV = _updatingMPV;
 		bool installingYTDLP = _updatingYTDLP;
-		bool installingSNES9X = _installingSNES9X;
+		bool installingSNES9X = _updatingSNES9X;
 
 		ImGui.Text("Dependencies:");
 
@@ -1240,7 +1222,7 @@ public class ControlWindow : Window, IDisposable
 			}
 			if (ImGui.Button((installingSNES9X ? "Updating..." : "Update") + "##snes9xUpdate"))
 			{
-				_installingSNES9X = true;
+				_updatingSNES9X = true;
 				_plugin.LibResources.DownloadSNES9XAsync().ContinueWith(async task =>
 				{
 					if (task.Result)
@@ -1252,7 +1234,7 @@ public class ControlWindow : Window, IDisposable
 					{
 						Services.Log.Error("Failed to download SNES9X");
 					}
-					_installingSNES9X = false;
+					_updatingSNES9X = false;
 				});
 			}
 			if (installingSNES9X)
@@ -1269,5 +1251,12 @@ public class ControlWindow : Window, IDisposable
 
 
 		ImGui.EndTabItem();
+	}
+
+	public void Dispose()
+	{
+		_plugin.UpdateIPCState(null);
+		_core.Dispose();
+		GC.SuppressFinalize(this);
 	}
 }

@@ -9,34 +9,26 @@ using SharpCompress.Common;
 
 namespace AlphaChannel;
 
-public class Resources : IDisposable
+internal sealed class Resources : IDisposable
 {
 	private readonly HttpClient _httpClient;
-	private readonly string _pluginDir;
+	private readonly Plugin _plugin;
 
-	public string[] MpvCheckResult { get; private set; } = [string.Empty, string.Empty];
-	public string[] YtdlpCheckResult { get; private set; } = [string.Empty, string.Empty];
+	internal string[] MpvCheckResult { get; private set; } = [string.Empty, string.Empty];
+	internal string[] YtdlpCheckResult { get; private set; } = [string.Empty, string.Empty];
 	private long _ntpTimeOffset;
 	private long _sysTimeOffset;
 
-	public long NTPTimeSeconds => _ntpTimeOffset > 0 ? _ntpTimeOffset + (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - _sysTimeOffset) : DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+	internal long NTPTimeSeconds => _ntpTimeOffset > 0 ? _ntpTimeOffset + (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - _sysTimeOffset) : DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
 
-	public Resources(string pluginDir)
+	internal Resources(Plugin plugin)
 	{
 		_httpClient = new HttpClient();
 		_httpClient.DefaultRequestHeaders.Add("User-Agent", "AlphaChannelUpdater/1.0");
-		_pluginDir = pluginDir;
-		_=GetNtpUtcAsync().ContinueWith(task =>
-		{
-			if (task.IsCompletedSuccessfully)
-			{
-				_ntpTimeOffset = task.GetResultSafely();
-				
-			}
-			_sysTimeOffset = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-			Services.Log.Debug("Received NTP Time Offset: " + _ntpTimeOffset);
-		});
+		_plugin = plugin;
+
+		Initialize();
 	}
 
 	public void Dispose()
@@ -53,13 +45,13 @@ public class Resources : IDisposable
 				}
 			}
 		}
-		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "alphachannelscreentex_*.atex").ToList().ForEach(File.Delete);
-		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "alphachannelscreen_*.avfx").ToList().ForEach(File.Delete);
-		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "snesscreentex_*.atex").ToList().ForEach(File.Delete);
-		Directory.GetFiles(Path.Combine(_pluginDir, "resources"), "snesscreen_*.avfx").ToList().ForEach(File.Delete);
+		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "alphachannelscreentex_*.atex").ToList().ForEach(File.Delete);
+		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "alphachannelscreen_*.avfx").ToList().ForEach(File.Delete);
+		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "snesscreentex_*.atex").ToList().ForEach(File.Delete);
+		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "snesscreen_*.avfx").ToList().ForEach(File.Delete);
 
-		var getDir = new GetModDirectory(Services.PluginInterface);
-        string dir = getDir.Invoke();
+		var modDir = new GetModDirectory(Services.PluginInterface);
+        string dir = modDir.Invoke();
         string alphachanneltempdir = Path.Combine(dir, "AlphaChannelTemp");
 		if (Directory.Exists(alphachanneltempdir))
 		{
@@ -67,13 +59,14 @@ public class Resources : IDisposable
 			{
 				try { File.Delete(file); } catch { }
 			}
+			Directory.Delete(alphachanneltempdir);
 		}
 		GC.SuppressFinalize(this);
 	}
 
-	//TO BE REMOVED JUST FOR DEBUG
+	/* TO BE REMOVED JUST FOR DEBUGGING PENUMBRA NOT SYNCING TEMPMODS */
     private List<Dictionary<string, string>> _tempGamePaths = [];
-    private Dictionary<string, string> TempCopyGamePaths(Dictionary<string, string> gamePaths)
+    private Dictionary<string, string> FixTempCopyGamePaths(Dictionary<string, string> gamePaths)
     {
 		var finalPaths = new Dictionary<string, string>();
 		
@@ -96,14 +89,48 @@ public class Resources : IDisposable
 		return finalPaths;
     }
 
-	public Dictionary<string, string> LoadPenumbraScreenResources()
+	private void Initialize()
+	{
+		_=GetNtpUtcAsync().ContinueWith(task =>
+		{
+			//Set NTP time
+			if (task.IsCompletedSuccessfully)
+			{
+				_ntpTimeOffset = task.GetResultSafely();
+				Services.Log.Debug("Received NTP Time Offset: " + _ntpTimeOffset);
+			}
+			_sysTimeOffset = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+		}).ContinueWith(_ =>
+		{
+			//Check for MPV Updates
+			_plugin.LibResources.CheckMPVAsync().ContinueWith(task =>
+			{
+				if (!task.IsCompletedSuccessfully)
+				{
+					Services.Log.Error("Failed to check for MPV updates: " + task.Exception?.ToString());
+				}
+			});
+		}).ContinueWith(_=>
+		{
+			//Check for YTDLP Updates
+			_plugin.LibResources.CheckYTDLPAsync().ContinueWith(task =>
+			{
+				if (!task.IsCompletedSuccessfully)
+				{
+					Services.Log.Error("Failed to check for YTDLP updates: " + task.Exception?.ToString());
+				}
+			});
+		});
+	}
+
+	internal Dictionary<string, string> LoadPenumbraScreenResources()
 	{
 		Dictionary<string, string> paths = [];
 
-		string oldPath = Path.Combine(_pluginDir, "resources", "alphachannelscreentex.atex");
+		string oldPath = Path.Combine(_plugin.PluginDir, "resources", "alphachannelscreentex.atex");
 		if (File.Exists(oldPath))
 		{
-			string path = Path.Combine(_pluginDir, "resources", "alphachannelscreentex_"+Plugin.PluginSessionGUID+".atex");
+			string path = Path.Combine(_plugin.PluginDir, "resources", "alphachannelscreentex_"+_plugin.PluginSessionGUID+".atex");
 			File.Copy(oldPath, path);
 			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreentex.atex", path);
 		}
@@ -112,34 +139,34 @@ public class Resources : IDisposable
 			throw new FileNotFoundException($"Required resource not found: {oldPath}");
 		}
 
-		oldPath = Path.Combine(_pluginDir, "resources", "alphachannelscreen.avfx");
+		oldPath = Path.Combine(_plugin.PluginDir, "resources", "alphachannelscreen.avfx");
 		if (File.Exists(oldPath))
 		{
-			string path = Path.Combine(_pluginDir, "resources", "alphachannelscreen_"+Plugin.PluginSessionGUID+".avfx");
+			string path = Path.Combine(_plugin.PluginDir, "resources", "alphachannelscreen_"+_plugin.PluginSessionGUID+".avfx");
 			File.Copy(oldPath, path);
-			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreen_"+Plugin.PluginSessionGUID+".avfx", path);
+			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreen_"+_plugin.PluginSessionGUID+".avfx", path);
 		}
 		else
 		{
 			throw new FileNotFoundException($"Required resource not found: {oldPath}");
 		}
 
-		oldPath = Path.Combine(_pluginDir, "resources", "snesscreen.avfx");
+		oldPath = Path.Combine(_plugin.PluginDir, "resources", "snesscreen.avfx");
 		if (File.Exists(oldPath))
 		{
-			string path = Path.Combine(_pluginDir, "resources", "snesscreen_"+Plugin.PluginSessionGUID+".avfx");
+			string path = Path.Combine(_plugin.PluginDir, "resources", "snesscreen_"+_plugin.PluginSessionGUID+".avfx");
 			File.Copy(oldPath, path);
-			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreen_"+Plugin.PluginSessionGUID+".avfx", path);
+			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreen_"+_plugin.PluginSessionGUID+".avfx", path);
 		}
 		else
 		{
 			throw new FileNotFoundException($"Required resource not found: {oldPath}");
 		}
 
-		oldPath = Path.Combine(_pluginDir, "resources", "snesscreentex.atex");
+		oldPath = Path.Combine(_plugin.PluginDir, "resources", "snesscreentex.atex");
 		if (File.Exists(oldPath))
 		{
-			string path = Path.Combine(_pluginDir, "resources", "snesscreentex_"+Plugin.PluginSessionGUID+".atex");
+			string path = Path.Combine(_plugin.PluginDir, "resources", "snesscreentex_"+_plugin.PluginSessionGUID+".atex");
 			File.Copy(oldPath, path);
 			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreentex.atex", path);
 		}
@@ -148,9 +175,10 @@ public class Resources : IDisposable
 			throw new FileNotFoundException($"Required resource not found: {oldPath}");
 		}
 
-		return TempCopyGamePaths(paths); //just return paths after the fix
+		return FixTempCopyGamePaths(paths); //just return paths after the bug is fixed
 	}
-	public Dictionary<string, string> LoadPenumbraModResources()
+
+	internal Dictionary<string, string> LoadPenumbraModResources()
 	{
 		Dictionary<string, string> paths = new () {
 			{"chara/monster/m7002/animation/a0001/bt_common/resident/monster.pap", "carbuncle/monster.pap"}, //Carbuncle Files
@@ -172,24 +200,24 @@ public class Resources : IDisposable
 		};
 		foreach(string key in paths.Keys)
 		{
-			string fullPath = Path.Combine(_pluginDir, "resources", paths[key]);
+			string fullPath = Path.Combine(_plugin.PluginDir, "resources", paths[key]);
 			if (!File.Exists(fullPath))
 			{
 				throw new FileNotFoundException($"Required resource not found: {fullPath}");
 			}
 			else
 			{
-				paths[key] = Path.Combine(_pluginDir, "resources", paths[key]);
+				paths[key] = Path.Combine(_plugin.PluginDir, "resources", paths[key]);
 			}
 		}
 
-		return TempCopyGamePaths(paths); //just return paths after the fix
+		return FixTempCopyGamePaths(paths); //just return paths after the bug is fixed
 	}
 
-	public string? GetLocationMPV()
+	internal string? GetLocationMPV()
 	{
 		string filenameStart = "mpv-dev-lgpl-x86_64-";
-		string? dir = Directory.GetDirectories(_pluginDir, $"{filenameStart}*").FirstOrDefault();
+		string? dir = Directory.GetDirectories(_plugin.ConfigDir, $"{filenameStart}*").FirstOrDefault();
 		if (dir != null)
 		{
 			return dir + "/libmpv-2.dll";
@@ -200,10 +228,10 @@ public class Resources : IDisposable
 		}
 	}
 
-	public string? GetLocationYTDLP()
+	internal string? GetLocationYTDLP()
 	{
 		string filenameStart = "yt-dlp";
-		string? dir = Directory.GetDirectories(_pluginDir, $"{filenameStart}*").FirstOrDefault();
+		string? dir = Directory.GetDirectories(_plugin.ConfigDir, $"{filenameStart}*").FirstOrDefault();
 		if (dir != null)
 		{
 			return dir + "/yt-dlp.exe";
@@ -214,13 +242,13 @@ public class Resources : IDisposable
 		}
 	}
 
-	public string? GetLocationSNES9X()
+	internal string? GetLocationSNES9X()
 	{
 		string directoryName = "snes9x";
-		string? dir = Directory.GetDirectories(_pluginDir, $"{directoryName}*").FirstOrDefault();
+		string? dir = Directory.GetDirectories(_plugin.ConfigDir, $"{directoryName}*").FirstOrDefault();
 		if (dir != null)
 		{
-			string file = Path.Combine(_pluginDir, directoryName, "snes9x_libretro.dll");
+			string file = Path.Combine(_plugin.ConfigDir, directoryName, "snes9x_libretro.dll");
 			if(File.Exists(file))
 			{
 				return file;
@@ -228,13 +256,148 @@ public class Resources : IDisposable
 		}
 		else
 		{
-			Directory.CreateDirectory(Path.Combine(_pluginDir, "snes9x"));
+			Directory.CreateDirectory(Path.Combine(_plugin.ConfigDir, "snes9x"));
 		}
 		
 		return null;
 	}
 
-	public async Task<bool> DownloadSNES9XAsync()
+	private async Task CheckMPVAsync()
+	{
+		string filenameStart = "mpv-dev-lgpl-x86_64-";
+		string filenameEnd = ".7z";
+		string url = "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest";
+		MpvCheckResult = await CheckForUpdateAsync(_plugin.ConfigDir, filenameStart, filenameEnd, url);
+	}
+	private async Task CheckYTDLPAsync()
+	{
+		string filenameStart = "yt-dlp.exe";
+		string filenameEnd = ".exe";
+		string url = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest";
+		YtdlpCheckResult = await CheckForUpdateAsync(_plugin.ConfigDir, filenameStart, filenameEnd, url);
+	}
+	internal async Task<bool> DownloadMPVAsync()
+	{
+		string filenameStart = "mpv-dev-lgpl-x86_64-";
+		string filenameEnd = ".7z";
+		string downloadURL = MpvCheckResult[0];
+		string folderName = MpvCheckResult[1];
+		return await UpdateAsync(_plugin.ConfigDir, filenameStart, filenameEnd, downloadURL, folderName);
+	}
+	internal async Task<bool> DownloadYTDLPAsync()
+	{
+		string filenameStart = "yt-dlp";
+		string filenameEnd = ".exe";
+		string downloadURL = YtdlpCheckResult[0];
+		string folderName = YtdlpCheckResult[1];
+		return await UpdateAsync(_plugin.ConfigDir, filenameStart, filenameEnd, downloadURL, folderName);
+	}
+	private async Task<string[]> CheckForUpdateAsync(string configDir, string nameStartsWith, string nameEndsWith, string checkURL)
+	{
+		try{
+			string json = await _httpClient.GetStringAsync(checkURL);
+			var doc = JsonDocument.Parse(json);
+			long remoteId = doc.RootElement.GetProperty("id").GetInt64();
+			var asset = doc.RootElement.GetProperty("assets")
+				.EnumerateArray()
+				.First(a => a.GetProperty("name").GetString()!
+					.StartsWith(nameStartsWith, StringComparison.Ordinal) &&
+					a.GetProperty("name").GetString()!.EndsWith(nameEndsWith, StringComparison.Ordinal));
+
+			string assetName = asset.GetProperty("name").GetString()!;
+			string folderName = assetName.Replace(nameEndsWith, "") + "_" + remoteId;
+
+			string localFolder = Path.Combine(configDir, folderName);
+
+			if (Directory.Exists(localFolder))
+			{
+				return [string.Empty, folderName]; //Already up to date
+			}
+
+			string downloadURL = asset.GetProperty("browser_download_url").GetString()!;
+			Services.Log.Warning("Found Update: " + downloadURL);
+			return [downloadURL, folderName];
+		}
+		catch
+		{
+			return [string.Empty, string.Empty];
+		}
+	}
+
+	private async Task<bool> UpdateAsync(string configDir, string nameStartsWith, string nameEndsWith, string downloadURL, string folderName)
+	{
+		try
+		{
+			Services.Log.Debug("Downloading Update: " + downloadURL);
+			string tempFile = Path.GetTempFileName() + nameEndsWith;
+			var response = await _httpClient.GetAsync(downloadURL, HttpCompletionOption.ResponseHeadersRead);
+			await using (var fs = File.OpenWrite(tempFile))
+			{
+				await response.Content.CopyToAsync(fs);
+			}
+			Services.Log.Debug("Finished Downloading " + downloadURL);
+			if (nameEndsWith == ".7z")
+			{
+				string localFolder = Path.Combine(configDir, Path.GetRandomFileName());
+				Directory.CreateDirectory(localFolder);
+				using (var archive = ArchiveFactory.OpenArchive(tempFile))
+				{
+					foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
+					{
+						entry.WriteToDirectory(localFolder, new ExtractionOptions
+						{
+							ExtractFullPath = true,
+							Overwrite = true
+						});
+					}
+				}
+
+				File.Delete(tempFile);
+
+				foreach (string dir in Directory.GetDirectories(configDir, $"{nameStartsWith}*"))
+				{
+					Directory.Delete(dir, recursive: true);
+				}
+
+				if (Directory.Exists(Path.Combine(configDir, folderName))) //Super weird but lets just do this to be safe
+				{
+					foreach (string file in Directory.GetFiles(localFolder, "*", SearchOption.AllDirectories))
+					{
+						string relative = Path.GetRelativePath(localFolder, file);
+						string target = Path.Combine(Path.Combine(configDir, folderName), relative);
+						Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+						File.Copy(file, target, overwrite: true);
+					}
+				}
+				else
+				{
+					Directory.Move(localFolder, Path.Combine(configDir, folderName));
+				}
+			}
+			else
+			{
+				foreach (string dir in Directory.GetDirectories(configDir, $"{nameStartsWith}*"))
+				{
+					Directory.Delete(dir, recursive: true);
+				}
+
+				string localFolder = Path.Combine(configDir, folderName);
+				Directory.CreateDirectory(localFolder);
+
+				string targetPath = Path.Combine(localFolder, nameStartsWith.EndsWith(nameEndsWith, StringComparison.Ordinal) ? nameStartsWith : nameStartsWith + nameEndsWith);
+				File.Copy(tempFile, targetPath, overwrite: true);
+				File.Delete(tempFile);
+			}
+			return true;
+		}
+		catch (Exception e)
+		{
+			Services.Log.Error($"Error updating {nameStartsWith}: {e.Message} {e.StackTrace}");
+			return false;
+		}
+	}
+
+	internal async Task<bool> DownloadSNES9XAsync()
 	{
 		try
 		{
@@ -246,7 +409,7 @@ public class Resources : IDisposable
 				await response.Content.CopyToAsync(fs);
 			}
 
-			string localFolder = Path.Combine(_pluginDir, directoryName);
+			string localFolder = Path.Combine(_plugin.ConfigDir, directoryName);
 			Directory.CreateDirectory(localFolder);
 			using (var archive = ArchiveFactory.OpenArchive(temp))
 			{
@@ -265,141 +428,6 @@ public class Resources : IDisposable
 		}
 		catch
 		{
-			return false;
-		}
-	}
-
-	public async Task CheckMPVAsync()
-	{
-		string filenameStart = "mpv-dev-lgpl-x86_64-";
-		string filenameEnd = ".7z";
-		string url = "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest";
-		MpvCheckResult = await CheckForUpdateAsync(_pluginDir, filenameStart, filenameEnd, url);
-	}
-	public async Task CheckYTDLPAsync()
-	{
-		string filenameStart = "yt-dlp.exe";
-		string filenameEnd = ".exe";
-		string url = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest";
-		YtdlpCheckResult = await CheckForUpdateAsync(_pluginDir, filenameStart, filenameEnd, url);
-	}
-	public async Task<bool> DownloadMPVAsync()
-	{
-		string filenameStart = "mpv-dev-lgpl-x86_64-";
-		string filenameEnd = ".7z";
-		string downloadURL = MpvCheckResult[0];
-		string folderName = MpvCheckResult[1];
-		return await UpdateAsync(_pluginDir, filenameStart, filenameEnd, downloadURL, folderName);
-	}
-	public async Task<bool> DownloadYTDLPAsync()
-	{
-		string filenameStart = "yt-dlp";
-		string filenameEnd = ".exe";
-		string downloadURL = YtdlpCheckResult[0];
-		string folderName = YtdlpCheckResult[1];
-		return await UpdateAsync(_pluginDir, filenameStart, filenameEnd, downloadURL, folderName);
-	}
-	private async Task<string[]> CheckForUpdateAsync(string pluginDir, string nameStartsWith, string nameEndsWith, string checkURL)
-	{
-		try{
-			string json = await _httpClient.GetStringAsync(checkURL);
-			var doc = JsonDocument.Parse(json);
-			long remoteId = doc.RootElement.GetProperty("id").GetInt64();
-			var asset = doc.RootElement.GetProperty("assets")
-				.EnumerateArray()
-				.First(a => a.GetProperty("name").GetString()!
-					.StartsWith(nameStartsWith, StringComparison.Ordinal) &&
-					a.GetProperty("name").GetString()!.EndsWith(nameEndsWith, StringComparison.Ordinal));
-
-			string assetName = asset.GetProperty("name").GetString()!;
-			string folderName = assetName.Replace(nameEndsWith, "") + "_" + remoteId;
-
-			string localFolder = Path.Combine(pluginDir, folderName);
-
-			if (Directory.Exists(localFolder))
-			{
-				return [string.Empty, folderName]; //Already up to date
-			}
-
-			string downloadURL = asset.GetProperty("browser_download_url").GetString()!;
-			Services.Log.Warning("Found Update: " + downloadURL);
-			return [downloadURL, folderName];
-		}
-		catch
-		{
-			return [string.Empty, string.Empty];
-		}
-	}
-
-	private async Task<bool> UpdateAsync(string pluginDir, string nameStartsWith, string nameEndsWith, string downloadURL, string folderName)
-	{
-		try
-		{
-			Services.Log.Debug("Downloading Update: " + downloadURL);
-			string tempFile = Path.GetTempFileName() + nameEndsWith;
-			var response = await _httpClient.GetAsync(downloadURL, HttpCompletionOption.ResponseHeadersRead);
-			await using (var fs = File.OpenWrite(tempFile))
-			{
-				await response.Content.CopyToAsync(fs);
-			}
-			Services.Log.Debug("Finished Downloading " + downloadURL);
-			if (nameEndsWith == ".7z")
-			{
-				string localFolder = Path.Combine(pluginDir, Path.GetRandomFileName());
-				Directory.CreateDirectory(localFolder);
-				using (var archive = ArchiveFactory.OpenArchive(tempFile))
-				{
-					foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
-					{
-						entry.WriteToDirectory(localFolder, new ExtractionOptions
-						{
-							ExtractFullPath = true,
-							Overwrite = true
-						});
-					}
-				}
-
-				File.Delete(tempFile);
-
-				foreach (string dir in Directory.GetDirectories(pluginDir, $"{nameStartsWith}*"))
-				{
-					Directory.Delete(dir, recursive: true);
-				}
-
-				if (Directory.Exists(Path.Combine(pluginDir, folderName))) //Super weird but lets just do this to be safe
-				{
-					foreach (string file in Directory.GetFiles(localFolder, "*", SearchOption.AllDirectories))
-					{
-						string relative = Path.GetRelativePath(localFolder, file);
-						string target = Path.Combine(Path.Combine(pluginDir, folderName), relative);
-						Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-						File.Copy(file, target, overwrite: true);
-					}
-				}
-				else
-				{
-					Directory.Move(localFolder, Path.Combine(pluginDir, folderName));
-				}
-			}
-			else
-			{
-				foreach (string dir in Directory.GetDirectories(pluginDir, $"{nameStartsWith}*"))
-				{
-					Directory.Delete(dir, recursive: true);
-				}
-
-				string localFolder = Path.Combine(pluginDir, folderName);
-				Directory.CreateDirectory(localFolder);
-
-				string targetPath = Path.Combine(localFolder, nameStartsWith.EndsWith(nameEndsWith, StringComparison.Ordinal) ? nameStartsWith : nameStartsWith + nameEndsWith);
-				File.Copy(tempFile, targetPath, overwrite: true);
-				File.Delete(tempFile);
-			}
-			return true;
-		}
-		catch (Exception e)
-		{
-			Services.Log.Error($"Error updating {nameStartsWith}: {e.Message} {e.StackTrace}");
 			return false;
 		}
 	}
@@ -436,7 +464,7 @@ public class Resources : IDisposable
 	{
 		private static Plugin? _plugin;
 
-		public static void Register(Plugin plugin)
+		internal static void Register(Plugin plugin)
 		{
 			_plugin = plugin;
 			NativeLibrary.SetDllImportResolver(typeof(NativeLoader).Assembly, Resolve);

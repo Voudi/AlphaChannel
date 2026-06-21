@@ -36,4 +36,7 @@ public class Services
 
 	[PluginService]
 	public static IKeyState KeyState { get; private set; } = null!;
+
+	[PluginService]
+	public static IGamepadState GamepadState { get; private set; } = null!;
 }

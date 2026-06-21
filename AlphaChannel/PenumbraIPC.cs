@@ -8,7 +8,7 @@ public static class PenumbraIPC
     private const string Tag = "AlphaChannelTemporaryMod";
 
     private static Guid _collectionId = Guid.Empty;
-    private static List<string> _keys = [];
+    private static readonly List<string> _keys = [];
 
     public static bool CheckTempMod(string key)
     {
@@ -65,12 +65,12 @@ public static class PenumbraIPC
 
         _collectionId = Guid.Empty;
         _keys.Clear();
-        Redraw(-1);
+        Redraw();
     }
 
-    public static void Redraw(int gameObjectIndex)
+    public static void Redraw(ushort gameObjectIndex = ushort.MaxValue)
     {
-        if(gameObjectIndex < 0) { 
+        if(gameObjectIndex == ushort.MaxValue) { 
             var redrawAll = new RedrawAll(Services.PluginInterface);
             redrawAll.Invoke(RedrawType.Redraw);
             Services.Log.Warning("Fallback: Redrawing all actors.");
