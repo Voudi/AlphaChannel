@@ -1085,7 +1085,7 @@ public class ControlWindow : Window, IDisposable
 
 				ImGui.Text("Configure Keys:");
 
-				string pressAKey = "Press a key... (ESC to abort)";
+				string pressAKey = "Press a key... (Click again to abort)";
 
 				foreach(Snes9xInput key in _core.SnesKeys.Keys)
 				{
@@ -1099,20 +1099,22 @@ public class ControlWindow : Window, IDisposable
 
 						if (ImGui.Button(label))
 						{
-							_waitingForKey = (int)key;
+							if (_waitingForKey == (int)key)
+							{
+								_waitingForKey = -1;
+							}
+							else
+							{
+								_waitingForKey = (int)key;
+							}
 						}
 
 						if (_waitingForKey == (int)key)
 						{
 							foreach (VirtualKey vk in Services.KeyState.GetValidVirtualKeys())
 							{
-								if (Services.KeyState[vk])
+								if (Services.KeyState[vk] && _core.IsKeyMappable(vk))
 								{
-									if (vk == VirtualKey.ESCAPE)
-									{
-										_waitingForKey = -1;
-										break;
-									}
 									_core.SnesKeys[key] = vk;
 									_plugin.Config.KeyMappings[key] = vk;
 									_plugin.Config.Save();

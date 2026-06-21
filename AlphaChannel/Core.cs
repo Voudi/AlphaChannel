@@ -653,6 +653,16 @@ public class Core : IDisposable
 		GC.SuppressFinalize(this);
 	}
 
+
+	public bool IsKeyMappable(VirtualKey vk)
+	{
+		return (vk >= VirtualKey.KEY_0 && vk <= VirtualKey.KEY_9)   // 0-9
+			|| (vk >= VirtualKey.A && vk <= VirtualKey.Z)            // A-Z
+			|| (vk >= VirtualKey.NUMPAD0 && vk <= VirtualKey.DIVIDE) // Numpad
+			|| (vk >= VirtualKey.F1 && vk <= VirtualKey.F12)         // F-Keys
+			|| vk == VirtualKey.SPACE
+			|| (vk >= VirtualKey.LEFT && vk <= VirtualKey.DOWN);     // Arrows
+	}
 	private readonly Dictionary<VirtualKey, bool> _heldState = new();
 
 	internal void OnFrameworkUpdate()

@@ -12,7 +12,6 @@ public class WndProcKeyUpReader : IDisposable
 
     private const int GWLP_WNDPROC = -4;
     private const uint WM_KEYUP = 0x0101;
-    private const uint WM_SYSKEYUP = 0x0105;
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
@@ -32,7 +31,7 @@ public class WndProcKeyUpReader : IDisposable
 
     private IntPtr WndProcDetour(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
-        if (msg == WM_KEYUP || msg == WM_SYSKEYUP)
+        if (msg == WM_KEYUP)
         {
             lock (_lock) { _releasedKeys.Add((int)(wParam.ToInt64() & 0xFFFF)); }
         }
