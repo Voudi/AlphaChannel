@@ -301,7 +301,7 @@ public sealed class Snes9xRenderer : IDisposable
 		{
 			if (_coreInited)
 			{
-				SaveSram();
+				SaveSramIfChanged();
 				Services.Log.Debug("[SNES9X] calling unload_game");
 				try { Services.Log.Debug("before unload");
 _unloadGame();
@@ -339,15 +339,15 @@ Services.Log.Debug("after unload"); }
 		private DateTime _lastSramCheck = DateTime.UtcNow;
 		internal void OnFrameworkUpdate()
 		{
-			if ((DateTime.UtcNow - _lastSramCheck).TotalSeconds >= 1)
+			if ((DateTime.UtcNow - _lastSramCheck).TotalSeconds >= 3)
 			{
 				_lastSramCheck = DateTime.UtcNow;
 				SaveSramIfChanged();
 			}
-			SaveSramIfChanged();
 		}
 
 		private byte[]? _lastSram;
+		private const uint RETRO_MEMORY_SAVE_RAM = 0;
 		private void SaveSramIfChanged()
 		{
 			if (!_coreInited) { return; }
@@ -363,18 +363,6 @@ Services.Log.Debug("after unload"); }
 			File.WriteAllBytes(_srmPath, sram);
 		}
 
-		private const uint RETRO_MEMORY_SAVE_RAM = 0;
-		private void SaveSram()
-		{
-			if (!_coreInited) { return; }
-			nuint size = _getMemorySize(RETRO_MEMORY_SAVE_RAM);
-			IntPtr ptr = _getMemoryData(RETRO_MEMORY_SAVE_RAM);
-			if (size == 0 || ptr == IntPtr.Zero) { return; }
-
-			byte[] sram = new byte[(int)size];
-			Marshal.Copy(ptr, sram, 0, (int)size);
-			File.WriteAllBytes(_srmPath, sram);
-		}
 		private void LoadSram()
 		{
 			if (!File.Exists(_srmPath)) { return; }
