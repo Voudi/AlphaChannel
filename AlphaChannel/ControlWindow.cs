@@ -458,11 +458,11 @@ public class ControlWindow : Window, IDisposable
 
 		if(_core.IsLocalPlayerTVOn() && !string.IsNullOrEmpty(url) && _core.GetPaused()) //LocalPlayer TV is on and video is paused
 		{
-			state = new IPCVideoState("paused", Uri.EscapeDataString(url), pos, (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+			state = new IPCVideoState("paused", Uri.EscapeDataString(url), pos, _plugin.LibResources.NTPTimeSeconds);
 		}
 		else if(_core.IsLocalPlayerTVOn() && !string.IsNullOrEmpty(url) && !_core.GetPaused()) //LocalPlayer TV is on and video is playing
 		{
-			state = new IPCVideoState("playing", Uri.EscapeDataString(url), pos, (int)DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+			state = new IPCVideoState("playing", Uri.EscapeDataString(url), pos, _plugin.LibResources.NTPTimeSeconds);
 		}
 
 		return state;
@@ -1156,7 +1156,7 @@ public class ControlWindow : Window, IDisposable
 			}
 			if (ImGui.Button((installingMPV ? "Updating..." : "Update") + "##mpvUpdate"))
 			{
-				if (_plugin.LibResources.MpvCheckResult[0] != string.Empty)
+				if (!string.IsNullOrWhiteSpace(_plugin.LibResources.MpvCheckResult[0]))
 				{
 					_updatingMPV = true;
 					_plugin.LibResources.DownloadMPVAsync().ContinueWith(async task =>
@@ -1197,7 +1197,7 @@ public class ControlWindow : Window, IDisposable
 			}
 			if (ImGui.Button((installingYTDLP ? "Updating..." : "Update") + "##ytdlpUpdate"))
 			{
-				if (_plugin.LibResources.YtdlpCheckResult[0] != string.Empty)
+				if (!string.IsNullOrWhiteSpace(_plugin.LibResources.YtdlpCheckResult[0]))
 				{
 					_updatingYTDLP = true;
 					_plugin.LibResources.DownloadYTDLPAsync().ContinueWith(async task =>

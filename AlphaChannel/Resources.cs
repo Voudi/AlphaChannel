@@ -1,5 +1,8 @@
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using Dalamud.Utility;
 using Penumbra.Api.IpcSubscribers;
 using SharpCompress.Archives;
 using SharpCompress.Common;
@@ -13,12 +16,27 @@ public class Resources : IDisposable
 
 	public string[] MpvCheckResult { get; private set; } = [string.Empty, string.Empty];
 	public string[] YtdlpCheckResult { get; private set; } = [string.Empty, string.Empty];
+	private long _ntpTimeOffset;
+	private long _sysTimeOffset;
+
+	public long NTPTimeSeconds => _ntpTimeOffset > 0 ? _ntpTimeOffset + (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - _sysTimeOffset) : DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
 
 	public Resources(string pluginDir)
 	{
 		_httpClient = new HttpClient();
 		_httpClient.DefaultRequestHeaders.Add("User-Agent", "AlphaChannelUpdater/1.0");
 		_pluginDir = pluginDir;
+		_=GetNtpUtcAsync().ContinueWith(task =>
+		{
+			if (task.IsCompletedSuccessfully)
+			{
+				_ntpTimeOffset = task.GetResultSafely();
+				
+			}
+			_sysTimeOffset = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+			Services.Log.Debug("Received NTP Time Offset: " + _ntpTimeOffset);
+		});
 	}
 
 	public void Dispose()
@@ -383,6 +401,34 @@ public class Resources : IDisposable
 		{
 			Services.Log.Error($"Error updating {nameStartsWith}: {e.Message} {e.StackTrace}");
 			return false;
+		}
+	}
+
+	private async Task<long> GetNtpUtcAsync(string server = "pool.ntp.org")
+	{
+		try
+		{
+			byte[] ntpData = new byte[48];
+			ntpData[0] = 0x1B;
+
+			var addresses = await Dns.GetHostAddressesAsync(server);
+			var ep = new IPEndPoint(addresses[0], 123);
+
+			using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+			socket.ReceiveTimeout = 3000;
+			await socket.ConnectAsync(ep);
+			await socket.SendAsync(ntpData);
+			await socket.ReceiveAsync(ntpData);
+
+			ulong intPart = ((ulong)ntpData[40] << 24) | ((ulong)ntpData[41] << 16) | ((ulong)ntpData[42] << 8) | ntpData[43];
+			ulong fracPart = ((ulong)ntpData[44] << 24) | ((ulong)ntpData[45] << 16) | ((ulong)ntpData[46] << 8) | ntpData[47];
+			ulong ms = intPart * 1000 + fracPart * 1000 / 0x100000000L;
+			var dto = new DateTimeOffset(1900, 1, 1, 0, 0, 0, TimeSpan.Zero).AddMilliseconds((long)ms);
+        	return dto.ToUnixTimeMilliseconds();
+		}
+		catch
+		{
+			return 0;
 		}
 	}
 

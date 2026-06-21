@@ -36,7 +36,7 @@ public class Plugin : IDalamudPlugin
 	private readonly string _pluginDir;
 	public Resources LibResources { get; }
 	public Configuration Config { get; }
-	public Core.WndProcKeyUpReader WindowKeyUpReader { get; }
+	public WndProcKeyUpReader WindowKeyUpReader { get; }
 
 	public Plugin(IDalamudPluginInterface pluginInterface)
 	{
@@ -86,7 +86,7 @@ public class Plugin : IDalamudPlugin
 
 		Services.Framework.Update += OnFrameworkUpdate;
 
-		WindowKeyUpReader = new Core.WndProcKeyUpReader(pluginInterface.UiBuilder.WindowHandlePtr);
+		WindowKeyUpReader = new WndProcKeyUpReader(pluginInterface.UiBuilder.WindowHandlePtr, Services.InteropProvider);
 	}
 
 	private void OnFrameworkUpdate(IFramework framework)

@@ -54,17 +54,19 @@ internal sealed class Compatibility
 			{
 				Services.Log.Error("Failed to check for MPV updates: " + task.Exception?.ToString());
 			}
-		});
-		_plugin.LibResources.CheckYTDLPAsync().ContinueWith(task =>
-		{
-			if (task.IsCompletedSuccessfully)
+
+			_plugin.LibResources.CheckYTDLPAsync().ContinueWith(task =>
 			{
-				Services.Log.Debug("Success checking for YTDLP updates");
-			}
-			else
-			{
-				Services.Log.Error("Failed to check for YTDLP updates: " + task.Exception?.ToString());
-			}
+				if (task.IsCompletedSuccessfully)
+				{
+					Services.Log.Debug("Success checking for YTDLP updates");
+				}
+				else
+				{
+					Services.Log.Error("Failed to check for YTDLP updates: " + task.Exception?.ToString());
+				}
+			});
 		});
+
 	}
 }
