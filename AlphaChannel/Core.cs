@@ -16,6 +16,10 @@ using SharpDX.DXGI;
 using SharpDX.Mathematics.Interop;
 using Dalamud.Game.ClientState.Keys;
 using Dalamud.Game.ClientState.Objects.Enums;
+using Dalamud.Game.ClientState.GamePad;
+using FFXIVClientStructs.FFXIV.Client.System.Input;
+using Dalamud.Interface.ManagedFontAtlas;
+using SharpDX.Win32;
 
 namespace AlphaChannel;
 
@@ -66,7 +70,7 @@ internal sealed class Core : IDisposable
 	
 	private bool _isPlayingSnes;
 	private bool _snesControlsEnabled;
-	internal Dictionary<Snes9xInput, VirtualKey> SnesKeyMap { get; set; } = [];
+	internal Dictionary<Snes9xInput, string> SnesKeyMap { get; set; } = [];
 
 	internal unsafe Core(Plugin plugin)
 	{
@@ -85,13 +89,13 @@ internal sealed class Core : IDisposable
 		List<Snes9xInput> keyOrder = [Snes9xInput.UP, Snes9xInput.DOWN, Snes9xInput.LEFT, Snes9xInput.RIGHT, Snes9xInput.A, Snes9xInput.B, Snes9xInput.X, Snes9xInput.Y, Snes9xInput.L, Snes9xInput.R, Snes9xInput.START, Snes9xInput.SELECT];
 		foreach(Snes9xInput key in keyOrder)
 		{
-			if(plugin.Config.KeyMappings.TryGetValue(key, out VirtualKey virtualKey))
+			if(plugin.Config.KeyMappings.TryGetValue(key, out string? virtualKey))
 			{
-				SnesKeyMap.Add(key, virtualKey);
+				SnesKeyMap.Add(key, virtualKey ?? VirtualKey.NO_KEY.ToString());
 			}
 			else
 			{
-				SnesKeyMap.Add(key, VirtualKey.NO_KEY);
+				SnesKeyMap.Add(key, VirtualKey.NO_KEY.ToString());
 			}
 		}
 	}
@@ -323,18 +327,94 @@ internal sealed class Core : IDisposable
 			|| vk == VirtualKey.SPACE
 			|| (vk >= VirtualKey.LEFT && vk <= VirtualKey.DOWN);     // Arrows
 	}
+
+	internal enum GamePadSticks
+	{
+		LeftStickUp = 0x10000,
+		LeftStickDown = 0x20000,
+		LeftStickLeft = 0x40000,
+		LeftStickRight = 0x80000,
+		RightStickUp = 0x100000,
+		RightStickDown = 0x200000,
+		RightStickLeft = 0x400000,
+		RightStickRight = 0x800000
+	}
+	internal List<int> GetAllGamePadButtons()
+	{
+		var gamePadButtonList = Enum.GetValues<GamepadButtons>().Select(button => (int)button).ToList();
+		var gamePadSticksList = Enum.GetValues<GamePadSticks>().Select(button => (int)button).ToList();
+		gamePadButtonList.AddRange(gamePadSticksList);
+		return gamePadButtonList;
+	}
+	internal string GetGamePadButtonName(int gamePadButton)
+	{
+		if(gamePadButton < 0x10000)
+		{
+			ushort button = (ushort) gamePadButton;
+			return Enum.GetName((GamepadButtons) button) ?? VirtualKey.NO_KEY.ToString();
+		}
+		else
+		{
+			return Enum.GetName((GamePadSticks) gamePadButton) ?? VirtualKey.NO_KEY.ToString();
+		}
+	}
+	private int GetGamePadButtonId(string gamePadButtonName)
+	{
+		if(Enum.TryParse(gamePadButtonName, out GamePadSticks gamePadButtonStick))
+		{
+			return (int) gamePadButtonStick;
+		}
+		else if(Enum.TryParse(gamePadButtonName, out GamepadButtons gamePadButton))
+		{
+			return (int) gamePadButton;
+		}
+		return (int)GamepadButtons.None;
+	}
+	internal bool IsGamePadButtonPressed(int gamePadButton)
+	{
+		if(gamePadButton < 0x10000)
+		{
+			GamepadButtons button = (GamepadButtons)(ushort) gamePadButton;
+			return Services.GamepadState.Raw(button) != 0;
+		}
+		else
+		{
+			bool leftStick = gamePadButton < 0x100000;
+			var button = (GamePadSticks) gamePadButton;
+			if ((leftStick && (Services.GamepadState.LeftStick.X != 0 || Services.GamepadState.LeftStick.Y != 0)) || (!leftStick && (Services.GamepadState.RightStick.X != 0 || Services.GamepadState.RightStick.Y != 0)))
+			{
+				float x = leftStick ? Services.GamepadState.LeftStick.X : Services.GamepadState.RightStick.X;
+				float y = leftStick ? Services.GamepadState.LeftStick.Y : Services.GamepadState.RightStick.Y;
+				float ratio = Math.Min(Math.Abs(x), Math.Abs(y)) / Math.Max(Math.Abs(x), Math.Abs(y));
+				bool diagonal = ratio > 0.6;
+				return button switch
+				{
+					GamePadSticks.LeftStickUp or GamePadSticks.RightStickUp => y > 0 && (Math.Abs(y) > Math.Abs(x) || diagonal),
+					GamePadSticks.LeftStickDown or GamePadSticks.RightStickDown => y < 0 && (Math.Abs(y) > Math.Abs(x) || diagonal),
+					GamePadSticks.LeftStickLeft or GamePadSticks.RightStickLeft => x < 0 && (Math.Abs(x) > Math.Abs(y) || diagonal),
+					GamePadSticks.LeftStickRight or GamePadSticks.RightStickRight => x > 0 && (Math.Abs(x) > Math.Abs(y) || diagonal),
+					_ => false
+				};
+			}
+			else
+			{
+				return false;
+			}
+		}
+	}
 	private readonly Dictionary<VirtualKey, bool> _heldState = new();
+	
 	internal void OnFrameworkUpdate()
 	{
 		HashSet<int> KeyUpEvents = _plugin.WindowKeyUpReader.Consume();
-		
+
 		if (!_isPlayingSnes || !_snesControlsEnabled)
 		{
 			return;
 		}
 		foreach(Snes9xInput key in SnesKeyMap.Keys)
 		{
-			if(SnesKeyMap.TryGetValue(key, out VirtualKey virtualKey) && virtualKey != VirtualKey.NO_KEY)
+			if(SnesKeyMap.TryGetValue(key, out string? virtualKeyString) && virtualKeyString != null && virtualKeyString != VirtualKey.NO_KEY.ToString() && Enum.TryParse(virtualKeyString, out VirtualKey virtualKey) && IsSnesKeyMappable(virtualKey))
 			{
 				bool pressed = Services.KeyState[virtualKey];
 
@@ -349,6 +429,12 @@ internal sealed class Core : IDisposable
 				{
 					Services.KeyState[virtualKey] = false; //Disable Key for Game
 				}
+			}
+			else if(SnesKeyMap.TryGetValue(key, out string? gamePadString) && gamePadString != null && gamePadString != VirtualKey.NO_KEY.ToString())
+			{
+				int gamePadButtonId = GetGamePadButtonId(gamePadString);
+				bool pressed = IsGamePadButtonPressed(gamePadButtonId);
+				_snesRenderer?.SetButton(0, (int)key, pressed);
 			}
 		}
 		_snesRenderer?.OnFrameworkUpdate();

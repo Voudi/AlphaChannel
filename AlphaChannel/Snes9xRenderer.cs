@@ -561,7 +561,7 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 		}
 	}
 
-	internal enum Snes9xInput
+	public enum Snes9xInput
 	{
 		B = 0, Y = 1, SELECT = 2, START = 3,
 		UP = 4, DOWN = 5, LEFT = 6, RIGHT = 7,

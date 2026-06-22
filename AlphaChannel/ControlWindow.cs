@@ -132,7 +132,7 @@ internal sealed class ControlWindow : Window, IDisposable
 			if (_core.ValidateURL(_inputURL, out Uri? uri) && uri != null)
 			{
 
-				_localPlayerState = new("playing", Uri.EscapeDataString(uri.ToString()), 0, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+				_localPlayerState = new("playing", Uri.EscapeDataString(uri.ToString()), 0, _plugin.LibResources.CurrentTimeNTPNormalizedMilliseconds);
 				_plugin.UpdateIPCState(_localPlayerState);
 				
 				_core.PlayVideo(entityId, uri.ToString());
@@ -152,8 +152,8 @@ internal sealed class ControlWindow : Window, IDisposable
 					return;
 				}
 
-				int getTimeDiff = (int) (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - stateInfo.Timestamp);
-				_core.PlayVideo(entityId, url, stateInfo.PlaybackPosition + getTimeDiff, stateInfo.State == "playing");
+				int getTimeDiffMillis = (int) (_plugin.LibResources.CurrentTimeNTPNormalizedMilliseconds - stateInfo.Timestamp);
+				_core.PlayVideo(entityId, url, stateInfo.PlaybackPosition + (getTimeDiffMillis / 1000), stateInfo.State == "playing");
 			}
 		}
 	}
@@ -370,11 +370,11 @@ internal sealed class ControlWindow : Window, IDisposable
 
 		if(_core.TVIsActive(LocalEntityId) && !string.IsNullOrEmpty(url) && _core.GetPaused()) //LocalPlayer TV is on and video is paused
 		{
-			state = new IPCVideoState("paused", Uri.EscapeDataString(url), pos, _plugin.LibResources.NTPTimeSeconds);
+			state = new IPCVideoState("paused", Uri.EscapeDataString(url), pos, _plugin.LibResources.CurrentTimeNTPNormalizedMilliseconds);
 		}
 		else if(_core.TVIsActive(LocalEntityId) && !string.IsNullOrEmpty(url) && !_core.GetPaused()) //LocalPlayer TV is on and video is playing
 		{
-			state = new IPCVideoState("playing", Uri.EscapeDataString(url), pos, _plugin.LibResources.NTPTimeSeconds);
+			state = new IPCVideoState("playing", Uri.EscapeDataString(url), pos, _plugin.LibResources.CurrentTimeNTPNormalizedMilliseconds);
 		}
 
 		return state;
@@ -1071,13 +1071,13 @@ internal sealed class ControlWindow : Window, IDisposable
 
 				foreach(Snes9xInput key in _core.SnesKeyMap.Keys)
 				{
-					if(_core.SnesKeyMap.TryGetValue(key, out VirtualKey virtualKey))
+					if(_core.SnesKeyMap.TryGetValue(key, out string? virtualKey))
 					{
 						float pos = ImGui.GetCursorPosX();
 						ImGui.Text(key.ToString());
 						ImGui.SameLine();
 						ImGui.SetCursorPosX(pos + 80);
-						string label = (_awaitKeyPress == (int)key ? pressAKey : virtualKey == VirtualKey.NO_KEY ? "Unmapped" : virtualKey.ToString()) + "##keymap"+key;
+						string label = (_awaitKeyPress == (int)key ? pressAKey : (virtualKey == null || virtualKey == VirtualKey.NO_KEY.ToString()) ? "Unmapped" : virtualKey) + "##keymap"+key;
 
 						if (ImGui.Button(label))
 						{
@@ -1097,8 +1097,39 @@ internal sealed class ControlWindow : Window, IDisposable
 							{
 								if (Services.KeyState[vk] && _core.IsSnesKeyMappable(vk))
 								{
-									_core.SnesKeyMap[key] = vk;
-									_plugin.Config.KeyMappings[key] = vk;
+									string keyName = vk.ToString();
+									foreach (Snes9xInput doubleKey in _core.SnesKeyMap.Keys)
+									{
+										if(_core.SnesKeyMap[doubleKey].Equals(keyName, StringComparison.OrdinalIgnoreCase))
+										{
+											_core.SnesKeyMap[doubleKey] = VirtualKey.NO_KEY.ToString();
+											_plugin.Config.KeyMappings[doubleKey] = VirtualKey.NO_KEY.ToString();
+											break;
+										}
+									}
+									_core.SnesKeyMap[key] = keyName;
+									_plugin.Config.KeyMappings[key] = keyName;
+									_plugin.Config.Save();
+									_awaitKeyPress = -1;
+									break;
+								}
+							}
+							foreach(int gamePadButton in _core.GetAllGamePadButtons())
+							{
+								if (_core.IsGamePadButtonPressed(gamePadButton))
+								{
+									string keyName = _core.GetGamePadButtonName(gamePadButton);
+									foreach (Snes9xInput doubleKey in _core.SnesKeyMap.Keys)
+									{
+										if(_core.SnesKeyMap[doubleKey].Equals(keyName, StringComparison.OrdinalIgnoreCase))
+										{
+											_core.SnesKeyMap[doubleKey] = VirtualKey.NO_KEY.ToString();
+											_plugin.Config.KeyMappings[doubleKey] = VirtualKey.NO_KEY.ToString();
+											break;
+										}
+									}
+									_core.SnesKeyMap[key] = keyName;
+									_plugin.Config.KeyMappings[key] = keyName;
 									_plugin.Config.Save();
 									_awaitKeyPress = -1;
 									break;

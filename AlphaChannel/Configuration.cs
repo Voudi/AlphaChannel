@@ -8,10 +8,8 @@ namespace AlphaChannel;
 public class Configuration : IPluginConfiguration
 {
     public int Version { get; set; }
-    int IPluginConfiguration.Version { get => Version; set => throw new NotImplementedException(); }
 
-    internal Dictionary<Snes9xInput, VirtualKey> KeyMappings { get; set; } = new();
-	
+    public Dictionary<Snes9xInput, string> KeyMappings { get; set; } = [];
 
 	[NonSerialized] private IDalamudPluginInterface _pi = null!;
 

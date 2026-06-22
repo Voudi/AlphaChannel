@@ -52,6 +52,7 @@ public class Plugin : IDalamudPlugin, IDisposable
 
 		Config = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 		Config.Initialize(pluginInterface);
+		Config.Save();
 		ConfigDir = pluginInterface.ConfigDirectory.FullName;
 
 		LibResources = new Resources(this);

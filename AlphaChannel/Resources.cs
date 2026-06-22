@@ -19,7 +19,7 @@ internal sealed class Resources : IDisposable
 	private long _ntpTimeOffset;
 	private long _sysTimeOffset;
 
-	internal long NTPTimeSeconds => _ntpTimeOffset > 0 ? _ntpTimeOffset + (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - _sysTimeOffset) : DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+	internal long CurrentTimeNTPNormalizedMilliseconds => _ntpTimeOffset > 0 ? _ntpTimeOffset + (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - _sysTimeOffset) : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 
 	internal Resources(Plugin plugin)
@@ -97,9 +97,9 @@ internal sealed class Resources : IDisposable
 			if (task.IsCompletedSuccessfully)
 			{
 				_ntpTimeOffset = task.GetResultSafely();
-				Services.Log.Debug("Received NTP Time Offset: " + _ntpTimeOffset);
+				Services.Log.Debug("Received NTP Time Offset: " + (_ntpTimeOffset - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) + " ms.");
 			}
-			_sysTimeOffset = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+			_sysTimeOffset = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 		}).ContinueWith(_ =>
 		{
 			//Check for MPV Updates
