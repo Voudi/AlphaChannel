@@ -1,8 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Numerics;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Keys;
 using Dalamud.Game.ClientState.Objects.SubKinds;
@@ -13,6 +10,8 @@ using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Interface;
 using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Windowing;
+using FFXIVClientStructs.FFXIV.Client.Game.Character;
+using Newtonsoft.Json;
 
 namespace AlphaChannel;
 
@@ -352,6 +351,7 @@ internal sealed class ControlWindow : Window, IDisposable
 	internal void RemoveOtherPlayer(nint addr)
 	{
 		uint player = _visiblePlayers.FirstOrDefault(player => player.Address == addr)?.EntityId ?? 0;
+
 		if (LocalEntityId != player && player != 0)
 		{
 			_currentStates.Remove(player);
@@ -406,7 +406,7 @@ internal sealed class ControlWindow : Window, IDisposable
 			}
 			else
 			{
-				IPCVideoState? state = JsonSerializer.Deserialize<IPCVideoState>(stateJSON);
+				IPCVideoState? state = JsonConvert.DeserializeObject<IPCVideoState>(stateJSON);
 				if (state != null)
 				{
 					bool foundstate = _currentStates.TryGetValue(playerId, out IPCVideoState? oldState);

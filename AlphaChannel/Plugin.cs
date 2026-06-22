@@ -1,12 +1,11 @@
 using System.Numerics;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using Newtonsoft.Json;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
-using SharpCompress.Compressors.ZStandard.Unsafe;
+using NoireLib;
 
 namespace AlphaChannel;
 
@@ -27,7 +26,7 @@ public class Plugin : IDalamudPlugin, IDisposable
 	internal string AssemblyLocationMPV { get; set; }
 	internal string AssemblyLocationYTDLP { get; set; }
 	internal string AssemblyLocationSnes { get; set; }
-	internal string ROMSLocationSnesDir { get => Path.Combine(ConfigDir, "snes"); }
+	internal string ROMSLocationSnesDir => Path.Combine(ConfigDir, "snes");
 	internal Dictionary<string, string> PenumbraTempModPaths { get; set;}
 	internal Dictionary<string, string> PenumbraTempScreenPaths { get; set;}
 
@@ -40,6 +39,8 @@ public class Plugin : IDalamudPlugin, IDisposable
 
 	public Plugin(IDalamudPluginInterface pluginInterface)
 	{
+		NoireLibMain.Initialize(pluginInterface, this);
+		
 		PluginSessionGUID = Guid.NewGuid();
 		
 		pluginInterface.Create<Services>();
@@ -169,7 +170,7 @@ public class Plugin : IDalamudPlugin, IDisposable
 	internal string? OnIPCGetLocalState()
 	{
 		ControlWindow.IPCVideoState? state = MainWindow?.IPCGetState();
-		return state is null ? null : JsonSerializer.Serialize(state);
+		return state is null ? null : JsonConvert.SerializeObject(state);
 	}
 
 	internal void OnIPCSetState(nint addr, string s)
@@ -181,10 +182,10 @@ public class Plugin : IDalamudPlugin, IDisposable
 	{
 		MainWindow?.RemoveOtherPlayer(addr);
 	}
-
+	
 	internal void UpdateIPCState(ControlWindow.IPCVideoState? state)
 	{
-		string? IPCstate = state is null ? null : JsonSerializer.Serialize(state);
+		string? IPCstate = state is null ? null : JsonConvert.SerializeObject(state);
 		ApiProvider.NotifyStateChange(IPCstate, IPCstate);
 	}
 }
