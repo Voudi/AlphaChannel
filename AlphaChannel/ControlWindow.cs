@@ -18,7 +18,6 @@ internal sealed class ControlWindow : Window, IDisposable
 	private readonly Core _core;
 	private readonly APIHelper _apiHelper;
 
-	private uint LocalEntityId => Services.Objects?.LocalPlayer?.EntityId ?? 0;
 	private bool _playerCarbuncleFound;
 	
 	//Resource vars
@@ -120,7 +119,7 @@ internal sealed class ControlWindow : Window, IDisposable
 
 	private void StartVideo(uint entityId)
 	{
-		if (LocalEntityId == entityId)
+		if (Services.LocalPlayerId == entityId)
 		{
 			if (_core.ValidateURL(_inputURL, out Uri? uri) && uri != null)
 			{
@@ -149,7 +148,11 @@ internal sealed class ControlWindow : Window, IDisposable
 
 	private void StartSnes(string path)
 	{
-		_core.PlaySnes(LocalEntityId, path);
+		uint? localPlayerId = Services.LocalPlayerId;
+		if (localPlayerId.HasValue)
+		{
+			_core.PlaySnes(localPlayerId.Value, path);
+		}
 	}
 
 	private void StopVideo()
@@ -178,7 +181,11 @@ internal sealed class ControlWindow : Window, IDisposable
 
 			_playerCarbuncleFound = _core.ScanForCompanions();
 
-			_visiblePlayers = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => (x.EntityId == LocalEntityId) ? "@" : x.Name.TextValue);
+			uint? localPlayerId = Services.LocalPlayerId;
+			if (localPlayerId.HasValue)
+			{
+				_visiblePlayers = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => x.Name.TextValue);
+			}
 		}
 	}
 
@@ -320,18 +327,22 @@ internal sealed class ControlWindow : Window, IDisposable
 		ImGui.Dummy(new Vector2(maxWidth, textSize.Y));
 	}
 
-	private void HandleNewPlayerSeen(IGameObject player, APIHelper.IPCVideoState state)
+	private void HandleNewPlayerSeen(IGameObject? player, APIHelper.IPCVideoState state)
 	{
-		uint playerId = player.EntityId;
+		uint? playerId = player?.EntityId;
+		if(!playerId.HasValue)
+		{
+			return;
+		}
 		DalamudLinkPayload linkPayload = Services.Chat.AddChatLinkHandler(_nextLinkId++, (commandId, msg) =>
 		{
-			StartVideo(playerId);
+			StartVideo(playerId.Value);
 			if (!IsOpen) { Toggle(); }
 		});
 		string url = state.Url.Length > 60 ? state.Url[..60] + "..." : state.Url;
 		SeString seString = new SeStringBuilder()
 			.AddUiForeground("[AlphaChannel] ", 35)
-			.AddText(player.Name.TextValue + " is currently hosting " + url)
+			.AddText(player?.Name.TextValue + " is currently hosting " + url)
 			.Add(linkPayload)
 			.AddUiForeground("[Click to start playback]", 32)
 			.Add(RawPayload.LinkTerminator)
@@ -400,9 +411,9 @@ internal sealed class ControlWindow : Window, IDisposable
 	private void DrawJoin()
 	{
 		int count = 0;
-		foreach (var item in _visiblePlayers)
+		foreach (IGameObject item in _visiblePlayers)
 		{
-			if(item.EntityId == LocalEntityId)
+			if(item.EntityId == Services.LocalPlayerId)
 			{
 				continue;
 			}
@@ -556,18 +567,18 @@ internal sealed class ControlWindow : Window, IDisposable
 	private void DrawHost()
 	{
 		Vector4 textColor;
-		IPlayerCharacter? player = Services.Objects.LocalPlayer;
-		if(player != null)
+		uint? localPlayerId = Services.LocalPlayerId;
+		if(localPlayerId.HasValue)
 		{
-			if (_playerCarbuncleFound || _core.TVIsVisible(player.EntityId)) //Checks if players Carbuncle or TV exists
+			if (_playerCarbuncleFound || _core.TVIsVisible(localPlayerId.Value)) //Checks if players Carbuncle or TV exists
 			{
-				bool playerTVRunning = _core.TVIsActive(LocalEntityId);
+				bool playerTVRunning = _core.TVIsActive(localPlayerId.Value);
 				bool urlEmpty = string.IsNullOrEmpty(_inputURL);
 				bool urlExists = _core.ValidateURL(_inputURL, out _);
 
 				ImGui.PushStyleColor(ImGuiCol.Text, _playerCarbuncleFound ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
 				ImGui.PushFont(UiBuilder.IconFont);
-				if(ImGui.Button(FontAwesomeIcon.PowerOff.ToIconString() + "##power" + player.EntityId))
+				if(ImGui.Button(FontAwesomeIcon.PowerOff.ToIconString() + "##power" + localPlayerId.Value))
 				{
 					if (_playerCarbuncleFound)
 					{
@@ -577,7 +588,7 @@ internal sealed class ControlWindow : Window, IDisposable
 					{
 						PenumbraIPC.RemoveTempMod("companion");
 					}
-					PenumbraIPC.Redraw(_core.GetCompanionIndex(player.EntityId));
+					PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId.Value));
 				}
 				ImGui.PopFont();
 				ImGui.PopStyleColor();
@@ -590,7 +601,7 @@ internal sealed class ControlWindow : Window, IDisposable
 					}
 
 					ImGui.PushFont(UiBuilder.IconFont);
-					if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##clipboard" + player.EntityId))
+					if (ImGui.Button(FontAwesomeIcon.Clipboard.ToIconString() + "##clipboard" + localPlayerId.Value))
 					{
 						ImGui.SetClipboardText(string.IsNullOrEmpty(_inputURL) && playerTVRunning ? _urlPlaceholder : _inputURL);
 					}
@@ -670,7 +681,7 @@ internal sealed class ControlWindow : Window, IDisposable
 							: FontAwesomeIcon.Stop.ToIconString()
 						)
 						: FontAwesomeIcon.Play.ToIconString()
-						) + "##play" + player.EntityId))
+						) + "##play" + localPlayerId.Value))
 					{
 						try
 						{
@@ -678,7 +689,7 @@ internal sealed class ControlWindow : Window, IDisposable
 							{
 								if (urlExists)
 								{
-									StartVideo(player.EntityId);
+									StartVideo(localPlayerId.Value);
 								}
 
 								_urlPlaceholder = _inputURL;
@@ -718,7 +729,7 @@ internal sealed class ControlWindow : Window, IDisposable
 					{
 						ImGui.SetNextItemWidth(265);
 						ImGui.PushStyleColor(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1));
-						ImGui.SliderFloat("##seeker" + player.EntityId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
+						ImGui.SliderFloat("##seeker" + localPlayerId.Value, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
 						if (ImGui.IsItemActive())
 						{
 							_sliderActive = true;
@@ -741,7 +752,7 @@ internal sealed class ControlWindow : Window, IDisposable
 
 						ImGui.PushFont(UiBuilder.IconFont);
 						ImGui.SetNextItemWidth(100);
-						ImGui.SliderFloat("##volumebar" + player.EntityId, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
+						ImGui.SliderFloat("##volumebar" + localPlayerId.Value, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
 						if (ImGui.IsItemActive())
 						{
 							_sliderActive = true;
@@ -755,7 +766,7 @@ internal sealed class ControlWindow : Window, IDisposable
 						ImGui.PopFont();
 						ImGui.SameLine();
 						ImGui.PushFont(UiBuilder.IconFont);
-						if (ImGui.Button(_mpvIsIdle ? FontAwesomeIcon.Repeat.ToIconString() : (_pauseToggle ? FontAwesomeIcon.Play.ToIconString() : FontAwesomeIcon.Pause.ToIconString()) + "##forceplay" + player.EntityId))
+						if (ImGui.Button(_mpvIsIdle ? FontAwesomeIcon.Repeat.ToIconString() : (_pauseToggle ? FontAwesomeIcon.Play.ToIconString() : FontAwesomeIcon.Pause.ToIconString()) + "##forceplay" + localPlayerId.Value))
 						{
 							if (_mpvIsIdle)
 							{
@@ -801,16 +812,16 @@ internal sealed class ControlWindow : Window, IDisposable
 	
 	private void DrawGame()
 	{
-		uint entityId = LocalEntityId;
+		uint? localPlayerId = Services.LocalPlayerId;
 		bool snesExists = !string.IsNullOrEmpty(_plugin.AssemblyLocationSnes);
 
-		if (_playerCarbuncleFound || _core.TVIsVisible(entityId))
+		if (localPlayerId.HasValue && (_playerCarbuncleFound || _core.TVIsVisible(localPlayerId.Value)))
 		{
-			bool playerTVRunning = _core.TVIsActive(LocalEntityId);
+			bool playerTVRunning = _core.TVIsActive(localPlayerId.Value);
 
 			ImGui.PushStyleColor(ImGuiCol.Text, _playerCarbuncleFound ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f));
 			ImGui.PushFont(UiBuilder.IconFont);
-			if(ImGui.Button(FontAwesomeIcon.PowerOff.ToIconString() + "##power" + entityId))
+			if(ImGui.Button(FontAwesomeIcon.PowerOff.ToIconString() + "##power" + localPlayerId.Value))
 			{
 				if (_playerCarbuncleFound)
 				{
@@ -820,7 +831,7 @@ internal sealed class ControlWindow : Window, IDisposable
 				{
 					PenumbraIPC.RemoveTempMod("companion");
 				}
-				PenumbraIPC.Redraw(_core.GetCompanionIndex(entityId));
+				PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId.Value));
 			}
 			ImGui.PopFont();
 			ImGui.PopStyleColor();
@@ -833,7 +844,7 @@ internal sealed class ControlWindow : Window, IDisposable
 					ImGui.PushStyleColor(ImGuiCol.Text, textColor);
 
 					ImGui.PushFont(UiBuilder.IconFont);
-					if (ImGui.Button(FontAwesomeIcon.Stop.ToIconString()+ "##stopgame" + entityId))
+					if (ImGui.Button(FontAwesomeIcon.Stop.ToIconString()+ "##stopgame" + localPlayerId.Value))
 					{
 						StopVideo();
 					}

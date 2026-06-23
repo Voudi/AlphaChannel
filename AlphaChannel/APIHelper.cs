@@ -11,7 +11,7 @@ public class APIHelper
 
     internal IReadOnlyDictionary<uint, IPCVideoState> RemoteStates => _remoteStates;
 
-    internal event Action<IGameObject, IPCVideoState>? OnNewPlayerSeen;
+    internal event Action<IGameObject?, IPCVideoState>? OnNewPlayerSeen;
 
     internal sealed record IPCVideoState(
         [property: JsonRequired] string State,
@@ -27,8 +27,8 @@ public class APIHelper
 
     internal string? GetLocalState()
     {
-        uint localId = Services.Objects?.LocalPlayer?.EntityId ?? 0;
-        if (!_core.TVIsActive(localId))
+        uint? localPlayerId = Services.LocalPlayerId;
+        if(!localPlayerId.HasValue || !_core.TVIsActive(localPlayerId.Value))
         {
             return null;
         }
@@ -47,23 +47,19 @@ public class APIHelper
 
     internal void SetRemoteState(nint addr, string stateJSON)
     {
-        uint localId = Services.Objects?.LocalPlayer?.EntityId ?? 0;
+        uint? localPlayerId = Services.LocalPlayerId;
+        ICharacter? player = NoireLib.Helpers.CharacterHelper.GetCharacterFromAddress(addr);
+        uint? playerId = player?.EntityId;
 
-        IGameObject? player = Services.Objects?.FirstOrDefault(x => x.Address == addr);
-        if (player == null)
-        {
-            return;
-        }
-        uint playerId = player.EntityId;
-        if (playerId == localId || playerId == 0) 
+        if (!playerId.HasValue || playerId == localPlayerId) 
         {
             return;
         }
 
         if (stateJSON == null)
         {
-            _remoteStates.Remove(playerId);
-            if (_core.TVIsActive(playerId))
+            _remoteStates.Remove(playerId.Value);
+            if (_core.TVIsActive(playerId.Value))
             {
                 _core.StopVideoSilent();
             }
@@ -77,22 +73,22 @@ public class APIHelper
             return;
         }
 
-        bool foundState = _remoteStates.TryGetValue(playerId, out IPCVideoState? oldState);
+        bool foundState = _remoteStates.TryGetValue(playerId.Value, out IPCVideoState? oldState);
         if (oldState?.Timestamp == state.Timestamp) 
         {
             return;
         }
 
-        state = _remoteStates[playerId] = new IPCVideoState(state.State, Uri.UnescapeDataString(state.Url), state.PlaybackPosition, state.Timestamp);
+        state = _remoteStates[playerId.Value] = new IPCVideoState(state.State, Uri.UnescapeDataString(state.Url), state.PlaybackPosition, state.Timestamp);
 
-        if (foundState && oldState != null && _core.TVIsActive(playerId))
+        if (foundState && oldState != null && _core.TVIsActive(playerId.Value))
         {
             if (oldState.Url != state.Url && state.Url != string.Empty)
             {
                 switch (state.State)
                 {
-                    case "playing": _core.PlayVideo(playerId, state.Url, state.PlaybackPosition, false); break;
-                    case "paused":  _core.PlayVideo(playerId, state.Url, state.PlaybackPosition, true); break;
+                    case "playing": _core.PlayVideo(playerId.Value, state.Url, state.PlaybackPosition, false); break;
+                    case "paused":  _core.PlayVideo(playerId.Value, state.Url, state.PlaybackPosition, true); break;
                 }
             }
             else
@@ -118,14 +114,14 @@ public class APIHelper
 
     internal void ClearRemoteState(nint addr)
     {
-        uint localId = Services.Objects?.LocalPlayer?.EntityId ?? 0;
-        IGameObject? player = Services.Objects?.FirstOrDefault(x => x.Address == addr);
-        uint playerId = player?.EntityId ?? 0;
+        uint? localPlayerId = Services.LocalPlayerId;
+        ICharacter? player = NoireLib.Helpers.CharacterHelper.GetCharacterFromAddress(addr);
+        uint? playerId = player?.EntityId;
 
-        if (playerId != localId && playerId != 0)
+        if (playerId.HasValue && playerId != localPlayerId)
         {
-            _remoteStates.Remove(playerId);
-            if (_core.TVIsActive(playerId))
+            _remoteStates.Remove(playerId.Value);
+            if (_core.TVIsActive(playerId.Value))
             {
                 _core.StopVideoSilent();
             }

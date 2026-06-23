@@ -91,13 +91,9 @@ internal sealed class Core : IDisposable
 		return _activeEntityId == entityId;
 	}
 
-	internal bool TVIsVisible(uint? entityId)
+	internal bool TVIsVisible(uint entityId)
 	{
-		if(entityId == null)
-		{
-			return false;
-		}
-		return _tvOwners.TryGetValue(entityId.Value, out _);
+		return _tvOwners.TryGetValue(entityId, out _);
 	}
 
 	internal ushort GetCompanionIndex(uint entityId)
@@ -111,7 +107,8 @@ internal sealed class Core : IDisposable
 
 	internal void StopVideo()
 	{
-		if (TVIsActive(Services.Objects?.LocalPlayer?.EntityId ?? 0))
+		uint? localPlayerId = Services.LocalPlayerId;
+		if (localPlayerId.HasValue && TVIsActive(localPlayerId.Value) && !IsPlayingSnes())
 		{
 			APIHelper?.OnVideoStopped();
 		}
@@ -141,7 +138,8 @@ internal sealed class Core : IDisposable
 			return;
 		}
 
-		if (entityId == (Services.Objects?.LocalPlayer?.EntityId ?? 0))
+		uint? localPlayerId = Services.LocalPlayerId;
+		if (entityId == localPlayerId)
 		{
 			APIHelper?.OnVideoStarted(url, playbackPosition, isPlaying);
 		}
@@ -191,7 +189,8 @@ internal sealed class Core : IDisposable
 
 	internal void Pause(bool pause)
 	{
-		if (TVIsActive(Services.Objects?.LocalPlayer?.EntityId ?? 0))
+		uint? localPlayerId = Services.LocalPlayerId;
+		if (localPlayerId.HasValue && TVIsActive(localPlayerId.Value) && !IsPlayingSnes())
 		{
 			APIHelper?.OnPaused(pause);
 		}
@@ -239,7 +238,8 @@ internal sealed class Core : IDisposable
 
 	internal void Seek(int seconds)
 	{
-		if (TVIsActive(Services.Objects?.LocalPlayer?.EntityId ?? 0))
+		uint? localPlayerId = Services.LocalPlayerId;
+		if (localPlayerId.HasValue && TVIsActive(localPlayerId.Value) && !IsPlayingSnes())
 		{
 			APIHelper?.OnSeeked(seconds);
 		}
@@ -341,7 +341,8 @@ internal sealed class Core : IDisposable
 	}
 	internal void OnFrameworkUpdate()
 	{
-		if (TVIsActive(Services.Objects?.LocalPlayer?.EntityId ?? 0))
+		uint? localPlayerId = Services.LocalPlayerId;
+		if (localPlayerId.HasValue && TVIsActive(localPlayerId.Value) && !IsPlayingSnes())
 		{
 			bool idle = GetIdle();
 			if (idle && !_lastIdle)

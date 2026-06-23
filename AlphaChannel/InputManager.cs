@@ -8,7 +8,7 @@ internal sealed class InputManager
 	private readonly Plugin _plugin;
 
 	internal Dictionary<Snes9xInput, string> SnesKeyMap { get; } = [];
-	private readonly Dictionary<VirtualKey, bool> _heldState = new();
+	private readonly Dictionary<VirtualKey, bool> _heldState = [];
 
 	internal enum GamePadSticks
 	{
