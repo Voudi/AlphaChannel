@@ -72,6 +72,10 @@ internal sealed class Core : IDisposable
 	private bool _snesControlsEnabled;
 	internal Dictionary<Snes9xInput, string> SnesKeyMap { get; set; } = [];
 
+	internal APIHelper? APIHelper { get; set; }
+
+	private bool _lastIdle = true;
+
 	internal unsafe Core(Plugin plugin)
 	{
 		_plugin = plugin;
@@ -125,6 +129,16 @@ internal sealed class Core : IDisposable
 
 	internal void StopVideo()
 	{
+		if (TVIsActive(Services.Objects?.LocalPlayer?.EntityId ?? 0))
+		{
+			APIHelper?.OnVideoStopped();
+		}
+
+		StopVideoSilent();
+	}
+
+	internal void StopVideoSilent()
+	{
 		if (_isPlayingSnes)
 		{
 			_snesRenderer?.Unload();
@@ -143,6 +157,11 @@ internal sealed class Core : IDisposable
 		if (_mpvRenderer != null && _mpvRenderer.GetCurrentUrl() == url && !_mpvRenderer.IsIdle())
 		{
 			return;
+		}
+
+		if (entityId == (Services.Objects?.LocalPlayer?.EntityId ?? 0))
+		{
+			APIHelper?.OnVideoStarted(url, playbackPosition, isPlaying);
 		}
 
 		ClearTexture(_screenTexture);
@@ -190,6 +209,16 @@ internal sealed class Core : IDisposable
 
 	internal void Pause(bool pause)
 	{
+		if (TVIsActive(Services.Objects?.LocalPlayer?.EntityId ?? 0))
+		{
+			APIHelper?.OnPaused(pause);
+		}
+
+		PauseSilent(pause);
+	}
+
+	internal void PauseSilent(bool pause)
+	{
 		if (!_renderCancellation.Token.IsCancellationRequested)
 		{
 			_mpvRenderer?.Pause(pause);
@@ -227,6 +256,16 @@ internal sealed class Core : IDisposable
 	}
 
 	internal void Seek(int seconds)
+	{
+		if (TVIsActive(Services.Objects?.LocalPlayer?.EntityId ?? 0))
+		{
+			APIHelper?.OnSeeked(seconds);
+		}
+
+		SeekSilent(seconds);
+	}
+
+	internal void SeekSilent(int seconds)
 	{
 		if (!_renderCancellation.Token.IsCancellationRequested)
 		{
@@ -406,6 +445,20 @@ internal sealed class Core : IDisposable
 	
 	internal void OnFrameworkUpdate()
 	{
+		if (TVIsActive(Services.Objects?.LocalPlayer?.EntityId ?? 0))
+		{
+			bool idle = GetIdle();
+			if (idle && !_lastIdle)
+			{
+				APIHelper?.OnIdleReached();
+			}
+			_lastIdle = idle;
+		}
+		else
+		{
+			_lastIdle = true;
+		}
+
 		HashSet<int> KeyUpEvents = _plugin.WindowKeyUpReader.Consume();
 
 		if (!_isPlayingSnes || !_snesControlsEnabled)
@@ -457,14 +510,13 @@ internal sealed class Core : IDisposable
 				{
 					continue;
 				}
-
 				var character = (Character*)item.Address;
 				if (character != null && character->DrawObject != null)
 				{
 					if (character->DrawObject->GetObjectType() == FFXIVClientStructs.FFXIV.Client.Graphics.Scene.ObjectType.CharacterBase)
 					{
 						try
-						{
+						{ 
 							var tvDraw = (CharacterBase*)character->DrawObject;
 							uint ownerId = character->CompanionOwnerId;
 							_companionOwners.TryAdd(ownerId, item);

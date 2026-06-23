@@ -19,7 +19,7 @@ public static class ApiProvider
     private static ICallGateProvider<object?>? _onDispose;
 
 
-    public static void Init(Plugin plugin)
+    public static void Init(APIHelper helper)
     {
         _version          = Services.PluginInterface.GetIpcProvider<(int, int)>("AlphaChannel.Version");
         _getState         = Services.PluginInterface.GetIpcProvider<string?>("AlphaChannel.GetState");
@@ -33,10 +33,10 @@ public static class ApiProvider
         _onDispose        = Services.PluginInterface.GetIpcProvider<object?>("AlphaChannel.OnDispose");
 
         _version.RegisterFunc(() => (ApiVersionMajor, ApiVersionMinor));
-        _getState.RegisterFunc(plugin.OnIPCGetLocalState);
-        _setState.RegisterAction(plugin.OnIPCSetState); //Persistent State
-        _applyStateUpdate.RegisterAction(plugin.OnIPCSetState); //Fleeting State
-        _clearState.RegisterAction(plugin.OnIPCClearState);
+        _getState.RegisterFunc(helper.GetLocalState);
+        _setState.RegisterAction(helper.SetRemoteState);
+        _applyStateUpdate.RegisterAction(helper.SetRemoteState);
+        _clearState.RegisterAction(helper.ClearRemoteState);
 
         _onReady.SendMessage();
     }

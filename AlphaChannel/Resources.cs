@@ -1,11 +1,12 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
-using System.Text.Json;
+using Newtonsoft.Json;
 using Dalamud.Utility;
 using Penumbra.Api.IpcSubscribers;
 using SharpCompress.Archives;
 using SharpCompress.Common;
+using Newtonsoft.Json.Linq;
 
 namespace AlphaChannel;
 
@@ -296,15 +297,14 @@ internal sealed class Resources : IDisposable
 	{
 		try{
 			string json = await _httpClient.GetStringAsync(checkURL);
-			var doc = JsonDocument.Parse(json);
-			long remoteId = doc.RootElement.GetProperty("id").GetInt64();
-			var asset = doc.RootElement.GetProperty("assets")
-				.EnumerateArray()
-				.First(a => a.GetProperty("name").GetString()!
+			var doc = JObject.Parse(json);
+			long remoteId = doc["id"]!.Value<long>();
+			var asset = doc["assets"]!
+				.First(a => a["name"]!.Value<string>()!
 					.StartsWith(nameStartsWith, StringComparison.Ordinal) &&
-					a.GetProperty("name").GetString()!.EndsWith(nameEndsWith, StringComparison.Ordinal));
+					a["name"]!.Value<string>()!.EndsWith(nameEndsWith, StringComparison.Ordinal));
 
-			string assetName = asset.GetProperty("name").GetString()!;
+			string assetName = asset["name"]!.Value<string>()!;
 			string folderName = assetName.Replace(nameEndsWith, "") + "_" + remoteId;
 
 			string localFolder = Path.Combine(configDir, folderName);
@@ -314,7 +314,7 @@ internal sealed class Resources : IDisposable
 				return [string.Empty, folderName]; //Already up to date
 			}
 
-			string downloadURL = asset.GetProperty("browser_download_url").GetString()!;
+			string downloadURL = asset["browser_download_url"]!.Value<string>()!;
 			Services.Log.Warning("Found Update: " + downloadURL);
 			return [downloadURL, folderName];
 		}

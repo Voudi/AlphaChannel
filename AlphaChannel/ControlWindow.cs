@@ -10,8 +10,6 @@ using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Interface;
 using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Windowing;
-using FFXIVClientStructs.FFXIV.Client.Game.Character;
-using Newtonsoft.Json;
 
 namespace AlphaChannel;
 
@@ -19,6 +17,7 @@ internal sealed class ControlWindow : Window, IDisposable
 {
 	private readonly Plugin _plugin;
 	private readonly Core _core;
+	private readonly APIHelper _apiHelper;
 
 	private uint LocalEntityId => Services.Objects?.LocalPlayer?.EntityId ?? 0;
 	private bool _playerCarbuncleFound;
@@ -55,17 +54,13 @@ internal sealed class ControlWindow : Window, IDisposable
 	private string _urlPlaceholder = UrlPlaceholderDefault;
 	private IEnumerable<IGameObject> _visiblePlayers = [];
 
-	//IPC vars
-	private readonly Dictionary<uint, IPCVideoState> _currentStates = []; //PlayerEntityID, IPCVideoState
-	internal sealed record IPCVideoState([property: JsonRequired] string State, [property: JsonRequired] string Url, [property: JsonRequired] int PlaybackPosition, [property: JsonRequired] long Timestamp);
-	private IPCVideoState? _localPlayerState;
-
-	internal ControlWindow(Plugin plugin, Core core, string title)
+	internal ControlWindow(Plugin plugin, Core core, APIHelper apiHelper, string title)
 		: base(title, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
 	{
 		_plugin = plugin;
-
 		_core = core;
+		_apiHelper = apiHelper;
+		_apiHelper.OnNewPlayerSeen += HandleNewPlayerSeen;
 
 		SizeConstraints = new WindowSizeConstraints
 		{
@@ -130,16 +125,12 @@ internal sealed class ControlWindow : Window, IDisposable
 		{
 			if (_core.ValidateURL(_inputURL, out Uri? uri) && uri != null)
 			{
-
-				_localPlayerState = new("playing", Uri.EscapeDataString(uri.ToString()), 0, _plugin.LibResources.CurrentTimeNTPNormalizedMilliseconds);
-				_plugin.UpdateIPCState(_localPlayerState);
-				
 				_core.PlayVideo(entityId, uri.ToString());
 			}
 		}
 		else
 		{
-			if (_currentStates.TryGetValue(entityId, out IPCVideoState? stateInfo))
+			if (_apiHelper.RemoteStates.TryGetValue(entityId, out APIHelper.IPCVideoState? stateInfo))
 			{
 				string url = stateInfo.Url;
 
@@ -207,15 +198,6 @@ internal sealed class ControlWindow : Window, IDisposable
 	{
 		int seconds = (int)(_seekerMaxSeconds * (percentage / 100));
 		Services.Log.Debug("Seeking to " + seconds + " seconds");
-
-		IPCVideoState? state = IPCGetState();
-		if(state != null)
-		{
-			state = new IPCVideoState(state.State, state.Url, seconds, state.Timestamp);
-			_localPlayerState = state;
-			_plugin.UpdateIPCState(state);
-		}
-
 		_core.Seek(seconds);
 	}
 
@@ -253,23 +235,14 @@ internal sealed class ControlWindow : Window, IDisposable
 			}
 		}
 		
-		if(_localPlayerState != null && !_core.TVIsActive(LocalEntityId)) //Level 1 - TV is has been turned completely off
-		{
-			_localPlayerState = null;
-			_plugin.UpdateIPCState(_localPlayerState);
-		}
-		else if(_mpvIsIdle != _core.GetIdle()) //Level 2 - TV has turned idle (end of video)
+		if(_mpvIsIdle != _core.GetIdle())
 		{
 			_mpvIsIdle = _core.GetIdle();
-			_pauseToggle = true;
-			_localPlayerState = IPCGetState();
-			_plugin.UpdateIPCState(_localPlayerState);
+			if (_mpvIsIdle) { _pauseToggle = true; }
 		}
-		else if(_pauseToggle != _core.GetPaused()) //Level 3 - TV has been paused
+		else if(_pauseToggle != _core.GetPaused())
 		{
 			_pauseToggle = _core.GetPaused();
-			_localPlayerState = IPCGetState();
-			_plugin.UpdateIPCState(_localPlayerState);
 		}
 	}
 
@@ -348,150 +321,23 @@ internal sealed class ControlWindow : Window, IDisposable
 		ImGui.Dummy(new Vector2(maxWidth, textSize.Y));
 	}
 
-	internal void RemoveOtherPlayer(nint addr)
+	private void HandleNewPlayerSeen(IGameObject player, APIHelper.IPCVideoState state)
 	{
-		uint player = _visiblePlayers.FirstOrDefault(player => player.Address == addr)?.EntityId ?? 0;
-
-		if (LocalEntityId != player && player != 0)
-		{
-			_currentStates.Remove(player);
-			if (_core.TVIsActive(player))
-			{
-				StopVideo();
-			}
-		}
-	}
-
-	internal IPCVideoState? IPCGetState()
-	{
-		string? url = _core.GetCurrentUrl();
-		int pos = _seekerTimeMinutes * 60 + _seekerTimeSeconds;
-		IPCVideoState? state = null;
-
-		if(_core.TVIsActive(LocalEntityId) && !string.IsNullOrEmpty(url) && _core.GetPaused()) //LocalPlayer TV is on and video is paused
-		{
-			state = new IPCVideoState("paused", Uri.EscapeDataString(url), pos, _plugin.LibResources.CurrentTimeNTPNormalizedMilliseconds);
-		}
-		else if(_core.TVIsActive(LocalEntityId) && !string.IsNullOrEmpty(url) && !_core.GetPaused()) //LocalPlayer TV is on and video is playing
-		{
-			state = new IPCVideoState("playing", Uri.EscapeDataString(url), pos, _plugin.LibResources.CurrentTimeNTPNormalizedMilliseconds);
-		}
-
-		return state;
-	}
-
-	internal void IPCSetState(nint addr, string stateJSON)
-	{
-		int pos = _seekerTimeMinutes * 60 + _seekerTimeSeconds;
-
-		IGameObject? player = _visiblePlayers.FirstOrDefault(player => player.Address == addr);
-		if(player == null)
-		{
-			return;
-		}
 		uint playerId = player.EntityId;
-		if (playerId == LocalEntityId)
+		DalamudLinkPayload linkPayload = Services.Chat.AddChatLinkHandler(_nextLinkId++, (commandId, msg) =>
 		{
-			return;
-		}
-		if (LocalEntityId != playerId && playerId != 0)
-		{
-			if(stateJSON == null)
-			{
-				_currentStates.Remove(playerId);
-				if (_core.TVIsActive(playerId))
-				{
-					StopVideo();
-				}
-			}
-			else
-			{
-				IPCVideoState? state = JsonConvert.DeserializeObject<IPCVideoState>(stateJSON);
-				if (state != null)
-				{
-					bool foundstate = _currentStates.TryGetValue(playerId, out IPCVideoState? oldState);
-					if(oldState != null && oldState.Timestamp == state.Timestamp)
-					{
-						return; //Got the same state twice
-					}
-					state = _currentStates[playerId] = new IPCVideoState(state.State, Uri.UnescapeDataString(state.Url), state.PlaybackPosition, state.Timestamp);
-					
-					if (foundstate && oldState != null && _core.TVIsActive(playerId))
-					{
-						if(oldState.Url != state.Url && state.Url != string.Empty)
-						{
-							switch(state.State)
-							{
-								case "playing":
-									_core.PlayVideo(playerId, state.Url, state.PlaybackPosition, false);
-									break;
-								case "paused":
-									_core.PlayVideo(playerId, state.Url, state.PlaybackPosition, true);
-									break;
-							}
-						}
-						else
-						{
-							if(pos + 7 < state.PlaybackPosition && pos - 7 > state.PlaybackPosition) //7s grace period to avoid unnecessary seek jumps due to minor desyncs
-							{
-								_core.Seek(state.PlaybackPosition);
-							}
-							switch(state.State)
-							{
-								case "playing":
-									if(_core.GetPaused())
-									{
-										_core.Pause(false);
-									}
-									break;
-								case "paused":
-									if(!_core.GetPaused())
-									{
-										_core.Pause(true);
-									}
-									break;
-							}
-						}
-					}
-					else if(!foundstate)
-					{
-						//First new player state received after abandoning TV, send chat message
-
-						DalamudLinkPayload _linkPayload = Services.Chat.AddChatLinkHandler(_nextLinkId++, (commandId, msg) =>
-						{
-							StartVideo(playerId);
-							if(!IsOpen)
-							{
-								Toggle();
-							}
-						});
-						string url = state.Url;
-						if(state.Url.Length > 60)
-						{
-							url = state.Url.Substring(0, 60);
-							url += "...";
-						}
-						SeString seString = new SeStringBuilder()
-							.AddUiForeground("[AlphaChannel] ", 35)
-							.AddText(player.Name.TextValue + " is currently hosting " + url)
-							.Add(_linkPayload)
-							.AddUiForeground("[Click to start playback]", 32)
-							.Add(RawPayload.LinkTerminator)
-							.Build();
-
-						Services.Chat.Print(new XivChatEntry
-						{
-							Message = seString,
-							Type    = XivChatType.Echo
-						});
-					}
-				}
-				else{
-					Services.Log.Error("Failed to deserialize state for player " + playerId + " with JSON: " + stateJSON);
-				}
-			}
-			
-		}
+			StartVideo(playerId);
+			if (!IsOpen) { Toggle(); }
+		});
+		string url = state.Url.Length > 60 ? state.Url[..60] + "..." : state.Url;
+		SeString seString = new SeStringBuilder()
+			.AddUiForeground("[AlphaChannel] ", 35)
+			.AddText(player.Name.TextValue + " is currently hosting " + url)
+			.Add(linkPayload)
+			.AddUiForeground("[Click to start playback]", 32)
+			.Add(RawPayload.LinkTerminator)
+			.Build();
+		Services.Chat.Print(new XivChatEntry { Message = seString, Type = XivChatType.Echo });
 	}
 
 	private void DrawFirstInstall()
@@ -570,7 +416,7 @@ internal sealed class ControlWindow : Window, IDisposable
 				bool urlExists = false;
 				bool urlEmpty = string.IsNullOrEmpty(_inputURL);
 
-				if (_currentStates.TryGetValue(item.EntityId, out IPCVideoState? state))
+				if (_apiHelper.RemoteStates.TryGetValue(item.EntityId, out APIHelper.IPCVideoState? state))
 				{
 					url = state.Url;
 					urlExists = true;
@@ -1286,7 +1132,8 @@ internal sealed class ControlWindow : Window, IDisposable
 
 	public void Dispose()
 	{
-		_plugin.UpdateIPCState(null);
+		_apiHelper.OnNewPlayerSeen -= HandleNewPlayerSeen;
+		_core.StopVideo();
 		_core.Dispose();
 		GC.SuppressFinalize(this);
 	}

@@ -1,5 +1,4 @@
 using System.Numerics;
-using Newtonsoft.Json;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
@@ -33,6 +32,7 @@ public class Plugin : IDalamudPlugin, IDisposable
 	internal WindowSystem WindowSystem { get; } = new(PluginName);
 	internal ControlWindow MainWindow { get; }
 	internal Core Core { get; }
+	internal APIHelper APIHelper { get; }
 	internal Resources LibResources { get; }
 	internal Configuration Config { get; }
 	internal WndProcKeyUpReader WindowKeyUpReader { get; }
@@ -69,15 +69,17 @@ public class Plugin : IDalamudPlugin, IDisposable
 		
 
 		Core = new Core(this);
+		APIHelper = new APIHelper(Core, LibResources);
+		Core.APIHelper = APIHelper;
 
 		string title = "AlphaChannel Remote ";
 		#if IS_TEST
 				title += " (Test)";
 		#endif
-		MainWindow = new ControlWindow(this, Core, title);
+		MainWindow = new ControlWindow(this, Core, APIHelper, title);
 		WindowSystem.AddWindow(MainWindow);
-		
-		ApiProvider.Init(this);
+
+		ApiProvider.Init(APIHelper);
 
 		Services.Framework.Update += OnFrameworkUpdate;
 
@@ -166,26 +168,4 @@ public class Plugin : IDalamudPlugin, IDisposable
 		_showError = true;
 	}
 
-	/* Sync Methods */
-	internal string? OnIPCGetLocalState()
-	{
-		ControlWindow.IPCVideoState? state = MainWindow?.IPCGetState();
-		return state is null ? null : JsonConvert.SerializeObject(state);
-	}
-
-	internal void OnIPCSetState(nint addr, string s)
-	{
-		MainWindow?.IPCSetState(addr, s);
-	}
-	
-	internal void OnIPCClearState(nint addr)
-	{
-		MainWindow?.RemoveOtherPlayer(addr);
-	}
-	
-	internal void UpdateIPCState(ControlWindow.IPCVideoState? state)
-	{
-		string? IPCstate = state is null ? null : JsonConvert.SerializeObject(state);
-		ApiProvider.NotifyStateChange(IPCstate, IPCstate);
-	}
 }
