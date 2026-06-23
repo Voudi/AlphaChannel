@@ -1,7 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
-using Dalamud.Game.ClientState.Keys;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Game.Text;
@@ -913,74 +912,28 @@ internal sealed class ControlWindow : Window, IDisposable
 
 				ImGui.Text("Configure Keys:");
 
-				string pressAKey = "Press a key... (Click again to abort)";
+				const string pressAKey = "Press a key... (Click again to abort)";
 
-				foreach(Snes9xInput key in _core.SnesKeyMap.Keys)
+				foreach (Snes9xInput key in _core.Input.SnesKeyMap.Keys)
 				{
-					if(_core.SnesKeyMap.TryGetValue(key, out string? virtualKey))
+					_core.Input.SnesKeyMap.TryGetValue(key, out string? boundKey);
+					float pos = ImGui.GetCursorPosX();
+					ImGui.Text(key.ToString());
+					ImGui.SameLine();
+					ImGui.SetCursorPosX(pos + 80);
+					string label = (_awaitKeyPress == (int)key ? pressAKey : string.IsNullOrEmpty(boundKey) || boundKey == "NO_KEY" ? "Unmapped" : boundKey) + "##keymap" + key;
+
+					if (ImGui.Button(label))
 					{
-						float pos = ImGui.GetCursorPosX();
-						ImGui.Text(key.ToString());
-						ImGui.SameLine();
-						ImGui.SetCursorPosX(pos + 80);
-						string label = (_awaitKeyPress == (int)key ? pressAKey : (virtualKey == null || virtualKey == VirtualKey.NO_KEY.ToString()) ? "Unmapped" : virtualKey) + "##keymap"+key;
+						_awaitKeyPress = _awaitKeyPress == (int)key ? -1 : (int)key;
+					}
 
-						if (ImGui.Button(label))
+					if (_awaitKeyPress == (int)key)
+					{
+						if (_core.Input.TryDetectInput(out string detectedKey))
 						{
-							if (_awaitKeyPress == (int)key)
-							{
-								_awaitKeyPress = -1;
-							}
-							else
-							{
-								_awaitKeyPress = (int)key;
-							}
-						}
-
-						if (_awaitKeyPress == (int)key)
-						{
-							foreach (VirtualKey vk in Services.KeyState.GetValidVirtualKeys())
-							{
-								if (Services.KeyState[vk] && _core.IsSnesKeyMappable(vk))
-								{
-									string keyName = vk.ToString();
-									foreach (Snes9xInput doubleKey in _core.SnesKeyMap.Keys)
-									{
-										if(_core.SnesKeyMap[doubleKey].Equals(keyName, StringComparison.OrdinalIgnoreCase))
-										{
-											_core.SnesKeyMap[doubleKey] = VirtualKey.NO_KEY.ToString();
-											_plugin.Config.KeyMappings[doubleKey] = VirtualKey.NO_KEY.ToString();
-											break;
-										}
-									}
-									_core.SnesKeyMap[key] = keyName;
-									_plugin.Config.KeyMappings[key] = keyName;
-									_plugin.Config.Save();
-									_awaitKeyPress = -1;
-									break;
-								}
-							}
-							foreach(int gamePadButton in _core.GetAllGamePadButtons())
-							{
-								if (_core.IsGamePadButtonPressed(gamePadButton))
-								{
-									string keyName = _core.GetGamePadButtonName(gamePadButton);
-									foreach (Snes9xInput doubleKey in _core.SnesKeyMap.Keys)
-									{
-										if(_core.SnesKeyMap[doubleKey].Equals(keyName, StringComparison.OrdinalIgnoreCase))
-										{
-											_core.SnesKeyMap[doubleKey] = VirtualKey.NO_KEY.ToString();
-											_plugin.Config.KeyMappings[doubleKey] = VirtualKey.NO_KEY.ToString();
-											break;
-										}
-									}
-									_core.SnesKeyMap[key] = keyName;
-									_plugin.Config.KeyMappings[key] = keyName;
-									_plugin.Config.Save();
-									_awaitKeyPress = -1;
-									break;
-								}
-							}
+							_core.Input.AssignKey(key, detectedKey);
+							_awaitKeyPress = -1;
 						}
 					}
 				}

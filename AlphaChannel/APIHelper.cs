@@ -131,8 +131,7 @@ public class APIHelper
             }
         }
     }
-
-    // Called by Core when local player's video starts
+    
     internal void OnVideoStarted(string url, int position, bool isPlaying)
     {
         string stateStr = isPlaying ? "playing" : "paused";
@@ -140,13 +139,11 @@ public class APIHelper
         ApiProvider.NotifyStateChange(json, json);
     }
 
-    // Called by Core when local player's video stops
     internal void OnVideoStopped()
     {
         ApiProvider.NotifyStateChange(null, null);
     }
 
-    // Called by Core when local player pauses/resumes
     internal void OnPaused(bool paused)
     {
         string? url = _core.GetCurrentUrl();
@@ -157,7 +154,6 @@ public class APIHelper
         ApiProvider.NotifyStateChange(json, json);
     }
 
-    // Called by Core when local player seeks (position is the seek target, not yet reflected in GetInfo)
     internal void OnSeeked(int seconds)
     {
         string? url = _core.GetCurrentUrl();
