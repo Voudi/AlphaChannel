@@ -15,7 +15,7 @@ public static class PenumbraIPC
         return _collectionId != Guid.Empty && _keys.Contains(key);
     }
 
-    public static void ApplyTempMod(string key, int? actorIndex, Dictionary<string, string> gamePaths)
+    public static void ApplyTempMod(string key, ushort? actorIndex, Dictionary<string, string> gamePaths)
     {
         if(actorIndex == null)
         {
@@ -65,17 +65,10 @@ public static class PenumbraIPC
 
         _collectionId = Guid.Empty;
         _keys.Clear();
-        Redraw();
     }
 
-    public static void Redraw(ushort gameObjectIndex = ushort.MaxValue)
+    public static void Redraw(ushort gameObjectIndex)
     {
-        if(gameObjectIndex == ushort.MaxValue) { 
-            var redrawAll = new RedrawAll(Services.PluginInterface);
-            redrawAll.Invoke(RedrawType.Redraw);
-            Services.Log.Warning("Fallback: Redrawing all actors.");
-            return; 
-        }
         var redraw = new RedrawObject(Services.PluginInterface);
         redraw.Invoke(gameObjectIndex, RedrawType.Redraw);
     }

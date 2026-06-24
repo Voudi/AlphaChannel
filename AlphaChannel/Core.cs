@@ -68,6 +68,7 @@ internal sealed class Core : IDisposable
 	internal APIHelper? APIHelper { get; set; }
 
 	private bool _lastIdle = true;
+	private readonly List<string> _recentSnesPaths = [];
 
 	internal unsafe Core(Plugin plugin)
 	{
@@ -84,6 +85,8 @@ internal sealed class Core : IDisposable
 		_actorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
 
 		_getResourceSyncHook.Enable();
+
+		_recentSnesPaths.AddRange(plugin.Config.RecentPaths);
 	}
 
 	internal bool TVIsActive(uint entityId)
@@ -143,8 +146,6 @@ internal sealed class Core : IDisposable
 		{
 			APIHelper?.OnVideoStarted(url, playbackPosition, isPlaying);
 		}
-
-		ClearTexture(_screenTexture);
 
 		Task.Run(async () =>
 		{
@@ -308,12 +309,11 @@ internal sealed class Core : IDisposable
 	{
 		try
 		{
-			ClearTexture(_snesScreenTexture);
-
 			_snesRenderer ??= new Snes9xRenderer(_plugin);
 
 			if(_plugin.ROMSLocationSnesDir != null)
 			{
+				AddSnesPath(path);
 				_snesControlsEnabled = true;
 				_isPlayingSnes = _snesRenderer.Load(_snesScreenTexture, path);
 				_activeEntityId = entityId;
@@ -326,6 +326,26 @@ internal sealed class Core : IDisposable
 		}
 
 		return _isPlayingSnes;
+	}
+	
+	internal void RemoveSnesPath(string path)
+	{
+		_recentSnesPaths.Remove(path);
+	}
+	private void AddSnesPath(string path)
+	{
+		_recentSnesPaths.Remove(path);
+		_recentSnesPaths.Insert(0, path);
+		if (_recentSnesPaths.Count > 6)
+		{
+			_recentSnesPaths.RemoveAt(_recentSnesPaths.Count - 1);
+		}
+		_plugin.Config.RecentPaths = _recentSnesPaths;
+		_plugin.Config.Save();
+	}
+	internal List<string> GetRecentSnesPaths()
+	{
+		return [.. _recentSnesPaths];
 	}
 	internal bool IsPlayingSnes()
 	{
@@ -628,34 +648,15 @@ internal sealed class Core : IDisposable
 		}
 	}
 
-	private void ClearTexture(Texture2D texture)
-	{
-		DeviceContext? ctx = DxHandler.DrawDevice?.ImmediateContext;
-		if (ctx == null || texture == null) { return; }
-
-		int w = texture.Description.Width;
-		int h = texture.Description.Height;
-
-		byte[] gray = new byte[w * h * 4];
-		for (int i = 0; i < gray.Length; i += 4)
-		{
-			gray[i] = 77;
-			gray[i+1] = 77;
-			gray[i+2] = 77;
-			gray[i+3] = 255;
-		}
-
-		var handle = GCHandle.Alloc(gray, GCHandleType.Pinned);
-		try
-		{
-			ctx.UpdateSubresource(texture, 0, null, handle.AddrOfPinnedObject(), w * 4, 0);
-			ctx.Flush();
-		}
-		finally { handle.Free(); }
-	}
-
 	public void Dispose()
 	{
+		PenumbraIPC.Dispose();
+		uint? localPlayerId = Services.LocalPlayerId;
+		if(localPlayerId.HasValue && _tvOwners.TryGetValue(localPlayerId.Value, out _))
+		{
+			PenumbraIPC.Redraw(GetCompanionIndex(localPlayerId.Value)); //Special case: Redraw one last time after
+		}
+
 		_mpvRenderer?.Dispose();
 		_snesRenderer?.Dispose();
 

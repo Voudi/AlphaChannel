@@ -10,6 +10,7 @@ public class Configuration : IPluginConfiguration
     public int Version { get; set; }
 
     public Dictionary<Snes9xInput, string> KeyMappings { get; set; } = [];
+    public List<string> RecentPaths { get; set; } = [];
 
 	[NonSerialized] private IDalamudPluginInterface _pi = null!;
 
