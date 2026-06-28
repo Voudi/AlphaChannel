@@ -5,6 +5,7 @@ namespace AlphaChannel;
 
 public class APIHelper
 {
+    private readonly Plugin _plugin;
     private readonly Core _core;
     private readonly Resources _resources;
     private readonly Dictionary<uint, IPCVideoState> _remoteStates = [];
@@ -19,8 +20,9 @@ public class APIHelper
         [property: JsonRequired] int PlaybackPosition,
         [property: JsonRequired] long Timestamp);
 
-    internal APIHelper(Core core, Resources resources)
+    internal APIHelper(Plugin plugin, Core core, Resources resources)
     {
+        _plugin = plugin;
         _core = core;
         _resources = resources;
     }
@@ -132,7 +134,9 @@ public class APIHelper
     {
         string stateStr = isPlaying ? "playing" : "paused";
         string json = JsonConvert.SerializeObject(new IPCVideoState(stateStr, Uri.EscapeDataString(url), position, _resources.CurrentTimeNTPNormalizedMilliseconds));
+
         ApiProvider.NotifyStateChange(json, json);
+        _=NotifyStateDebug(json);
     }
 
     internal void OnVideoStopped()
@@ -140,14 +144,16 @@ public class APIHelper
         ApiProvider.NotifyStateChange(null, null);
     }
 
-    internal void OnPaused(bool paused)
+    internal async Task OnPaused(bool paused)
     {
         string? url = _core.GetCurrentUrl();
         if (string.IsNullOrEmpty(url)) { return; }
 
         int pos = (int)_core.GetInfo()[0];
         string json = JsonConvert.SerializeObject(new IPCVideoState(paused ? "paused" : "playing", Uri.EscapeDataString(url), pos, _resources.CurrentTimeNTPNormalizedMilliseconds));
+
         ApiProvider.NotifyStateChange(json, json);
+        _=NotifyStateDebug(json);
     }
 
     internal void OnSeeked(int seconds)
@@ -161,6 +167,7 @@ public class APIHelper
         string stateStr = _core.GetPaused() ? "paused" : "playing";
         string json = JsonConvert.SerializeObject(new IPCVideoState(stateStr, Uri.EscapeDataString(url), seconds, _resources.CurrentTimeNTPNormalizedMilliseconds));
         ApiProvider.NotifyStateChange(json, json);
+        _=NotifyStateDebug(json);
     }
 
     internal void OnIdleReached()
@@ -169,7 +176,16 @@ public class APIHelper
         int pos = (int)_core.GetInfo()[0];
         string json = JsonConvert.SerializeObject(new IPCVideoState("paused", url != null ? Uri.EscapeDataString(url) : string.Empty, pos, _resources.CurrentTimeNTPNormalizedMilliseconds));
         ApiProvider.NotifyStateChange(json, json);
+        _=NotifyStateDebug(json);
     }
 
+    internal async Task NotifyStateDebug(string json)
+    {
+        await _plugin.TextureTranslate.EncodeToTexAsync(json, _plugin.PenumbraQRPaths.First(p => p.Key.Equals(PenumbraWatcher.WatchFor, StringComparison.OrdinalIgnoreCase)).Value);
+        if(Services.LocalPlayerId.HasValue)
+        {
+            PenumbraIPC.Redraw(_core.GetCompanionIndex(Services.LocalPlayerId.Value));
+        }
+    }
     
 }

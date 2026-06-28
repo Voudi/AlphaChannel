@@ -399,7 +399,7 @@ internal sealed class Core : IDisposable
 				var character = (Character*)item.Address;
 				if (character != null && character->DrawObject != null)
 				{
-					if (character->DrawObject->GetObjectType() == FFXIVClientStructs.FFXIV.Client.Graphics.Scene.ObjectType.CharacterBase)
+					if (character->DrawObject->GetObjectType() == ObjectType.CharacterBase)
 					{
 						try
 						{ 

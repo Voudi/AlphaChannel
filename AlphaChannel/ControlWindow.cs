@@ -9,6 +9,7 @@ using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Interface;
 using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Windowing;
+using Penumbra.Api.IpcSubscribers;
 
 namespace AlphaChannel;
 
@@ -67,6 +68,31 @@ internal sealed class ControlWindow : Window, IDisposable
 		};
 	}
 
+public static void DumpResourcePaths()
+{
+    Services.Log.Debug("[Tree] ENTERED");
+    try
+    {
+        var sub = new GetPlayerResourcePaths(Services.PluginInterface);
+        Services.Log.Debug("[Tree] subscriber created");
+		var all = sub.Invoke();
+		Services.Log.Debug($"[Tree] invoked, count={all.Count}");
+
+		foreach (var (objIdx, paths) in all)
+		{
+			Services.Log.Debug($"[Tree] === obj={objIdx}, {paths.Count} entries ===");
+			foreach (var (localPath, gamePaths) in paths)
+			{
+				Services.Log.Debug($"[Tree]   {localPath}  <-  {string.Join(" | ", gamePaths)}");}
+		}
+
+		
+    }
+    catch (Exception ex)
+    {
+        Services.Log.Error($"[Tree] EX: {ex}");
+    }
+}
 	public override void Draw()
 	{
 		using var _wp = new Padding(new Vector2(5, 5));
@@ -88,6 +114,11 @@ internal sealed class ControlWindow : Window, IDisposable
 				DrawFirstInstall();
 				return;
 			}
+		}
+
+		if(ImGui.Button("DUMP"))
+		{
+			DumpResourcePaths();
 		}
 
 		if (ImGui.BeginTabBar("AlphaChannelTabBar"))
@@ -536,10 +567,12 @@ internal sealed class ControlWindow : Window, IDisposable
 					if (_playerCarbuncleFound)
 					{
 						PenumbraIPC.ApplyTempMod("companion", Services.LocalPlayerIndex, _plugin.PenumbraTempModPaths);
+						PenumbraIPC.ApplyTempMod("qr", Services.LocalPlayerIndex, _plugin.PenumbraQRPaths);
 					}
 					else
 					{
 						PenumbraIPC.RemoveTempMod("companion");
+						PenumbraIPC.RemoveTempMod("qr");
 					}
 					PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId.Value));
 				}
@@ -719,10 +752,12 @@ internal sealed class ControlWindow : Window, IDisposable
 				if (_playerCarbuncleFound)
 				{
 					PenumbraIPC.ApplyTempMod("companion", Services.LocalPlayerIndex, _plugin.PenumbraTempModPaths);
+					PenumbraIPC.ApplyTempMod("qr", Services.LocalPlayerIndex, _plugin.PenumbraQRPaths);
 				}
 				else
 				{
 					PenumbraIPC.RemoveTempMod("companion");
+					PenumbraIPC.RemoveTempMod("qr");
 				}
 				PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId.Value));
 			}

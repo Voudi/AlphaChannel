@@ -41,4 +41,9 @@ public class Services
 
 	[PluginService]
 	public static IGamepadState GamepadState { get; private set; } = null!;
+	
+	[PluginService]
+	public static IDataManager Data { get; private set; } = null!;
+
+	
 }

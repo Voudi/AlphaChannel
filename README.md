@@ -1,4 +1,7 @@
 # AlphaChannel
+
+[RepoURL](https://raw.githubusercontent.com/Voudi/AlphaChannel/refs/heads/master/pluginmaster.json)
+
 Dalamud plugin for playing stuff on in-game screens.
 
 Originally forked from [Browsingway](https://github.com/Styr1x/Browsingway) by Styr1x — since rewritten from the ground up.

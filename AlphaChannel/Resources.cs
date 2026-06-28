@@ -35,21 +35,18 @@ internal sealed class Resources : IDisposable
 	public void Dispose()
 	{
 		_httpClient.Dispose();
-		foreach(var paths in _tempGamePaths)
+		foreach(string path in _tempGamePaths)
 		{
-			foreach(string ingamePath in paths.Keys)
+			if (File.Exists(path))
 			{
-				string path = paths[ingamePath];
-				if (File.Exists(path))
-				{
-					File.Delete(path);
-				}
+				File.Delete(path);
 			}
 		}
 		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "alphachannelscreentex_*.atex").ToList().ForEach(File.Delete);
 		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "alphachannelscreen_*.avfx").ToList().ForEach(File.Delete);
 		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "snesscreentex_*.atex").ToList().ForEach(File.Delete);
 		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "snesscreen_*.avfx").ToList().ForEach(File.Delete);
+		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "tvqr_*.avfx").ToList().ForEach(File.Delete);
 
 		var modDir = new GetModDirectory(Services.PluginInterface);
         string dir = modDir.Invoke();
@@ -66,7 +63,7 @@ internal sealed class Resources : IDisposable
 	}
 
 	/* TO BE REMOVED JUST FOR DEBUGGING PENUMBRA NOT SYNCING TEMPMODS */
-    private List<Dictionary<string, string>> _tempGamePaths = [];
+    private readonly List<string> _tempGamePaths = [];
     private Dictionary<string, string> FixTempCopyGamePaths(Dictionary<string, string> gamePaths)
     {
 		var finalPaths = new Dictionary<string, string>();
@@ -79,13 +76,13 @@ internal sealed class Resources : IDisposable
         {
 			string realPath = gamePaths[ingamePath];
 			string newPath = Path.Combine(alphachanneltempdir, Path.GetFileName(realPath));
-			if (!File.Exists(newPath))
-			{
-            	File.Copy(realPath, newPath);
-			}
+
+			File.Copy(realPath, newPath, true);
+
 			finalPaths.Add(ingamePath, newPath);
+			
         }
-		_tempGamePaths.Add(finalPaths);
+		_tempGamePaths.AddRange(finalPaths.Values);
 
 		return finalPaths;
     }
@@ -128,6 +125,27 @@ internal sealed class Resources : IDisposable
 		});
 	}
 
+	internal Dictionary<string, string> LoadPenumbraQRResources()
+	{
+		Dictionary<string, string> paths = [];
+
+		string oldPath = Path.Combine(_plugin.PluginDir, "resources", "carbuncle/tv_d.tex");
+		if (File.Exists(oldPath))
+		{
+			string path = Path.Combine(_plugin.PluginDir, "resources", "tvqr_"+_plugin.PluginSessionGUID+".tex");
+			
+			File.Copy(oldPath, path, true);
+
+			paths.Add(PenumbraWatcher.WatchFor, path);
+		}
+		else
+		{
+			throw new FileNotFoundException($"Required resource not found: {oldPath}");
+		}
+
+		return FixTempCopyGamePaths(paths); //just return paths after the bug is fixed
+	}
+
 	internal Dictionary<string, string> LoadPenumbraScreenResources()
 	{
 		Dictionary<string, string> paths = [];
@@ -136,7 +154,7 @@ internal sealed class Resources : IDisposable
 		if (File.Exists(oldPath))
 		{
 			string path = Path.Combine(_plugin.PluginDir, "resources", "alphachannelscreentex_"+_plugin.PluginSessionGUID+".atex");
-			File.Copy(oldPath, path);
+			File.Copy(oldPath, path, true);
 			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreentex.atex", path);
 		}
 		else
@@ -148,7 +166,7 @@ internal sealed class Resources : IDisposable
 		if (File.Exists(oldPath))
 		{
 			string path = Path.Combine(_plugin.PluginDir, "resources", "alphachannelscreen_"+_plugin.PluginSessionGUID+".avfx");
-			File.Copy(oldPath, path);
+			File.Copy(oldPath, path, true);
 			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreen_"+_plugin.PluginSessionGUID+".avfx", path);
 		}
 		else
@@ -160,7 +178,7 @@ internal sealed class Resources : IDisposable
 		if (File.Exists(oldPath))
 		{
 			string path = Path.Combine(_plugin.PluginDir, "resources", "snesscreen_"+_plugin.PluginSessionGUID+".avfx");
-			File.Copy(oldPath, path);
+			File.Copy(oldPath, path, true);
 			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreen_"+_plugin.PluginSessionGUID+".avfx", path);
 		}
 		else
@@ -172,7 +190,7 @@ internal sealed class Resources : IDisposable
 		if (File.Exists(oldPath))
 		{
 			string path = Path.Combine(_plugin.PluginDir, "resources", "snesscreentex_"+_plugin.PluginSessionGUID+".atex");
-			File.Copy(oldPath, path);
+			File.Copy(oldPath, path, true);
 			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreentex.atex", path);
 		}
 		else
@@ -194,7 +212,6 @@ internal sealed class Resources : IDisposable
 			{"chara/monster/m7002/obj/body/b0001/material/v0005/mt_m7002b0001_a.mtrl", "carbuncle/mt_m7002b0001_a.mtrl"},
 			{"chara/monster/m7002/obj/body/b0001/material/v0006/mt_m7002b0001_a.mtrl", "carbuncle/mt_m7002b0001_a.mtrl"},
 			{"chara/monster/m7002/obj/body/b0001/model/m7002b0001.mdl", "carbuncle/m7002b0001.mdl"},
-			{"chara/monster/m7002/obj/body/b0001/texture/tv_d.tex", "carbuncle/tv_d.tex"},
 			{"chara/monster/m7002/obj/body/b0001/texture/tv_id.tex", "carbuncle/tv_id.tex"},
 			{"chara/monster/m7002/obj/body/b0001/texture/tv_n.tex", "carbuncle/tv_n.tex"},
 			{"chara/monster/m7002/obj/body/b0001/texture/tv_s.tex", "carbuncle/tv_id.tex"},

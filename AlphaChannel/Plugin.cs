@@ -28,6 +28,7 @@ public class Plugin : IDalamudPlugin, IDisposable
 	internal string ROMSLocationSnesDir => Path.Combine(ConfigDir, "snes");
 	internal Dictionary<string, string> PenumbraTempModPaths { get; set;}
 	internal Dictionary<string, string> PenumbraTempScreenPaths { get; set;}
+	internal Dictionary<string, string> PenumbraQRPaths {get; set;}
 
 	internal WindowSystem WindowSystem { get; } = new(PluginName);
 	internal ControlWindow MainWindow { get; }
@@ -36,6 +37,9 @@ public class Plugin : IDalamudPlugin, IDisposable
 	internal Resources LibResources { get; }
 	internal Configuration Config { get; }
 	internal WndProcKeyUpReader WindowKeyUpReader { get; }
+
+	internal PenumbraWatcher Watcher { get; }
+	internal TextureTranslate TextureTranslate { get; }
 
 	public Plugin(IDalamudPluginInterface pluginInterface)
 	{
@@ -61,14 +65,14 @@ public class Plugin : IDalamudPlugin, IDisposable
 		AssemblyLocationSnes = LibResources.GetLocationSNES9X() ?? string.Empty;
 		PenumbraTempModPaths = LibResources.LoadPenumbraModResources();
 		PenumbraTempScreenPaths = LibResources.LoadPenumbraScreenResources();
+		PenumbraQRPaths = LibResources.LoadPenumbraQRResources();
 
 		Resources.NativeLoader.Register(this);
 		MpvRenderer.Setup(this);
 		DxHandler.Initialise(Services.PluginInterface);
-		
 
 		Core = new Core(this);
-		APIHelper = new APIHelper(Core, LibResources);
+		APIHelper = new APIHelper(this, Core, LibResources);
 		Core.APIHelper = APIHelper;
 
 		string title = "AlphaChannel Remote ";
@@ -79,6 +83,8 @@ public class Plugin : IDalamudPlugin, IDisposable
 		WindowSystem.AddWindow(MainWindow);
 
 		ApiProvider.Init(APIHelper);
+		Watcher = new PenumbraWatcher();
+		TextureTranslate = new TextureTranslate(pluginInterface);
 
 		Services.Framework.Update += OnFrameworkUpdate;
 
@@ -111,6 +117,7 @@ public class Plugin : IDalamudPlugin, IDisposable
 	{
 		MainWindow?.OnFrameworkUpdate();
 		Core?.OnFrameworkUpdate();
+		Watcher?.OnFrameworkUpdate();
 	}
 
 	public void Dispose()
@@ -126,6 +133,8 @@ public class Plugin : IDalamudPlugin, IDisposable
 		WindowSystem?.RemoveAllWindows();
 
 		WindowKeyUpReader?.Dispose();
+
+		Watcher.Dispose();
 
 		GC.SuppressFinalize(this);
 	}

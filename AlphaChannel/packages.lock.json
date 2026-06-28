@@ -68,6 +68,12 @@
           "SharpDX": "4.2.0"
         }
       },
+      "ZXing.Net": {
+        "type": "Direct",
+        "requested": "[0.16.11, )",
+        "resolved": "0.16.11",
+        "contentHash": "OZfAVu88hl87BffQ+rlWCj/vLvAhhCK4QnFaoveeF/MY8SjHNSYBQ3qyUEWlPKNgBQGh1syXhCDg10vUnCsqkg=="
+      },
       "Castle.Core": {
         "type": "Transitive",
         "resolved": "5.2.1",

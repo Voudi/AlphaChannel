@@ -29,6 +29,7 @@ public static class PenumbraIPC
                 createCollection.Invoke(Tag, Tag, out _collectionId);
             }
 
+            
             var addMod = new AddTemporaryMod(Services.PluginInterface);
             addMod.Invoke(Tag + key, _collectionId, gamePaths, string.Empty, int.MaxValue);
 
@@ -52,6 +53,12 @@ public static class PenumbraIPC
         }
     }
 
+    public static void Redraw(ushort gameObjectIndex)
+    {
+        var redraw = new RedrawObject(Services.PluginInterface);
+        redraw.Invoke(gameObjectIndex, RedrawType.Redraw);
+    }
+
     public static void Dispose()
     {
         if (Services.PluginInterface == null || _collectionId == Guid.Empty) {return;}
@@ -65,11 +72,5 @@ public static class PenumbraIPC
 
         _collectionId = Guid.Empty;
         _keys.Clear();
-    }
-
-    public static void Redraw(ushort gameObjectIndex)
-    {
-        var redraw = new RedrawObject(Services.PluginInterface);
-        redraw.Invoke(gameObjectIndex, RedrawType.Redraw);
     }
 }
