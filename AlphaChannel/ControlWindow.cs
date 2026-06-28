@@ -348,6 +348,8 @@ internal sealed class ControlWindow : Window, IDisposable
 
 	private void DrawFirstInstall()
 	{
+		ImGui.BeginChild("##scrollListInstall" + _plugin.Name, new Vector2(0, 0), true);
+
 		bool updatesAvailable = !string.IsNullOrWhiteSpace(_plugin.LibResources.MpvCheckResult[0]) || !string.IsNullOrWhiteSpace(_plugin.LibResources.YtdlpCheckResult[0]);
 		if (_installingLibs)
 		{
@@ -398,9 +400,13 @@ internal sealed class ControlWindow : Window, IDisposable
 
 			_installingLibs = true;
 		}
+
+		ImGui.EndChild();
 	}
 	private void DrawJoin()
 	{
+		ImGui.BeginChild("##scrollListJoin" + _plugin.Name, new Vector2(0, 0), true);
+
 		int count = 0;
 		foreach (IGameObject item in _visiblePlayers)
 		{
@@ -506,10 +512,13 @@ internal sealed class ControlWindow : Window, IDisposable
 		{
 			ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: No hosts detected nearby.");
 		}
+
+		ImGui.EndChild();
 		ImGui.EndTabItem();
 	}
 	private void DrawHost()
 	{
+		ImGui.BeginChild("##scrollListHost" + _plugin.Name, new Vector2(0, 0), true);
 		Vector4 textColor;
 		uint? localPlayerId = Services.LocalPlayerId;
 		if(localPlayerId.HasValue)
@@ -605,7 +614,7 @@ internal sealed class ControlWindow : Window, IDisposable
 						{
 							IconFont(() =>
 							{
-								ImGui.SetNextItemWidth(115);
+								ImGui.SetNextItemWidth(104);
 								ImGui.SliderFloat("##volumebar" + localPlayerId.Value, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
 								if (ImGui.IsItemActive()) { SetVolume(_volume, true); _sliderActive = true; }
 								if (ImGui.IsItemDeactivatedAfterEdit()) { SetVolume(_volume, true); _sliderActive = false; }
@@ -627,7 +636,7 @@ internal sealed class ControlWindow : Window, IDisposable
 					{
 						Style(ImGuiStyleVar.FrameBorderSize, 1.0f, () =>
 						{
-							ImGui.SetNextItemWidth(228);
+							ImGui.SetNextItemWidth(217);
 							ImGui.InputText("##URL", ref _inputURL, 1000, ImGuiInputTextFlags.None);
 						});
 					});
@@ -670,10 +679,10 @@ internal sealed class ControlWindow : Window, IDisposable
 					{
 						if (_seekerExactTime > 0)
 						{
-							DrawScrollingText(_seekerExactTime > 0 ? _mediaTitle : " ", 260);
+							DrawScrollingText(_seekerExactTime > 0 ? _mediaTitle : " ", 249);
 						}
 
-						ImGui.SetNextItemWidth(261);
+						ImGui.SetNextItemWidth(250);
 						Color(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1), () =>
 						{
 							ImGui.SliderFloat("##seeker" + localPlayerId.Value, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
@@ -689,11 +698,14 @@ internal sealed class ControlWindow : Window, IDisposable
 				ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " your Blue Carbuncle.");
 			}
 		}
+		ImGui.EndChild();
 		ImGui.EndTabItem();
 	}
 	
 	private void DrawGame()
 	{
+		ImGui.BeginChild("##scrollListGame" + _plugin.Name, new Vector2(0, 0), true);
+
 		uint? localPlayerId = Services.LocalPlayerId;
 		bool snesExists = !string.IsNullOrEmpty(_plugin.AssemblyLocationSnes);
 
@@ -740,7 +752,7 @@ internal sealed class ControlWindow : Window, IDisposable
 					{
 						IconFont(() =>
 						{
-							ImGui.SetNextItemWidth(115);
+							ImGui.SetNextItemWidth(104);
 							ImGui.SliderFloat("##volumebarsnes", ref _volumesnes, 0, 100, _volumesnes < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volumesnes <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
 							if (ImGui.IsItemActive()) { SetVolume(_volumesnes); _sliderActive = true; }
 							if (ImGui.IsItemDeactivatedAfterEdit()) { SetVolume(_volumesnes); _sliderActive = false; }
@@ -850,11 +862,15 @@ internal sealed class ControlWindow : Window, IDisposable
 			ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " Notice: You have not summoned");
 			ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), " your Blue Carbuncle.");
 		}
+
+		ImGui.EndChild();
 		ImGui.EndTabItem();
 	}
 	
 	private void DrawSettings()
 	{
+		ImGui.BeginChild("##scrollListHost" + _plugin.Name, new Vector2(0, 0), true);
+
 		bool mpvUpdateAvailable = _plugin.LibResources.MpvCheckResult[0] != string.Empty;
 		bool ytdlpUpdateAvailable = _plugin.LibResources.YtdlpCheckResult[0] != string.Empty;
 		bool snesInstallAvailable = string.IsNullOrEmpty(_plugin.AssemblyLocationSnes);
@@ -955,6 +971,7 @@ internal sealed class ControlWindow : Window, IDisposable
 			IconFont(() => ImGui.Text(FontAwesomeIcon.CheckCircle.ToIconString()));
 		}
 
+		ImGui.EndChild();
 		ImGui.EndTabItem();
 	}
 
