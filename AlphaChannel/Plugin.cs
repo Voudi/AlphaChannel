@@ -122,6 +122,8 @@ public class Plugin : IDalamudPlugin, IDisposable
 
 	public void Dispose()
 	{
+		Services.CommandManager.RemoveHandler(Command);
+
 		MainWindow?.Dispose();
 
 		DxHandler.Dispose();
