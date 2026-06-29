@@ -604,6 +604,14 @@ internal sealed class Core : IDisposable
 						return tex;
 					}
 
+					nint key = (nint)thisPtr;
+
+					if (_views.TryGetValue(key, out var oldView) && (nint)thisPtr->D3D11Texture2D == texture.NativePointer)
+					{
+						//Detected view on this
+						return tex;
+					}
+
 					var newView = new ShaderResourceView(DxHandler.Device, texture,
 											new ShaderResourceViewDescription
 											{
@@ -612,17 +620,7 @@ internal sealed class Core : IDisposable
 												Texture2D = { MipLevels = texture.Description.MipLevels }
 											});
 
-					nint key = (nint)thisPtr;
-
-					if (_views.TryGetValue(key, out var oldView))
-					{
-						oldView.Dispose();
-						_views[key] = newView;
-					}
-					else
-					{
-						_views[key] = newView;
-					}
+					_views[key] = newView;
 
 					nint oldTexPtr = (nint)thisPtr->D3D11Texture2D;
 					nint oldSrvPtr = (nint)thisPtr->D3D11ShaderResourceView;
