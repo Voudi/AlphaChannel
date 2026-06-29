@@ -508,7 +508,7 @@ internal sealed class Core : IDisposable
 		}
 		if (_activeEntityId == ownerId)
 		{
-			RefreshActorVFX(companion.Address, companion.Address); //This TV is active, play its VFX
+			RefreshActorVFX(Services.LocalPlayerAddr ?? companion.Address, companion.Address); //This TV is active, play its VFX
 		}
 	}
 
