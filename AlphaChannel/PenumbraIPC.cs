@@ -1,5 +1,7 @@
 using Penumbra.Api.IpcSubscribers;
 using Penumbra.Api.Enums;
+using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Game.ClientState.Objects.Enums;
 
 namespace AlphaChannel;
 
@@ -25,15 +27,15 @@ public static class PenumbraIPC
         {
             if (_collectionId == Guid.Empty)
             {
-                var createCollection = new CreateTemporaryCollection(Services.PluginInterface);
+                var createCollection = new Penumbra.Api.IpcSubscribers.CreateTemporaryCollection(Services.PluginInterface);
                 createCollection.Invoke(Tag, Tag, out _collectionId);
             }
 
             
-            var addMod = new AddTemporaryMod(Services.PluginInterface);
+            var addMod = new Penumbra.Api.IpcSubscribers.AddTemporaryMod(Services.PluginInterface);
             addMod.Invoke(Tag + key, _collectionId, gamePaths, string.Empty, int.MaxValue);
 
-            var assign = new AssignTemporaryCollection(Services.PluginInterface);
+            var assign = new Penumbra.Api.IpcSubscribers.AssignTemporaryCollection(Services.PluginInterface);
             assign.Invoke(_collectionId, (int)actorIndex, true);
 
             _keys.Add(key);
@@ -46,7 +48,7 @@ public static class PenumbraIPC
     {
         if (_collectionId != Guid.Empty && _keys.Contains(key))
         {
-            var assign = new RemoveTemporaryMod(Services.PluginInterface);
+            var assign = new Penumbra.Api.IpcSubscribers.RemoveTemporaryMod(Services.PluginInterface);
             assign.Invoke(Tag + key, _collectionId, int.MaxValue);
             _keys.Remove(key);
             Services.Log.Debug("Removed Temp Mod " + key);
@@ -55,8 +57,19 @@ public static class PenumbraIPC
 
     public static void Redraw(ushort gameObjectIndex)
     {
-        var redraw = new RedrawObject(Services.PluginInterface);
+        var redraw = new Penumbra.Api.IpcSubscribers.RedrawObject(Services.PluginInterface);
         redraw.Invoke(gameObjectIndex, RedrawType.Redraw);
+    }
+
+    public static void RedrawAll()
+    {
+        foreach (ushort item in Services.Objects.Where(x => x is IBattleNpc && x.BaseId == 13498 && x.ObjectKind is ObjectKind.BattleNpc).Select(o => o.ObjectIndex))
+        {
+            var redraw = new Penumbra.Api.IpcSubscribers.RedrawObject(Services.PluginInterface);
+            redraw.Invoke(item, RedrawType.Redraw);
+            Services.Log.Debug("Redrawing item " + item);
+        }
+        
     }
 
     public static void Dispose()

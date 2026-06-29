@@ -27,7 +27,7 @@ public sealed class PenumbraWatcher : IDisposable
     }
 
     private void OnRedrawn(nint objectAddress, int objectTableIndex)
-        => _pending.Enqueue((objectTableIndex, Environment.TickCount64 + 500)); // wait half a sec for path to exist
+        => _pending.Enqueue((objectTableIndex, Environment.TickCount64 + 1000)); // wait half a sec for path to exist
 
     public void OnFrameworkUpdate()
     {
@@ -41,36 +41,48 @@ public sealed class PenumbraWatcher : IDisposable
             try
             {
 				Dictionary<string, HashSet<string>>?[] res = _resourcePaths.Invoke((ushort)item.idx);
-				uint companionEntityId = Services.Objects.First(o => o.ObjectIndex == item.idx).EntityId;
-                unsafe {
-                        uint ownerId = CharacterManager.Instance()->LookupBattleCharaByEntityId(companionEntityId)->CompanionOwnerId;
-                        nint addr = Services.Objects.First(o => o.EntityId == ownerId).Address;
+                try
+                {
+                    IGameObject companionEntity = Services.Objects.First(o => o.ObjectIndex == item.idx);
+                    unsafe {
+                            var character = (Character*)companionEntity.Address;
+                            uint ownerId = character->CompanionOwnerId;
+                            
+                            nint addr = Services.Objects.First(o => o.EntityId == ownerId).Address;
 
-                        string playerName = Services.Objects.First(o => o.EntityId == ownerId).Name.TextValue;
+                            string playerName = Services.Objects.First(o => o.EntityId == ownerId).Name.TextValue;
 
-                        Dictionary<string, HashSet<string>>? paths = res.Length > 0 ? res[0] : null;
-                        if (paths == null) { continue; }
+                            Dictionary<string, HashSet<string>>? paths = res.Length > 0 ? res[0] : null;
+                            if (paths == null) { continue; }
 
-                        foreach ((string? localFile, HashSet<string>? games) in paths)
-                        {
-                            if (games.Any(g => !string.Equals(g, localFile, StringComparison.OrdinalIgnoreCase) && string.Equals(g, WatchFor, StringComparison.OrdinalIgnoreCase)))
+                            foreach ((string? localFile, HashSet<string>? games) in paths)
                             {
-                                if(Services.LocalPlayerAddr != addr)
+                                if (games.Any(g => !string.Equals(g, localFile, StringComparison.OrdinalIgnoreCase) && string.Equals(g, WatchFor, StringComparison.OrdinalIgnoreCase)))
                                 {
-                                    string? state = _textureTranslate.DecodeFromTex(localFile);
-                                    if(state != null)
+                                    if(Services.LocalPlayerAddr != addr)
                                     {
-                                        _apiHelper.SetRemoteState(addr, state);
-                                    }
-                                    else
-                                    {
-                                        _apiHelper.ClearRemoteState(addr);
+                                        string? state = _textureTranslate.DecodeFromTex(localFile);
+                                        if(state != null)
+                                        {
+                                            _apiHelper.SetRemoteState(addr, state);
+                                            Services.Log.Debug("Detected state on " + localFile + " for player " + playerName);
+                                            Services.Log.Debug("State: " + state);
+                                        }
+                                        else
+                                        {
+                                            _apiHelper.ClearRemoteState(addr);
+                                            Services.Log.Debug("Detected clear on " + localFile + " for player " + playerName);
+                                        }
                                     }
                                 }
-                                Services.Log.Debug("Detected file load " + localFile + " for player " + playerName);
                             }
                         }
-                    }
+                }
+                catch
+                {
+                    Services.Log.Debug("Dismissing unknown object...");
+                }
+				
             }
             catch (Exception ex) { Services.Log.Error($"[Delayed] EX: {ex}"); }
         }

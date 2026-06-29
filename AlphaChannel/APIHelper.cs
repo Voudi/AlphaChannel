@@ -56,6 +56,7 @@ public class APIHelper
 
         if (!playerId.HasValue || playerId == localPlayerId) 
         {
+            Services.Log.Debug("No need to set state for local player.");
             return;
         }
 
@@ -79,6 +80,7 @@ public class APIHelper
         bool foundState = _remoteStates.TryGetValue(playerId.Value, out IPCVideoState? oldState);
         if (oldState?.Timestamp == state.Timestamp) 
         {
+            Services.Log.Debug("Old state equals new state. Aborting.");
             return;
         }
 

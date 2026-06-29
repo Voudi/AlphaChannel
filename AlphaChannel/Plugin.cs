@@ -95,6 +95,12 @@ public class Plugin : IDalamudPlugin, IDisposable
 		pluginInterface.UiBuilder.OpenConfigUi += ToggleMainUI;
 		pluginInterface.UiBuilder.OpenMainUi += ToggleMainUI;
 		pluginInterface.UiBuilder.Draw += Render;
+
+		_=NoireService.Framework.RunOnTick(() =>
+		{
+			Services.Log.Debug("Redrawing all");
+			PenumbraIPC.RedrawAll();
+		});
 	}
 
 	private void HandleCommand(string command, string rawArgs)

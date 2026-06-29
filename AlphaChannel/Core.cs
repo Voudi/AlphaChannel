@@ -420,13 +420,9 @@ internal sealed class Core : IDisposable
 											{
 												if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture is not null)
 												{
-													if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualHeight == 1024
-														&& tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture->ActualWidth == 1024)
-													{
-														visitedTvs.Add(ownerId);
-														CheckoutCompanion(ownerId, item);
-														continue;
-													}
+													visitedTvs.Add(ownerId);
+													CheckoutCompanion(ownerId, item);
+													continue;
 												}
 											}
 										}
