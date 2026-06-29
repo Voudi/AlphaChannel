@@ -143,6 +143,7 @@ public class APIHelper
     internal void OnVideoStopped()
     {
         ApiProvider.NotifyStateChange(null, null);
+        _=NotifyStateDebug(null);
     }
 
     internal async Task OnPaused(bool paused)
@@ -180,9 +181,19 @@ public class APIHelper
         _=NotifyStateDebug(json);
     }
 
-    internal async Task NotifyStateDebug(string json)
+    internal async Task NotifyStateDebug(string? json)
     {
-        await _plugin.TextureTranslate.EncodeToTexAsync(json, _plugin.PenumbraQRPaths.First(p => p.Key.Equals(PenumbraWatcher.WatchFor, StringComparison.OrdinalIgnoreCase)).Value);
+        if(json != null)
+        {
+            await _plugin.TextureTranslate.EncodeToTexAsync(json, _plugin.PenumbraQRPaths.First(p => p.Key.Equals(PenumbraWatcher.WatchFor, StringComparison.OrdinalIgnoreCase)).Value);
+        }
+        else
+        {
+            PenumbraIPC.RemoveTempMod("qr");
+            _plugin.LibResources.LoadPenumbraQRResources();
+			PenumbraIPC.ApplyTempMod("qr", Services.LocalPlayerIndex, _plugin.PenumbraQRPaths);
+        }
+
         _=NoireService.Framework.RunOnTick(() =>
         {
             if(Services.LocalPlayerId.HasValue)

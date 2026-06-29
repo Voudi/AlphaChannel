@@ -62,6 +62,10 @@ public sealed class PenumbraWatcher : IDisposable
                                     {
                                         _apiHelper.SetRemoteState(addr, state);
                                     }
+                                    else
+                                    {
+                                        _apiHelper.ClearRemoteState(addr);
+                                    }
                                 }
                                 Services.Log.Debug("Detected file load " + localFile + " for player " + playerName);
                             }
