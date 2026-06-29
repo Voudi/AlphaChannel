@@ -451,6 +451,7 @@ internal sealed class Core : IDisposable
 			{
 				if (_activeEntityId == ownerId)
 				{
+					Services.Log.Warning("Stopping Vid owner not found...");
 					StopVideo();
 				}
 				_tvOwners.Remove(ownerId);

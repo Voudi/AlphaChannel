@@ -546,6 +546,7 @@ internal sealed class ControlWindow : Window, IDisposable
 						PenumbraIPC.RemoveTempMod("qr");
 						PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId.Value));
 						_core.RemoveCompanion();
+						_core.StopVideo();
 					}
 				}
 
