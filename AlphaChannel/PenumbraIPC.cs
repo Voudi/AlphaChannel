@@ -2,6 +2,7 @@ using Penumbra.Api.IpcSubscribers;
 using Penumbra.Api.Enums;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Game.ClientState.Objects.Enums;
+using NoireLib;
 
 namespace AlphaChannel;
 
@@ -57,8 +58,18 @@ public static class PenumbraIPC
 
     public static void Redraw(ushort gameObjectIndex)
     {
-        var redraw = new Penumbra.Api.IpcSubscribers.RedrawObject(Services.PluginInterface);
-        redraw.Invoke(gameObjectIndex, RedrawType.Redraw);
+        if(gameObjectIndex == ushort.MaxValue)
+        {
+            _=NoireService.Framework.RunOnTick(() =>
+            {
+                RedrawAll();
+            });
+        }
+        else
+        {
+            var redraw = new Penumbra.Api.IpcSubscribers.RedrawObject(Services.PluginInterface);
+            redraw.Invoke(gameObjectIndex, RedrawType.Redraw);
+        }
     }
 
     public static void RedrawAll()
