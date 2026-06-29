@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Runtime.Serialization;
+using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Plugin;
+using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using Penumbra.Api.Enums;
 using Penumbra.Api.Helpers;
 using Penumbra.Api.IpcSubscribers;
@@ -10,12 +12,16 @@ namespace AlphaChannel;
 public sealed class PenumbraWatcher : IDisposable
 {
     public const string WatchFor = "chara/monster/m7002/obj/body/b0001/texture/tv_d.tex";
-    private readonly EventSubscriber<nint, int> _redrawn;
+	private readonly APIHelper _apiHelper;
+    private readonly TextureTranslate _textureTranslate;
+	private readonly EventSubscriber<nint, int> _redrawn;
     private readonly ConcurrentQueue<(int idx, long dueMs)> _pending = new();
     private readonly GetGameObjectResourcePaths _resourcePaths;
 
-    public PenumbraWatcher()
+    public PenumbraWatcher(APIHelper apiHelper, TextureTranslate textureTranslate)
     {
+        _textureTranslate = textureTranslate;
+        _apiHelper = apiHelper;
         _redrawn = GameObjectRedrawn.Subscriber(Services.PluginInterface, OnRedrawn);
         _resourcePaths = new GetGameObjectResourcePaths(Services.PluginInterface);
     }
@@ -35,16 +41,32 @@ public sealed class PenumbraWatcher : IDisposable
             try
             {
 				Dictionary<string, HashSet<string>>?[] res = _resourcePaths.Invoke((ushort)item.idx);
-				Dictionary<string, HashSet<string>>? paths = res.Length > 0 ? res[0] : null;
-                if (paths == null) { continue; }
+				uint companionEntityId = Services.Objects.First(o => o.ObjectIndex == item.idx).EntityId;
+                unsafe {
+                        uint ownerId = CharacterManager.Instance()->LookupBattleCharaByEntityId(companionEntityId)->CompanionOwnerId;
+                        nint addr = Services.Objects.First(o => o.EntityId == ownerId).Address;
 
-                foreach ((string? local, HashSet<string>? games) in paths)
-                {
-                    if (games.Any(g => !string.Equals(g, local, StringComparison.OrdinalIgnoreCase) && string.Equals(g, WatchFor, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        Services.Log.Debug("Detected file load " + local);
+                        string playerName = Services.Objects.First(o => o.EntityId == ownerId).Name.TextValue;
+
+                        Dictionary<string, HashSet<string>>? paths = res.Length > 0 ? res[0] : null;
+                        if (paths == null) { continue; }
+
+                        foreach ((string? localFile, HashSet<string>? games) in paths)
+                        {
+                            if (games.Any(g => !string.Equals(g, localFile, StringComparison.OrdinalIgnoreCase) && string.Equals(g, WatchFor, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                if(Services.LocalPlayerAddr != addr)
+                                {
+                                    string? state = _textureTranslate.DecodeFromTex(localFile);
+                                    if(state != null)
+                                    {
+                                        _apiHelper.SetRemoteState(addr, state);
+                                    }
+                                }
+                                Services.Log.Debug("Detected file load " + localFile + " for player " + playerName);
+                            }
+                        }
                     }
-                }
             }
             catch (Exception ex) { Services.Log.Error($"[Delayed] EX: {ex}"); }
         }

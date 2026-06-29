@@ -396,6 +396,7 @@ internal sealed class Core : IDisposable
 				{
 					continue;
 				}
+				
 				var character = (Character*)item.Address;
 				if (character != null && character->DrawObject != null)
 				{
@@ -432,7 +433,7 @@ internal sealed class Core : IDisposable
 									}
 								}
 							}
-							if (_tvOwners.TryGetValue(ownerId, out _) && ownerId != localPlayerId) //If entity has been recognized as TV once, keep it playing until its been removed or explicitly turned off to avoid 'sync holes', except for localplayer
+							if (_tvOwners.TryGetValue(ownerId, out _)) //If entity has been recognized as TV once, keep it playing until its been removed or explicitly turned off to avoid 'sync holes'
 							{
 								visitedTvs.Add(ownerId);
 								CheckoutCompanion(ownerId, item);
@@ -489,6 +490,14 @@ internal sealed class Core : IDisposable
 		}
 
 		return playerCarbuncleFound;
+	}
+
+	internal void RemoveCompanion()
+	{
+		if(Services.LocalPlayerId.HasValue)
+		{
+			_tvOwners.Remove(Services.LocalPlayerId.Value);
+		}
 	}
 
 	private void CheckoutCompanion(uint ownerId, IGameObject companion)

@@ -67,32 +67,7 @@ internal sealed class ControlWindow : Window, IDisposable
 			MaximumSize = new Vector2(275, 1080)
 		};
 	}
-
-public static void DumpResourcePaths()
-{
-    Services.Log.Debug("[Tree] ENTERED");
-    try
-    {
-        var sub = new GetPlayerResourcePaths(Services.PluginInterface);
-        Services.Log.Debug("[Tree] subscriber created");
-		var all = sub.Invoke();
-		Services.Log.Debug($"[Tree] invoked, count={all.Count}");
-
-		foreach (var (objIdx, paths) in all)
-		{
-			Services.Log.Debug($"[Tree] === obj={objIdx}, {paths.Count} entries ===");
-			foreach (var (localPath, gamePaths) in paths)
-			{
-				Services.Log.Debug($"[Tree]   {localPath}  <-  {string.Join(" | ", gamePaths)}");}
-		}
-
-		
-    }
-    catch (Exception ex)
-    {
-        Services.Log.Error($"[Tree] EX: {ex}");
-    }
-}
+	
 	public override void Draw()
 	{
 		using var _wp = new Padding(new Vector2(5, 5));
@@ -114,11 +89,6 @@ public static void DumpResourcePaths()
 				DrawFirstInstall();
 				return;
 			}
-		}
-
-		if(ImGui.Button("DUMP"))
-		{
-			DumpResourcePaths();
 		}
 
 		if (ImGui.BeginTabBar("AlphaChannelTabBar"))
@@ -568,16 +538,18 @@ public static void DumpResourcePaths()
 					{
 						PenumbraIPC.ApplyTempMod("companion", Services.LocalPlayerIndex, _plugin.PenumbraTempModPaths);
 						PenumbraIPC.ApplyTempMod("qr", Services.LocalPlayerIndex, _plugin.PenumbraQRPaths);
+						PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId.Value));
 					}
 					else
 					{
 						PenumbraIPC.RemoveTempMod("companion");
 						PenumbraIPC.RemoveTempMod("qr");
+						PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId.Value));
+						_core.RemoveCompanion();
 					}
-					PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId.Value));
 				}
 
-				if(!_core.IsPlayingSnes())
+				if (!_playerCarbuncleFound && !_core.IsPlayingSnes())
 				{
 					ImGui.SameLine();
 
@@ -602,10 +574,7 @@ public static void DumpResourcePaths()
 						}
 					}
 					Tooltip(playerTVRunning ? "Stop" : "Play");
-				}
 
-				if (!_playerCarbuncleFound && !_core.IsPlayingSnes())
-				{
 					if (playerTVRunning)
 					{
 						ImGui.SameLine();
@@ -753,13 +722,15 @@ public static void DumpResourcePaths()
 				{
 					PenumbraIPC.ApplyTempMod("companion", Services.LocalPlayerIndex, _plugin.PenumbraTempModPaths);
 					PenumbraIPC.ApplyTempMod("qr", Services.LocalPlayerIndex, _plugin.PenumbraQRPaths);
+					PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId.Value));
 				}
 				else
 				{
 					PenumbraIPC.RemoveTempMod("companion");
 					PenumbraIPC.RemoveTempMod("qr");
+					PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId.Value));
+					_core.RemoveCompanion();
 				}
-				PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId.Value));
 			}
 
 			if (!_playerCarbuncleFound)

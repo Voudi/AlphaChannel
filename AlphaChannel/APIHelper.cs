@@ -1,5 +1,6 @@
 using Dalamud.Game.ClientState.Objects.Types;
 using Newtonsoft.Json;
+using NoireLib;
 
 namespace AlphaChannel;
 
@@ -182,10 +183,13 @@ public class APIHelper
     internal async Task NotifyStateDebug(string json)
     {
         await _plugin.TextureTranslate.EncodeToTexAsync(json, _plugin.PenumbraQRPaths.First(p => p.Key.Equals(PenumbraWatcher.WatchFor, StringComparison.OrdinalIgnoreCase)).Value);
-        if(Services.LocalPlayerId.HasValue)
+        _=NoireService.Framework.RunOnTick(() =>
         {
-            PenumbraIPC.Redraw(_core.GetCompanionIndex(Services.LocalPlayerId.Value));
-        }
+            if(Services.LocalPlayerId.HasValue)
+                {
+                    PenumbraIPC.Redraw(_core.GetCompanionIndex(Services.LocalPlayerId.Value));
+                }
+        });
     }
     
 }

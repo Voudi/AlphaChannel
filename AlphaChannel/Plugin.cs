@@ -83,8 +83,8 @@ public class Plugin : IDalamudPlugin, IDisposable
 		WindowSystem.AddWindow(MainWindow);
 
 		ApiProvider.Init(APIHelper);
-		Watcher = new PenumbraWatcher();
 		TextureTranslate = new TextureTranslate(pluginInterface);
+		Watcher = new PenumbraWatcher(APIHelper, TextureTranslate);
 
 		Services.Framework.Update += OnFrameworkUpdate;
 
