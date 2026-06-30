@@ -362,8 +362,7 @@ internal sealed class Core : IDisposable
 	}
 	internal void OnFrameworkUpdate()
 	{
-		uint? localPlayerId = Services.LocalPlayerId;
-		if (localPlayerId.HasValue && TVIsActive(localPlayerId.Value) && !IsPlayingSnes())
+		if (Services.LocalPlayerExists && TVIsActive(Services.LocalPlayerId) && !IsPlayingSnes())
 		{
 			bool idle = GetIdle();
 			if (idle && !_lastIdle)
