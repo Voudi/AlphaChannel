@@ -110,6 +110,7 @@ internal sealed class Core : IDisposable
 
 	internal void StopVideo()
 	{
+		_activeEntityId = 0;
 		uint? localPlayerId = Services.LocalPlayerId;
 		if (localPlayerId.HasValue && TVIsActive(localPlayerId.Value) && !IsPlayingSnes())
 		{
@@ -121,6 +122,7 @@ internal sealed class Core : IDisposable
 
 	internal void StopVideoSilent()
 	{
+		_activeEntityId = 0;
 		if (_isPlayingSnes)
 		{
 			_snesRenderer?.Unload();
@@ -131,7 +133,6 @@ internal sealed class Core : IDisposable
 			_mpvRenderer?.Stop();
 			_mpvRenderer = null;
 		}
-		_activeEntityId = 0;
 	}
 
 	internal void PlayVideo(uint entityId, string url, int playbackPosition = 0, bool isPlaying = true)
@@ -398,50 +399,55 @@ internal sealed class Core : IDisposable
 				}
 				
 				var character = (Character*)item.Address;
-				if (character != null && character->DrawObject != null)
+				if (character != null)
 				{
-					if (character->DrawObject->GetObjectType() == ObjectType.CharacterBase)
+					uint ownerId = character->CompanionOwnerId;
+					if(character->DrawObject != null)
 					{
-						try
-						{ 
-							var tvDraw = (CharacterBase*)character->DrawObject;
-							uint ownerId = character->CompanionOwnerId;
-							_companionOwners.TryAdd(ownerId, item);
-							visitedCompanions.Add(ownerId);
-							if (tvDraw->Models[0] is not null) //TODO: find a better checking method
-							{ //Actually, its not so bad checking it like this, wysiwyg
-								if (tvDraw->Models[0]->MaterialCount >= 1)
-								{
-									if (tvDraw->Models[0]->Materials[0] is not null)
+						if (character->DrawObject->GetObjectType() == ObjectType.CharacterBase)
+						{
+							try
+							{ 
+								var tvDraw = (CharacterBase*)character->DrawObject;
+								
+								_companionOwners.TryAdd(ownerId, item);
+								visitedCompanions.Add(ownerId);
+								if (tvDraw->Models[0] is not null) //TODO: find a better checking method
+								{ //Actually, its not so bad checking it like this, wysiwyg
+									if (tvDraw->Models[0]->MaterialCount >= 1)
 									{
-										if (tvDraw->Models[0]->Materials[0]->TextureCount >= 4)
+										if (tvDraw->Models[0]->Materials[0] is not null)
 										{
-											if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture is not null)
+											if (tvDraw->Models[0]->Materials[0]->TextureCount >= 4)
 											{
-												if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture is not null)
+												if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture is not null)
 												{
-													visitedTvs.Add(ownerId);
-													CheckoutCompanion(ownerId, item);
-													continue;
+													if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture is not null)
+													{
+														visitedTvs.Add(ownerId);
+														CheckoutCompanion(ownerId, item);
+														continue;
+													}
 												}
 											}
 										}
 									}
 								}
 							}
-							if (_tvOwners.TryGetValue(ownerId, out _)) //If entity has been recognized as TV once, keep it playing until its been removed or explicitly turned off to avoid 'sync holes'
-							{
-								visitedTvs.Add(ownerId);
-								CheckoutCompanion(ownerId, item);
-								continue;
-							}
-
-							if (localPlayerId == ownerId)
-							{
-								playerCarbuncleFound = true;
-							}
+							catch (Exception) { }
 						}
-						catch (Exception) { }
+					}
+
+					if (localPlayerId == ownerId)
+					{
+						playerCarbuncleFound = true;
+					}
+
+					if (_tvOwners.TryGetValue(ownerId, out _)) //If entity has been recognized as TV once, keep it playing until its been removed or explicitly turned off to avoid 'sync holes'
+					{
+						visitedTvs.Add(ownerId);
+						CheckoutCompanion(ownerId, item);
+						continue;
 					}
 				}
 			}
@@ -491,10 +497,7 @@ internal sealed class Core : IDisposable
 
 	internal void RemoveCompanion()
 	{
-		if(Services.LocalPlayerId.HasValue)
-		{
-			_tvOwners.Remove(Services.LocalPlayerId.Value);
-		}
+		_tvOwners.Remove(Services.LocalPlayerId);
 	}
 
 	private void CheckoutCompanion(uint ownerId, IGameObject companion)
@@ -505,7 +508,7 @@ internal sealed class Core : IDisposable
 		}
 		if (_activeEntityId == ownerId)
 		{
-			RefreshActorVFX(Services.LocalPlayerAddr ?? companion.Address, companion.Address); //This TV is active, play its VFX
+			RefreshActorVFX(Services.LocalPlayerAddr, companion.Address); //This TV is active, play its VFX
 		}
 	}
 
@@ -513,7 +516,7 @@ internal sealed class Core : IDisposable
 	{
 		if (!PenumbraIPC.CheckTempMod("screenvfx"))
 		{
-			PenumbraIPC.ApplyTempMod("screenvfx", Services.Objects.LocalPlayer?.ObjectIndex, _plugin.PenumbraTempScreenPaths);
+			PenumbraIPC.ApplyTempMod("screenvfx", _plugin.PenumbraTempScreenPaths);
 		}
 		lock (_screenTextureLock)
 		{

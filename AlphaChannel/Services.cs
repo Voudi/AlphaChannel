@@ -9,9 +9,9 @@ public class Services
 
 	[PluginService]
 	public static IObjectTable Objects { get; private set; } = null!;
-	public static uint? LocalPlayerId => Objects.LocalPlayer?.EntityId;
-	public static ushort? LocalPlayerIndex => Objects.LocalPlayer?.ObjectIndex;
-	public static nint? LocalPlayerAddr => Objects.LocalPlayer?.Address;
+	public static uint LocalPlayerId => Objects.LocalPlayer!.EntityId;
+	public static ushort LocalPlayerIndex => Objects.LocalPlayer!.ObjectIndex;
+	public static nint LocalPlayerAddr => Objects.LocalPlayer!.Address;
 
 	[PluginService]
 	public static IPluginLog Log { get; private set; } = null!;

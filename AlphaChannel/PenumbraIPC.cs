@@ -11,6 +11,9 @@ public static class PenumbraIPC
     private const string Tag = "AlphaChannelTemporaryMod";
 
     private static Guid _collectionId = Guid.Empty;
+
+    private static bool _isTempCollection; 
+
     private static readonly List<string> _keys = [];
 
     public static bool CheckTempMod(string key)
@@ -18,26 +21,36 @@ public static class PenumbraIPC
         return _collectionId != Guid.Empty && _keys.Contains(key);
     }
 
-    public static void ApplyTempMod(string key, ushort? actorIndex, Dictionary<string, string> gamePaths)
+    public static void ApplyTempMod(string key, Dictionary<string, string> gamePaths)
     {
-        if(actorIndex == null)
-        {
-            return;
-        }
-        else if(!_keys.Contains(key))
+        if(!_keys.Contains(key))
         {
             if (_collectionId == Guid.Empty)
             {
-                var createCollection = new Penumbra.Api.IpcSubscribers.CreateTemporaryCollection(Services.PluginInterface);
-                createCollection.Invoke(Tag, Tag, out _collectionId);
-            }
+                var getCollection = new GetCollectionForObject(Services.PluginInterface);
+				(bool ObjectValid, bool IndividualSet, (Guid Id, string Name) EffectiveCollection) collectionResult = getCollection.Invoke(Services.LocalPlayerIndex);
+                if (collectionResult.ObjectValid)
+                {
+                    _collectionId = collectionResult.EffectiveCollection.Id;
+                    _isTempCollection = false;
+                }
+                else
+                {
+                    var createCollection = new CreateTemporaryCollection(Services.PluginInterface);
+                    createCollection.Invoke(Tag, Tag, out _collectionId);
 
+                    _isTempCollection = true;
+                }
+            }
             
-            var addMod = new Penumbra.Api.IpcSubscribers.AddTemporaryMod(Services.PluginInterface);
+            var addMod = new AddTemporaryMod(Services.PluginInterface);
             addMod.Invoke(Tag + key, _collectionId, gamePaths, string.Empty, int.MaxValue);
 
-            var assign = new Penumbra.Api.IpcSubscribers.AssignTemporaryCollection(Services.PluginInterface);
-            assign.Invoke(_collectionId, (int)actorIndex, true);
+            if(_isTempCollection)
+            {
+                var assign = new AssignTemporaryCollection(Services.PluginInterface);
+                assign.Invoke(_collectionId, Services.LocalPlayerIndex, true);
+            }
 
             _keys.Add(key);
 
@@ -49,7 +62,7 @@ public static class PenumbraIPC
     {
         if (_collectionId != Guid.Empty && _keys.Contains(key))
         {
-            var assign = new Penumbra.Api.IpcSubscribers.RemoveTemporaryMod(Services.PluginInterface);
+            var assign = new RemoveTemporaryMod(Services.PluginInterface);
             assign.Invoke(Tag + key, _collectionId, int.MaxValue);
             _keys.Remove(key);
             Services.Log.Debug("Removed Temp Mod " + key);
@@ -67,7 +80,7 @@ public static class PenumbraIPC
         }
         else
         {
-            var redraw = new Penumbra.Api.IpcSubscribers.RedrawObject(Services.PluginInterface);
+            var redraw = new RedrawObject(Services.PluginInterface);
             redraw.Invoke(gameObjectIndex, RedrawType.Redraw);
         }
     }
@@ -76,7 +89,7 @@ public static class PenumbraIPC
     {
         foreach (ushort item in Services.Objects.Where(x => x is IBattleNpc && x.BaseId == 13498 && x.ObjectKind is ObjectKind.BattleNpc).Select(o => o.ObjectIndex))
         {
-            var redraw = new Penumbra.Api.IpcSubscribers.RedrawObject(Services.PluginInterface);
+            var redraw = new RedrawObject(Services.PluginInterface);
             redraw.Invoke(item, RedrawType.Redraw);
             Services.Log.Debug("Redrawing item " + item);
         }
@@ -91,8 +104,11 @@ public static class PenumbraIPC
         {
             RemoveTempMod(key);
         }
-        var removeCollection = new DeleteTemporaryCollection(Services.PluginInterface);
-        removeCollection.Invoke(_collectionId);
+        if(_isTempCollection)
+        {
+            var removeCollection = new DeleteTemporaryCollection(Services.PluginInterface);
+            removeCollection.Invoke(_collectionId);
+        }
 
         _collectionId = Guid.Empty;
         _keys.Clear();

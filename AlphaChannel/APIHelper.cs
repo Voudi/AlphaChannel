@@ -193,15 +193,12 @@ public class APIHelper
         {
             PenumbraIPC.RemoveTempMod("qr");
             _plugin.LibResources.LoadPenumbraQRResources();
-			PenumbraIPC.ApplyTempMod("qr", Services.LocalPlayerIndex, _plugin.PenumbraQRPaths);
+			PenumbraIPC.ApplyTempMod("qr", _plugin.PenumbraQRPaths);
         }
 
         _=NoireService.Framework.RunOnTick(() =>
         {
-            if(Services.LocalPlayerId.HasValue)
-                {
-                    PenumbraIPC.Redraw(_core.GetCompanionIndex(Services.LocalPlayerId.Value));
-                }
+            PenumbraIPC.Redraw(_core.GetCompanionIndex(Services.LocalPlayerId));
         });
     }
     

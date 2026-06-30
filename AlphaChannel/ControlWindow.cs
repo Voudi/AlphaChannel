@@ -76,40 +76,40 @@ internal sealed class ControlWindow : Window, IDisposable
 		{
 			ImGui.Text("AlphaChannel is deactivated");
 			ImGui.Text("inside duties.");
-			return;
 		}
-		
-		if (!_libsLoaded)
+		else
 		{
-			bool needsFirstInstall = string.IsNullOrWhiteSpace(_plugin.AssemblyLocationMPV) || string.IsNullOrWhiteSpace(_plugin.AssemblyLocationYTDLP);
-
-			_libsLoaded = !needsFirstInstall;
 			if (!_libsLoaded)
 			{
-				DrawFirstInstall();
-				return;
-			}
-		}
+				bool needsFirstInstall = string.IsNullOrWhiteSpace(_plugin.AssemblyLocationMPV) || string.IsNullOrWhiteSpace(_plugin.AssemblyLocationYTDLP)|| string.IsNullOrWhiteSpace(_plugin.AssemblyLocationSnes);
 
-		if (ImGui.BeginTabBar("AlphaChannelTabBar"))
-		{
-			if (ImGui.BeginTabItem("Join"))
-    		{
-				DrawJoin();
+				_libsLoaded = !needsFirstInstall;
+				if (!_libsLoaded)
+				{
+					DrawFirstInstall();
+				}
 			}
-			if (ImGui.BeginTabItem("Host"))
+
+			if (_libsLoaded && ImGui.BeginTabBar("AlphaChannelTabBar"))
 			{
-				DrawHost();
+				if (ImGui.BeginTabItem("Join"))
+				{
+					DrawJoin();
+				}
+				if (ImGui.BeginTabItem("Host"))
+				{
+					DrawHost();
+				}
+				if(ImGui.BeginTabItem("Snes9x"))
+				{
+					DrawGame();
+				}
+				if (ImGui.BeginTabItem("Settings"))
+				{
+					DrawSettings();
+				}
+				ImGui.EndTabBar();
 			}
-			if(ImGui.BeginTabItem("Snes9x"))
-			{
-				DrawGame();
-			}
-			if (ImGui.BeginTabItem("Settings"))
-			{
-				DrawSettings();
-			}
-			ImGui.EndTabBar();
 		}
 
 		_fileDialog.Draw();
@@ -197,11 +197,18 @@ internal sealed class ControlWindow : Window, IDisposable
 		_core.SetVolume(vol);
 	}
 
-	private void SeekPlayer(double percentage)
+	private void SeekPlayer(double percentage, bool silent = false)
 	{
 		int seconds = (int)(_seekerMaxSeconds * (percentage / 100));
 		Services.Log.Debug("Seeking to " + seconds + " seconds");
-		_core.Seek(seconds);
+		if (silent)
+		{
+			_core.SeekSilent(seconds);
+		}
+		else
+		{
+			_core.Seek(seconds);
+		}
 	}
 
 	private void GetCoreInfo()
@@ -351,56 +358,80 @@ internal sealed class ControlWindow : Window, IDisposable
 	{
 		ImGui.BeginChild("##scrollListInstall" + _plugin.Name, new Vector2(0, 0), true);
 
-		bool updatesAvailable = !string.IsNullOrWhiteSpace(_plugin.LibResources.MpvCheckResult[0]) || !string.IsNullOrWhiteSpace(_plugin.LibResources.YtdlpCheckResult[0]);
+		bool snesInstallAvailable = string.IsNullOrEmpty(_plugin.AssemblyLocationSnes);
+		bool updatesAvailable = !string.IsNullOrWhiteSpace(_plugin.LibResources.MpvCheckResult[0]) || !string.IsNullOrWhiteSpace(_plugin.LibResources.YtdlpCheckResult[0]) || snesInstallAvailable;
+		
+
 		if (_installingLibs)
 		{
 			ImGui.Text("Installing dependencies...");
-			return;
 		}
-		ImGui.Text("Please download the required dependencies to use AlphaChannel:");
-		if (Button(updatesAvailable ? "Install dependencies" : "Checking for updates...", "installDeps", disabled: !updatesAvailable))
+		else
 		{
-			Services.Log.Debug("Installing AlphaChannel Dependencies...");
-			Task.Run(() => {
-				if (string.IsNullOrWhiteSpace(_plugin.AssemblyLocationMPV) || !string.IsNullOrWhiteSpace(_plugin.LibResources.MpvCheckResult[0]))
-				{
-					_plugin.LibResources.DownloadMPVAsync().ContinueWith(async task =>
-					{
-						if (task.Result)
-						{
-							Services.Log.Debug("MPV downloaded successfully");
-							_plugin.AssemblyLocationMPV = _plugin.LibResources.GetLocationMPV()!;
-							_plugin.LibResources.MpvCheckResult[0] = string.Empty;
-						}
-						else
-						{
-							Services.Log.Error("Failed to download MPV");
-						}
-					});
-				}
-			}).ContinueWith(task =>
+			ImGui.Text("Please download the required ");
+			ImGui.Text("dependencies to use AlphaChannel:");
+			if (Button(updatesAvailable ? "Install dependencies" : "Checking for updates...", "installDeps", disabled: !updatesAvailable))
 			{
-				if (string.IsNullOrWhiteSpace(_plugin.AssemblyLocationYTDLP) || !string.IsNullOrWhiteSpace(_plugin.LibResources.YtdlpCheckResult[0]))
-				{
-					_plugin.LibResources.DownloadYTDLPAsync().ContinueWith(async task =>
+				Services.Log.Debug("Installing AlphaChannel Dependencies...");
+				Task.Run(() => {
+					if (string.IsNullOrWhiteSpace(_plugin.AssemblyLocationMPV) || !string.IsNullOrWhiteSpace(_plugin.LibResources.MpvCheckResult[0]))
 					{
-						if (task.Result)
+						_plugin.LibResources.DownloadMPVAsync().ContinueWith(async task =>
 						{
-							Services.Log.Debug("YTDLP downloaded successfully");
-							_plugin.AssemblyLocationYTDLP = _plugin.LibResources.GetLocationYTDLP()!;
-							_plugin.LibResources.YtdlpCheckResult[0] = string.Empty;
-						}
-						else
+							if (task.Result)
+							{
+								Services.Log.Debug("MPV downloaded successfully");
+								_plugin.AssemblyLocationMPV = _plugin.LibResources.GetLocationMPV()!;
+								_plugin.LibResources.MpvCheckResult[0] = string.Empty;
+							}
+							else
+							{
+								Services.Log.Error("Failed to download MPV");
+							}
+						});
+					}
+				}).ContinueWith(task =>
+				{
+					if (string.IsNullOrWhiteSpace(_plugin.AssemblyLocationYTDLP) || !string.IsNullOrWhiteSpace(_plugin.LibResources.YtdlpCheckResult[0]))
+					{
+						_plugin.LibResources.DownloadYTDLPAsync().ContinueWith(async task =>
 						{
-							Services.Log.Error("Failed to download YTDLP");
-						}
-					});
-				}
-			});
+							if (task.Result)
+							{
+								Services.Log.Debug("YTDLP downloaded successfully");
+								_plugin.AssemblyLocationYTDLP = _plugin.LibResources.GetLocationYTDLP()!;
+								_plugin.LibResources.YtdlpCheckResult[0] = string.Empty;
+							}
+							else
+							{
+								Services.Log.Error("Failed to download YTDLP");
+							}
+						});
+					}
+				}).ContinueWith(task =>
+				{
+					if (snesInstallAvailable)
+					{
+						_plugin.LibResources.DownloadSNES9XAsync().ContinueWith(async task =>
+						{
+							if (task.Result)
+							{
+								Services.Log.Debug("SNES9X downloaded successfully");
+								_plugin.AssemblyLocationSnes = _plugin.LibResources.GetLocationSNES9X()!;
+							}
+							else
+							{
+								Services.Log.Error("Failed to download SNES9X");
+							}
+							_updatingSNES9X = false;
+						});
+					}
+				});
 
-
-			_installingLibs = true;
+				_installingLibs = true;
+			}
 		}
+		
 
 		ImGui.EndChild();
 	}
@@ -536,8 +567,8 @@ internal sealed class ControlWindow : Window, IDisposable
 				{
 					if (_playerCarbuncleFound)
 					{
-						PenumbraIPC.ApplyTempMod("companion", Services.LocalPlayerIndex, _plugin.PenumbraTempModPaths);
-						PenumbraIPC.ApplyTempMod("qr", Services.LocalPlayerIndex, _plugin.PenumbraQRPaths);
+						PenumbraIPC.ApplyTempMod("companion", _plugin.PenumbraTempModPaths);
+						PenumbraIPC.ApplyTempMod("qr", _plugin.PenumbraQRPaths);
 						PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId.Value));
 					}
 					else
@@ -599,7 +630,7 @@ internal sealed class ControlWindow : Window, IDisposable
 								{
 									if (_mpvIsIdle)
 									{
-										SeekPlayer(0);
+										SeekPlayer(0, true);
 										_core.Pause(false);
 										_pauseToggle = false;
 									}
@@ -721,8 +752,8 @@ internal sealed class ControlWindow : Window, IDisposable
 			{
 				if (_playerCarbuncleFound)
 				{
-					PenumbraIPC.ApplyTempMod("companion", Services.LocalPlayerIndex, _plugin.PenumbraTempModPaths);
-					PenumbraIPC.ApplyTempMod("qr", Services.LocalPlayerIndex, _plugin.PenumbraQRPaths);
+					PenumbraIPC.ApplyTempMod("companion", _plugin.PenumbraTempModPaths);
+					PenumbraIPC.ApplyTempMod("qr", _plugin.PenumbraQRPaths);
 					PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId.Value));
 				}
 				else
@@ -891,7 +922,7 @@ internal sealed class ControlWindow : Window, IDisposable
 
 		ImGui.Text("mpv-winbuild");
 		ImGui.SameLine();
-		if (mpvUpdateAvailable)
+		if (false && mpvUpdateAvailable) //Deactivate updating from inside the plugin for now
 		{
 			if (Button(installingMPV ? "Updating..." : "Update", "mpvUpdate", disabled: installingMPV))
 			{
@@ -922,7 +953,7 @@ internal sealed class ControlWindow : Window, IDisposable
 
 		ImGui.Text("yt-dlp");
 		ImGui.SameLine();
-		if (ytdlpUpdateAvailable)
+		if (false && ytdlpUpdateAvailable)
 		{
 			if (Button(installingYTDLP ? "Updating..." : "Update", "ytdlpUpdate", disabled: installingYTDLP))
 			{
@@ -953,7 +984,7 @@ internal sealed class ControlWindow : Window, IDisposable
 
 		ImGui.Text("snes9x");
 		ImGui.SameLine();
-		if (snesInstallAvailable)
+		if (false && snesInstallAvailable)
 		{
 			if (Button(installingSNES9X ? "Updating..." : "Update", "snes9xUpdate", disabled: installingSNES9X))
 			{
