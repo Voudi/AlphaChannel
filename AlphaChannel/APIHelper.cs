@@ -30,8 +30,7 @@ public class APIHelper
 
     internal string? GetLocalState()
     {
-        uint? localPlayerId = Services.LocalPlayerId;
-        if(!localPlayerId.HasValue || !_core.TVIsActive(localPlayerId.Value))
+        if(!_core.TVIsActive(Services.LocalPlayerId))
         {
             return null;
         }
@@ -50,11 +49,10 @@ public class APIHelper
 
     internal void SetRemoteState(nint addr, string stateJSON)
     {
-        uint? localPlayerId = Services.LocalPlayerId;
         ICharacter? player = NoireLib.Helpers.CharacterHelper.GetCharacterFromAddress(addr);
         uint? playerId = player?.EntityId;
 
-        if (!playerId.HasValue || playerId == localPlayerId) 
+        if (!playerId.HasValue || playerId == Services.LocalPlayerId) 
         {
             Services.Log.Debug("No need to set state for local player.");
             return;
@@ -119,11 +117,10 @@ public class APIHelper
 
     internal void ClearRemoteState(nint addr)
     {
-        uint? localPlayerId = Services.LocalPlayerId;
         ICharacter? player = NoireLib.Helpers.CharacterHelper.GetCharacterFromAddress(addr);
         uint? playerId = player?.EntityId;
 
-        if (playerId.HasValue && playerId != localPlayerId)
+        if (playerId.HasValue && playerId != Services.LocalPlayerId)
         {
             _remoteStates.Remove(playerId.Value);
             if (_core.TVIsActive(playerId.Value))

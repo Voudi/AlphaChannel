@@ -111,8 +111,7 @@ internal sealed class Core : IDisposable
 	internal void StopVideo()
 	{
 		_activeEntityId = 0;
-		uint? localPlayerId = Services.LocalPlayerId;
-		if (localPlayerId.HasValue && TVIsActive(localPlayerId.Value) && !IsPlayingSnes())
+		if (TVIsActive(Services.LocalPlayerId) && !IsPlayingSnes())
 		{
 			APIHelper?.OnVideoStopped();
 		}
@@ -191,8 +190,7 @@ internal sealed class Core : IDisposable
 
 	internal void Pause(bool pause)
 	{
-		uint? localPlayerId = Services.LocalPlayerId;
-		if (localPlayerId.HasValue && TVIsActive(localPlayerId.Value) && !IsPlayingSnes())
+		if (TVIsActive(Services.LocalPlayerId) && !IsPlayingSnes())
 		{
 			APIHelper?.OnPaused(pause);
 		}
@@ -240,8 +238,7 @@ internal sealed class Core : IDisposable
 
 	internal void Seek(int seconds)
 	{
-		uint? localPlayerId = Services.LocalPlayerId;
-		if (localPlayerId.HasValue && TVIsActive(localPlayerId.Value) && !IsPlayingSnes())
+		if (TVIsActive(Services.LocalPlayerId) && !IsPlayingSnes())
 		{
 			APIHelper?.OnSeeked(seconds);
 		}
@@ -657,10 +654,10 @@ internal sealed class Core : IDisposable
 	public void Dispose()
 	{
 		PenumbraIPC.Dispose();
-		uint? localPlayerId = Services.LocalPlayerId;
-		if(localPlayerId.HasValue && _tvOwners.TryGetValue(localPlayerId.Value, out _))
+		uint localPlayerId = Services.LocalPlayerId;
+		if(_tvOwners.TryGetValue(localPlayerId, out _))
 		{
-			PenumbraIPC.Redraw(GetCompanionIndex(localPlayerId.Value)); //Special case: Redraw one last time after
+			PenumbraIPC.Redraw(GetCompanionIndex(localPlayerId)); //Special case: Redraw one last time after dispose
 		}
 
 		_mpvRenderer?.Dispose();
