@@ -11,7 +11,7 @@ namespace AlphaChannel;
 
 public sealed class PenumbraWatcher : IDisposable
 {
-    public const string WatchFor = "chara/monster/m7002/obj/body/b0001/texture/tv_d.tex";
+    public const string WatchFor = "chara/monster/m7002/obj/body/b0001/texture/unknown_b_d_1400445740.tex";
 	private readonly APIHelper _apiHelper;
     private readonly TextureTranslate _textureTranslate;
 	private readonly EventSubscriber<nint, int> _redrawn;

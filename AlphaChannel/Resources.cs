@@ -129,7 +129,7 @@ internal sealed class Resources : IDisposable
 	{
 		Dictionary<string, string> paths = [];
 
-		string oldPath = Path.Combine(_plugin.PluginDir, "resources", "carbuncle/tv_d.tex");
+		string oldPath = Path.Combine(_plugin.PluginDir, "resources", "carbuncle/tv_qr.tex");
 		if (File.Exists(oldPath))
 		{
 			string path = Path.Combine(_plugin.PluginDir, "resources", "tvqr_"+_plugin.PluginSessionGUID+".tex");
@@ -214,11 +214,12 @@ internal sealed class Resources : IDisposable
 			{"chara/monster/m7002/obj/body/b0001/model/m7002b0001.mdl", "carbuncle/m7002b0001.mdl"},
 			{"chara/monster/m7002/obj/body/b0001/texture/tv_id.tex", "carbuncle/tv_id.tex"},
 			{"chara/monster/m7002/obj/body/b0001/texture/tv_n.tex", "carbuncle/tv_n.tex"},
+			{"chara/monster/m7002/obj/body/b0001/texture/tv_d.tex", "carbuncle/tv_d.tex"},
 			{"chara/monster/m7002/obj/body/b0001/texture/tv_s.tex", "carbuncle/tv_id.tex"},
 			{"chara/monster/m7002/obj/body/b0001/vfx/texture/flas001bt.atex", "carbuncle/flas001bt.atex"},
 			{"chara/monster/m7002/obj/body/b0001/vfx/texture/pk_x001a_h.atex", "carbuncle/pk_x001a_h.atex"},
 			{"chara/monster/m7002/obj/body/b0001/vfx/texture/glow002bf.atex", "carbuncle/glow002bf.atex"},
-			{"chara/monster/m7002/obj/body/b0001/vfx/texture/flas001ct.atex", "carbuncle/flas001bt.atex"}
+			{"chara/monster/m7002/obj/body/b0001/vfx/texture/flas001ct.atex", "carbuncle/flas001bt.atex"},
 		};
 		foreach(string key in paths.Keys)
 		{
