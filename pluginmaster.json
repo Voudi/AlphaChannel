@@ -3,7 +3,7 @@
     "Author": "Voudi",
     "Name": "AlphaChannel",
     "InternalName": "AlphaChannel",
-    "AssemblyVersion": "1.1.20260701.900",
+    "AssemblyVersion": "1.1.20260703.902",
     "TestingAssemblyVersion": "1.1.20260518.539",
     "Description": "Ingame watch parties.",
     "ApplicableVersion": "any",
@@ -19,8 +19,8 @@
     "Changelog": "Initial Prototype",
     "AcceptsFeedback": false,
     "IconUrl": "https://gist.githubusercontent.com/Voudi/77c661ec1597925c2856d649a0cfc2d8/raw/icon.png",
-    "DownloadLinkInstall": "https://github.com/Voudi/AlphaChannel/releases/download/v1.1.20260701.900/AlphaChannel.zip",
-    "DownloadLinkUpdate": "https://github.com/Voudi/AlphaChannel/releases/download/v1.1.20260701.900/AlphaChannel.zip",
+    "DownloadLinkInstall": "https://github.com/Voudi/AlphaChannel/releases/download/v1.1.20260703.902/AlphaChannel.zip",
+    "DownloadLinkUpdate": "https://github.com/Voudi/AlphaChannel/releases/download/v1.1.20260703.902/AlphaChannel.zip",
     "DownloadLinkTesting": "https://gist.github.com/Voudi/ff56526cfcd0197a87d518e07cf1302f/raw/AlphaChannel.zip"
   }
 ]
