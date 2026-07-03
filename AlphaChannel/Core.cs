@@ -132,6 +132,7 @@ internal sealed class Core : IDisposable
 			_mpvRenderer?.Stop();
 			_mpvRenderer = null;
 		}
+		PenumbraIPC.RemoveTempMod("screenvfx");
 	}
 
 	internal void PlayVideo(uint entityId, string url, int playbackPosition = 0, bool isPlaying = true)
@@ -514,15 +515,18 @@ internal sealed class Core : IDisposable
 		{
 			PenumbraIPC.ApplyTempMod("screenvfx", _plugin.PenumbraTempScreenPaths);
 		}
-		lock (_screenTextureLock)
+		else
 		{
-			if(_isPlayingSnes)
+			lock (_screenTextureLock)
 			{
-				_actorVfxCreate?.Invoke("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreen_"+_plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
-			}
-			else
-			{
-				_actorVfxCreate?.Invoke("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreen_"+_plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
+				if(_isPlayingSnes)
+				{
+					_actorVfxCreate?.Invoke("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreen_"+_plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
+				}
+				else
+				{
+					_actorVfxCreate?.Invoke("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreen_"+_plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
+				}
 			}
 		}
 	}

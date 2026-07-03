@@ -182,16 +182,7 @@ public class APIHelper
 
     internal async Task NotifyStateDebug(string? json)
     {
-        if(json != null)
-        {
-            await _plugin.TextureTranslate.EncodeToTexAsync(json, _plugin.PenumbraQRPaths.First(p => p.Key.Equals(PenumbraWatcher.WatchFor, StringComparison.OrdinalIgnoreCase)).Value);
-        }
-        else
-        {
-            PenumbraIPC.RemoveTempMod("qr");
-            _plugin.LibResources.LoadPenumbraQRResources();
-			PenumbraIPC.ApplyTempMod("qr", _plugin.PenumbraQRPaths);
-        }
+        await _plugin.TextureTranslate.EncodeToTexAsync(json, _plugin.PenumbraQRPaths.First(p => p.Key.Equals(PenumbraWatcher.WatchFor, StringComparison.OrdinalIgnoreCase)).Value);
 
         _=NoireService.Framework.RunOnTick(() =>
         {

@@ -198,7 +198,7 @@ internal sealed class Resources : IDisposable
 			throw new FileNotFoundException($"Required resource not found: {oldPath}");
 		}
 
-		return FixTempCopyGamePaths(paths); //just return paths after the bug is fixed
+		return paths; //no need to fix bug here since these wont need to get synced to others anyways, only use the clients vfx for the screen
 	}
 
 	internal Dictionary<string, string> LoadPenumbraModResources()

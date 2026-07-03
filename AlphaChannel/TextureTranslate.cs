@@ -1,6 +1,4 @@
-using System.Collections.Generic;
 using Dalamud.Plugin;
-using Dalamud.Plugin.Services;
 using Lumina.Data.Files;
 using Penumbra.Api.Enums;
 using Penumbra.Api.IpcSubscribers;
@@ -22,8 +20,24 @@ public sealed class TextureTranslate
         _convert = new ConvertTextureData(pi);
     }
 
-    public async Task EncodeToTexAsync(string json, string outputPath)
+    public async Task EncodeToTexAsync(string? json, string outputPath)
     {
+        if (json is null)
+        {
+            int size = _sizes[0];
+            byte[] white = new byte[size * size * 4];
+            Array.Fill(white, (byte)255);
+
+            string temp = Path.Combine(Path.GetTempPath(), $"axc_{Guid.NewGuid():N}.tex");
+            try
+            {
+                await _convert.Invoke(white, size, temp, TextureType.Bc7Tex, mipMaps: true).ConfigureAwait(false);
+                File.Copy(temp, outputPath, overwrite: true);
+            }
+            finally { if (File.Exists(temp)) { try { File.Delete(temp); } catch { } } }
+            return;
+        }
+
         Exception? lastErr = null;
 
         foreach (int size in _sizes)
@@ -35,8 +49,7 @@ public sealed class TextureTranslate
             }
             catch (WriterException)
             {
-                throw new InvalidOperationException(
-                    "Payload überschreitet maximale QR-Kapazität (ECC-H). URL kürzen oder Plattform-ID statt Voll-URL nutzen.");
+                throw new InvalidOperationException("URL is too long to fit inside a QR code!");
             }
 
 			string temp = Path.Combine(Path.GetTempPath(), $"axc_{Guid.NewGuid():N}.tex");
@@ -56,8 +69,8 @@ public sealed class TextureTranslate
         }
 
         throw new InvalidOperationException(
-            "QR überlebt BC7 nicht -> Daten zu lang." +
-            (lastErr != null ? $" Letzter Fehler: {lastErr.Message}" : ""));
+            "URL is too long to fit inside a QR code - BC7 compression did not survive" +
+            (lastErr != null ? $" Last Error: {lastErr.Message}" : ""));
     }
 
     public string? DecodeFromTex(string texPath)

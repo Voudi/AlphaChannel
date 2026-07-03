@@ -188,18 +188,11 @@ internal sealed class ControlWindow : Window, IDisposable
 		_core.SetVolume(vol);
 	}
 
-	private void SeekPlayer(double percentage, bool silent = false)
+	private void SeekPlayer(double percentage)
 	{
 		int seconds = (int)(_seekerMaxSeconds * (percentage / 100));
 		Services.Log.Debug("Seeking to " + seconds + " seconds");
-		if (silent)
-		{
-			_core.SeekSilent(seconds);
-		}
-		else
-		{
-			_core.Seek(seconds);
-		}
+		_core.Seek(seconds);
 	}
 
 	private void GetCoreInfo()
@@ -619,7 +612,7 @@ internal sealed class ControlWindow : Window, IDisposable
 							{
 								if (_mpvIsDone)
 								{
-									SeekPlayer(0, true);
+									SeekPlayer(0);
 								}
 								
 								if(_mpvIsIdle)
