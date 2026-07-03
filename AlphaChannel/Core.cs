@@ -110,7 +110,6 @@ internal sealed class Core : IDisposable
 
 	internal void StopVideo()
 	{
-		_activeEntityId = 0;
 		if (TVIsActive(Services.LocalPlayerId) && !IsPlayingSnes())
 		{
 			APIHelper?.OnVideoStopped();
@@ -142,8 +141,7 @@ internal sealed class Core : IDisposable
 			return;
 		}
 
-		uint? localPlayerId = Services.LocalPlayerId;
-		if (entityId == localPlayerId)
+		if (entityId == Services.LocalPlayerId)
 		{
 			APIHelper?.OnVideoStarted(url, playbackPosition, isPlaying);
 		}
