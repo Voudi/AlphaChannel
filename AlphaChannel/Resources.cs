@@ -211,6 +211,12 @@ internal sealed class Resources : IDisposable
 			{"chara/monster/m7002/obj/body/b0001/material/v0004/mt_m7002b0001_a.mtrl", "carbuncle/mt_m7002b0001_a.mtrl"},
 			{"chara/monster/m7002/obj/body/b0001/material/v0005/mt_m7002b0001_a.mtrl", "carbuncle/mt_m7002b0001_a.mtrl"},
 			{"chara/monster/m7002/obj/body/b0001/material/v0006/mt_m7002b0001_a.mtrl", "carbuncle/mt_m7002b0001_a.mtrl"},
+			{"chara/monster/m7002/obj/body/b0001/material/v0001/mt_m7002b0001_b.mtrl", "carbuncle/mt_m7002b0001_b.mtrl"},
+			{"chara/monster/m7002/obj/body/b0001/material/v0002/mt_m7002b0001_b.mtrl", "carbuncle/mt_m7002b0001_b.mtrl"},
+			{"chara/monster/m7002/obj/body/b0001/material/v0003/mt_m7002b0001_b.mtrl", "carbuncle/mt_m7002b0001_b.mtrl"},
+			{"chara/monster/m7002/obj/body/b0001/material/v0004/mt_m7002b0001_b.mtrl", "carbuncle/mt_m7002b0001_b.mtrl"},
+			{"chara/monster/m7002/obj/body/b0001/material/v0005/mt_m7002b0001_b.mtrl", "carbuncle/mt_m7002b0001_b.mtrl"},
+			{"chara/monster/m7002/obj/body/b0001/material/v0006/mt_m7002b0001_b.mtrl", "carbuncle/mt_m7002b0001_b.mtrl"},
 			{"chara/monster/m7002/obj/body/b0001/model/m7002b0001.mdl", "carbuncle/m7002b0001.mdl"},
 			{"chara/monster/m7002/obj/body/b0001/texture/tv_id.tex", "carbuncle/tv_id.tex"},
 			{"chara/monster/m7002/obj/body/b0001/texture/tv_n.tex", "carbuncle/tv_n.tex"},
@@ -220,6 +226,9 @@ internal sealed class Resources : IDisposable
 			{"chara/monster/m7002/obj/body/b0001/vfx/texture/pk_x001a_h.atex", "carbuncle/pk_x001a_h.atex"},
 			{"chara/monster/m7002/obj/body/b0001/vfx/texture/glow002bf.atex", "carbuncle/glow002bf.atex"},
 			{"chara/monster/m7002/obj/body/b0001/vfx/texture/flas001ct.atex", "carbuncle/flas001bt.atex"},
+			{"chara/monster/m7002/obj/body/b0001/texture/unknown_b_id_1400445740.tex", "carbuncle/tv_id.tex"},
+			{"chara/monster/m7002/obj/body/b0001/texture/unknown_b_n_1400445740.tex", "carbuncle/tv_n.tex"},
+			{"chara/monster/m7002/obj/body/b0001/texture/unknown_b_s_1400445740.tex", "carbuncle/tv_id.tex"}
 		};
 		foreach(string key in paths.Keys)
 		{
