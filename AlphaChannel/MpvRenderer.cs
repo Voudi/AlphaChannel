@@ -47,15 +47,12 @@ namespace AlphaChannel
 		private bool _closed = true;
 		private Thread? _eventThread;
 
-		public void Initialize(int width, int height, Texture2D targetTexture, CancellationTokenSource cancelToken)
+		public void Initialize(int width, int height, Texture2D? drawDeviceTexture, CancellationTokenSource cancelToken)
 		{
 			_width = width;
 			_height = height;
 			_cancelToken = cancelToken;
-			using (SharpDX.DXGI.Resource resource = targetTexture.QueryInterface<SharpDX.DXGI.Resource>())
-			{
-				_targetTexture = DxHandler.DrawDevice?.OpenSharedResource<Texture2D>(resource.SharedHandle);
-			}
+			_targetTexture = drawDeviceTexture;
 
 			_bufferPtr = Marshal.AllocHGlobal(width * height * 4);
 
@@ -202,7 +199,7 @@ namespace AlphaChannel
 					Marshal.FreeHGlobal(_formatPtr);
 					Marshal.FreeHGlobal(_renderParamsPtr);
 
-					_targetTexture?.Dispose();
+					_targetTexture = null;
 				}
 			});
 
@@ -342,7 +339,7 @@ namespace AlphaChannel
 				{
 					try
 					{
-						return Marshal.PtrToStringAnsi(ptr);
+						return Marshal.PtrToStringUTF8(ptr);
 					}
 					finally
 					{

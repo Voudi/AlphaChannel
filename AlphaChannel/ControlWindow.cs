@@ -41,7 +41,7 @@ internal sealed class ControlWindow : Window, IDisposable
 	private int _seekerMaxSeconds;
 	private bool _pauseToggle;
 	private bool _mpvIsIdle;
-	private bool _mpvIsDone => _mpvIsIdle && _seekerMaxSeconds - 2 < _seekerExactTime;
+	private bool _mpvIsDone => _mpvIsIdle || _seekerMaxSeconds - 2 < _seekerExactTime;
 	private string _mediaTitle = string.Empty;
 
 	//Controls vars
@@ -191,6 +191,10 @@ internal sealed class ControlWindow : Window, IDisposable
 	private void SeekPlayer(double percentage)
 	{
 		int seconds = (int)(_seekerMaxSeconds * (percentage / 100));
+		if(seconds >= _seekerMaxSeconds-1)
+		{
+			seconds = _seekerMaxSeconds-1;
+		}
 		Services.Log.Debug("Seeking to " + seconds + " seconds");
 		_core.Seek(seconds);
 	}
@@ -537,9 +541,10 @@ internal sealed class ControlWindow : Window, IDisposable
 		ImGui.BeginChild("##scrollListHost" + _plugin.Name, new Vector2(0, 0), true);
 		Vector4 textColor;
 		uint localPlayerId = Services.LocalPlayerId;
-		if (_playerCarbuncleFound || _core.TVIsVisible(localPlayerId)) //Checks if players Carbuncle or TV exists
+		bool playerTVRunning = _core.TVIsActive(localPlayerId);
+
+		if (_playerCarbuncleFound || _core.TVIsVisible(localPlayerId) || playerTVRunning) //Checks if players Carbuncle or TV exists
 		{
-			bool playerTVRunning = _core.TVIsActive(localPlayerId);
 			bool urlEmpty = string.IsNullOrEmpty(_inputURL);
 			bool urlExists = _core.ValidateURL(_inputURL, out _);
 			bool refreshNeeded = playerTVRunning && !string.IsNullOrEmpty(_inputURL) && urlExists;

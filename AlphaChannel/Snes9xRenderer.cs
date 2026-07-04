@@ -105,7 +105,12 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 			_setControllerPortDevice = null!; _serializeSize = null!; _serialize = null!;
 			_unserialize = null!;
 
-			if (_lib != IntPtr.Zero) { NativeLibrary.Free(_lib); _lib = IntPtr.Zero; }
+			if (_lib != IntPtr.Zero)
+			{
+				Services.Log.Debug($"[SNES9X] diag: freeing native dll, _lib={_lib}");
+				NativeLibrary.Free(_lib);
+				_lib = IntPtr.Zero;
+			}
 		}
 		#endregion
 
@@ -179,7 +184,7 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 		private const int PIXFMT_RGB565 = 2; //0=0RGB1555 1=XRGB8888 2=RGB565
 		#endregion
 
-		internal bool Load(Texture2D targetTexture, string romPath)
+		internal bool Load(Texture2D? drawDeviceTexture, string romPath)
 		{
 			if (_running)
 			{
@@ -197,16 +202,19 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 				_instance = this;
 				_cancel = new CancellationTokenSource();
 
-				using (var res = targetTexture.QueryInterface<SharpDX.DXGI.Resource>())
-				{
-					_targetTexture = DxHandler.DrawDevice?.OpenSharedResource<Texture2D>(res.SharedHandle);
-				}
+				_targetTexture = drawDeviceTexture;
+				Services.Log.Debug($"[SNES9X] diag: using shared draw-device texture, null={_targetTexture == null}");
+
 				if (_targetTexture != null && DxHandler.DrawDevice != null)
 				{
+					Services.Log.Debug("[SNES9X] diag: constructing CrtLottesScaler");
 					_scaler = new CrtLottesScaler(DxHandler.DrawDevice, _targetTexture);
+					Services.Log.Debug("[SNES9X] diag: CrtLottesScaler constructed");
 				}
 
+				Services.Log.Debug($"[SNES9X] diag: loading native dll, prior _lib={_lib}");
 				LoadNative(_plugin.AssemblyLocationSnes);
+				Services.Log.Debug($"[SNES9X] diag: native dll loaded, _lib={_lib}");
 
 				_setEnvironment(_envCb);
 				_setVideoRefresh(_videoCb);
@@ -214,8 +222,10 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 				_setAudioSampleBatch(_audioBatchCb);
 				_setInputPoll(_inputPollCb);
 				_setInputState(_inputStateCb);
+				Services.Log.Debug("[SNES9X] diag: callbacks set, calling retro_init");
 
 				_init();
+				Services.Log.Debug("[SNES9X] diag: retro_init returned");
 				_coreInited = true;
 
 				_getSystemInfo(out RetroSystemInfo si);
@@ -310,11 +320,13 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 				try { _deinit(); }
 				catch (Exception e) { Services.Log.Error($"[SNES9X] deinit threw: {e}"); }
 				_coreInited = false;
+				Services.Log.Debug("[SNES9X] diag: retro_deinit returned");
 			}
-			
+
 			_audio?.Dispose(); _audio = null;
 			_scaler?.Dispose(); _scaler = null;
-			_targetTexture?.Dispose(); _targetTexture = null;
+			_targetTexture = null;
+			Services.Log.Debug("[SNES9X] diag: scaler disposed");
 
 			FreeNative();
 
