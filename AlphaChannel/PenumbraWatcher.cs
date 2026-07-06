@@ -1,9 +1,6 @@
 using System.Collections.Concurrent;
-using System.Runtime.Serialization;
 using Dalamud.Game.ClientState.Objects.Types;
-using Dalamud.Plugin;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
-using Penumbra.Api.Enums;
 using Penumbra.Api.Helpers;
 using Penumbra.Api.IpcSubscribers;
 
