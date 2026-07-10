@@ -25,7 +25,7 @@ public class Plugin : IDalamudPlugin, IDisposable
 	internal string AssemblyLocationMPV { get; set; }
 	internal string AssemblyLocationYTDLP { get; set; }
 	internal string AssemblyLocationSnes { get; set; }
-	internal string ROMSLocationSnesDir => Path.Combine(ConfigDir, "snes");
+	internal string ROMSLocationSnesDir => Path.Combine(ConfigDir, "roms");
 	internal Dictionary<string, string> PenumbraTempModPaths { get; set;}
 	internal Dictionary<string, string> PenumbraTempScreenPaths { get; set;}
 	internal Dictionary<string, string> PenumbraQRPaths {get; set;}
