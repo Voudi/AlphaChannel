@@ -148,7 +148,8 @@ internal sealed class ControlWindow : Window, IDisposable
 		}
 	}
 
-	private long _lastMilliSecond1000ms;
+	private long _lastMilliSecond5000ms;
+	private long _lastMilliSecond1500ms;
 	private long _lastMilliSecond6ms;
 	internal void OnFrameworkUpdate()
 	{
@@ -158,9 +159,9 @@ internal sealed class ControlWindow : Window, IDisposable
 
 			GetCoreInfo();
 		}
-		if (_lastMilliSecond1000ms + 1500 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+		if (_lastMilliSecond1500ms + 1500 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 		{
-			_lastMilliSecond1000ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+			_lastMilliSecond1500ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 			_playerCarbuncleFound = _core.ScanForCompanions();
 
@@ -168,6 +169,12 @@ internal sealed class ControlWindow : Window, IDisposable
 			{
 				_visiblePlayers = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => x.Name.TextValue);
 			}
+		}
+		if (_lastMilliSecond5000ms + 5000 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+		{
+			_lastMilliSecond5000ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+			_core.RedrawIfNeeded();
 		}
 	}
 

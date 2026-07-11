@@ -13,6 +13,7 @@ using SharpDX.Direct3D;
 using SharpDX.Direct3D11;
 using SharpDX.DXGI;
 using Dalamud.Game.ClientState.Objects.Enums;
+using NoireLib;
 
 namespace AlphaChannel;
 
@@ -373,6 +374,24 @@ internal sealed class Core : IDisposable
 		}
 
 		Input.OnFrameworkUpdate(_isPlayingSnes, _snesControlsEnabled, _snesRenderer);
+	}
+
+	internal void RedrawIfNeeded()
+	{
+		if(_redrawScheduled)
+		{
+			_redrawScheduled = false;
+			_=NoireService.Framework.RunOnTick(() =>
+			{
+				PenumbraIPC.Redraw(GetCompanionIndex(Services.LocalPlayerId));
+			});
+		}
+	}
+
+	private bool _redrawScheduled;
+	internal void ScheduleRedraw()
+	{
+		_redrawScheduled = true;
 	}
 
 	internal unsafe bool ScanForCompanions()

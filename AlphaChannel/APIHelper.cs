@@ -183,11 +183,7 @@ public class APIHelper
     internal async Task NotifyStateDebug(string? json)
     {
         await _plugin.TextureTranslate.EncodeToTexAsync(json, _plugin.PenumbraQRPaths.First(p => p.Key.Equals(PenumbraWatcher.WatchFor, StringComparison.OrdinalIgnoreCase)).Value);
-
-        _=NoireService.Framework.RunOnTick(() =>
-        {
-            PenumbraIPC.Redraw(_core.GetCompanionIndex(Services.LocalPlayerId));
-        });
+        _core.ScheduleRedraw();
     }
     
 }
