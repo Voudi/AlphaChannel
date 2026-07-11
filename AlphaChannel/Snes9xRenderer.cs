@@ -746,7 +746,9 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 		//whatever pipeline state we touch so the game's own next draw calls aren't affected.
 		private void Blit(DeviceContext ctx, IntPtr data, int w, int h, int pitch)
 		{
-			RawViewportF prevViewport = ctx.Rasterizer.GetViewports<RawViewportF>()[0];
+			//Not saving/restoring the viewport here: querying it via SharpDX's generic GetViewports<T>() crashes
+			//with an IndexOutOfRangeException on this SharpDX build. We always set our own viewport explicitly
+			//before drawing, and the game sets its own again before its next real draw call regardless.
 			RenderTargetView[] prevRtvs = ctx.OutputMerger.GetRenderTargets(1, out DepthStencilView? prevDsv);
 			RasterizerState? prevRs = ctx.Rasterizer.State;
 			BlendState? prevBlend = ctx.OutputMerger.BlendState;
@@ -794,7 +796,6 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 			}
 			finally
 			{
-				ctx.Rasterizer.SetViewport(prevViewport);
 				ctx.OutputMerger.SetRenderTargets(prevDsv, prevRtvs);
 				foreach (RenderTargetView? rtv in prevRtvs)
 				{

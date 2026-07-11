@@ -57,7 +57,7 @@ internal static class DxHandler
 				}
 				catch (Exception e)
 				{
-					Services.Log.Error($"[DxHandler] Render-thread callback '{key}' failed: {e.Message}");
+					Services.Log.Error($"[DxHandler] Render-thread callback '{key}' failed: {e}");
 				}
 			}
 		}
