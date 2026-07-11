@@ -33,9 +33,14 @@ namespace AlphaChannel
 
 		public delegate void MpvRenderUpdateFn(IntPtr callback_ctx);
 
+		private const string RenderKey = "mpv";
+
 		private IntPtr _mpvCtx;
 		private IntPtr _mpvRenderCtx;
 		private IntPtr _bufferPtr;
+		private IntPtr _snapA, _snapB;
+		private bool _useSnapA = true;
+		private int _frameBytes;
 		private int _width, _height;
 		private CancellationTokenSource? _cancelToken;
 		private IntPtr _renderParamsPtr;
@@ -47,14 +52,17 @@ namespace AlphaChannel
 		private bool _closed = true;
 		private Thread? _eventThread;
 
-		public void Initialize(int width, int height, Texture2D? drawDeviceTexture, CancellationTokenSource cancelToken)
+		public void Initialize(int width, int height, Texture2D? targetTexture, CancellationTokenSource cancelToken)
 		{
 			_width = width;
 			_height = height;
 			_cancelToken = cancelToken;
-			_targetTexture = drawDeviceTexture;
+			_targetTexture = targetTexture;
 
-			_bufferPtr = Marshal.AllocHGlobal(width * height * 4);
+			_frameBytes = width * height * 4;
+			_bufferPtr = Marshal.AllocHGlobal(_frameBytes);
+			_snapA = Marshal.AllocHGlobal(_frameBytes);
+			_snapB = Marshal.AllocHGlobal(_frameBytes);
 
 			_mpvCtx = mpv_create();
 			_ = mpv_set_option_string(_mpvCtx, "vo", "libmpv");
@@ -141,15 +149,27 @@ namespace AlphaChannel
 			{
 				int rc = mpv_render_context_render(_mpvRenderCtx, _renderParamsPtr);
 
-				if (_closed || _cancelToken!.Token.IsCancellationRequested || DxHandler.DrawDevice?.ImmediateContext == null)
+				if (_closed || _cancelToken!.Token.IsCancellationRequested)
 				{
 					return false;
 				}
 
 				if (rc == 0 && _targetTexture != null)
 				{
-					DxHandler.DrawDevice?.ImmediateContext.UpdateSubresource(_targetTexture, 0, null, _bufferPtr, _width * 4, 0);
-					DxHandler.DrawDevice?.ImmediateContext.Flush();
+					IntPtr snapshot = _useSnapA ? _snapA : _snapB;
+					_useSnapA = !_useSnapA;
+
+					unsafe
+					{
+						System.Buffer.MemoryCopy((void*)_bufferPtr, (void*)snapshot, _frameBytes, _frameBytes);
+					}
+
+					Texture2D texture = _targetTexture;
+					int width = _width;
+					DxHandler.RunOnRenderThread(RenderKey, () =>
+					{
+						DxHandler.Device?.ImmediateContext.UpdateSubresource(texture, 0, null, snapshot, width * 4, 0);
+					});
 					return true;
 				}
 				else
@@ -168,6 +188,7 @@ namespace AlphaChannel
 		{
 			_closed = true;
 			_cancelToken!.Cancel();
+			DxHandler.CancelRenderThreadWork(RenderKey);
 			Task.Run(() =>
 			{
 				lock (_mpvLock)
@@ -181,7 +202,7 @@ namespace AlphaChannel
 					{
 						_updateCallbackHandle.Free();
 					}
-					
+
 					if (_mpvCtx != IntPtr.Zero)
 					{
 						mpv_terminate_destroy(_mpvCtx);
@@ -192,6 +213,16 @@ namespace AlphaChannel
 					{
 						Marshal.FreeHGlobal(_bufferPtr);
 						_bufferPtr = IntPtr.Zero;
+					}
+					if (_snapA != IntPtr.Zero)
+					{
+						Marshal.FreeHGlobal(_snapA);
+						_snapA = IntPtr.Zero;
+					}
+					if (_snapB != IntPtr.Zero)
+					{
+						Marshal.FreeHGlobal(_snapB);
+						_snapB = IntPtr.Zero;
 					}
 
 					Marshal.FreeHGlobal(_sizePtr);
@@ -311,11 +342,24 @@ namespace AlphaChannel
 
 		public void Seek(int seconds)
 		{
-			if (!_closed)
+			if (_closed)
 			{
-				lock (_mpvLock)
-				{	
-					_ = mpv_command(_mpvCtx, ["seek", seconds.ToString(System.Globalization.CultureInfo.InvariantCulture), "absolute", null!]);
+				Services.Log.Debug($"[MPV] Seek to {seconds}s ignored: player closed");
+				return;
+			}
+
+			lock (_mpvLock)
+			{
+				if (_mpvCtx == IntPtr.Zero)
+				{
+					Services.Log.Debug($"[MPV] Seek to {seconds}s ignored: no mpv context");
+					return;
+				}
+
+				int rc = mpv_command(_mpvCtx, ["seek", seconds.ToString(System.Globalization.CultureInfo.InvariantCulture), "absolute", null!]);
+				if (rc < 0)
+				{
+					Services.Log.Warning($"[MPV] Seek to {seconds}s failed: rc={rc}");
 				}
 			}
 		}

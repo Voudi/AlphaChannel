@@ -184,7 +184,7 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 		private const int PIXFMT_RGB565 = 2; //0=0RGB1555 1=XRGB8888 2=RGB565
 		#endregion
 
-		internal bool Load(Texture2D? drawDeviceTexture, string romPath)
+		internal bool Load(Texture2D? targetTexture, string romPath)
 		{
 			if (_running)
 			{
@@ -202,13 +202,13 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 				_instance = this;
 				_cancel = new CancellationTokenSource();
 
-				_targetTexture = drawDeviceTexture;
-				Services.Log.Debug($"[SNES9X] diag: using shared draw-device texture, null={_targetTexture == null}");
+				_targetTexture = targetTexture;
+				Services.Log.Debug($"[SNES9X] diag: using target texture, null={_targetTexture == null}");
 
-				if (_targetTexture != null && DxHandler.DrawDevice != null)
+				if (_targetTexture != null && DxHandler.Device != null)
 				{
 					Services.Log.Debug("[SNES9X] diag: constructing CrtLottesScaler");
-					_scaler = new CrtLottesScaler(DxHandler.DrawDevice, _targetTexture);
+					_scaler = new CrtLottesScaler(DxHandler.Device, _targetTexture);
 					Services.Log.Debug("[SNES9X] diag: CrtLottesScaler constructed");
 				}
 
@@ -463,11 +463,9 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 		{
 			try
 			{
-				var self = _instance;
+				Snes9xRenderer? self = _instance;
 				if (self == null || data == IntPtr.Zero) { return; }
-				var ctx = DxHandler.DrawDevice?.ImmediateContext;
-				if (ctx == null) { return;}
-				self._scaler?.Blit(ctx, data, (int)width, (int)height, (int)pitch);
+				self._scaler?.Submit(data, (int)width, (int)height, (int)pitch);
 			}
 			catch { }
 		}
@@ -584,6 +582,9 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 	internal sealed class CrtLottesScaler : IDisposable
 	{
 		private const int SrcMaxW = 512, SrcMaxH = 480;
+		private const int SrcMaxBytes = SrcMaxW * SrcMaxH * 2; //RGB565, worst case pitch*height
+
+		private const string RenderKey = "snes";
 
 		private readonly Texture2D _src;
 		private readonly ShaderResourceView _srv;
@@ -595,6 +596,10 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 		private readonly int _dstW, _dstH;
 		private readonly Texture2D _privateRt;
 		private readonly Texture2D _shared;
+
+		private readonly IntPtr _snapA = Marshal.AllocHGlobal(SrcMaxBytes);
+		private readonly IntPtr _snapB = Marshal.AllocHGlobal(SrcMaxBytes);
+		private bool _useSnapA = true;
 
 		internal float MaskStrength = 0.30f; //intensity
 		internal float ScanBeam = 2.5f;
@@ -714,43 +719,107 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 				BindFlags.ConstantBuffer, CpuAccessFlags.None, ResourceOptionFlags.None, 0);
 		}
 
-		internal void Blit(DeviceContext ctx, IntPtr data, int w, int h, int pitch)
+		//Called from the emulation thread. 'data' is only valid for the duration of this call (owned by the
+		//libretro core), so we snapshot it here and defer the actual D3D work to the game's own render thread.
+		internal unsafe void Submit(IntPtr data, int w, int h, int pitch)
 		{
-			var region = new ResourceRegion(0, 0, 0, w, h, 1);
-			ctx.UpdateSubresource(_src, 0, region, data, pitch, 0);
-
-			var p = new CrtParams
+			int bytes = pitch * h;
+			if (bytes <= 0 || bytes > SrcMaxBytes)
 			{
-				UvScale = new RawVector2((float)w / SrcMaxW, (float)h / SrcMaxH),
-				SrcSize = new RawVector2(w, h),
-				OutSize = new RawVector2(_dstW, _dstH),
-				MaskStrength = MaskStrength,
-				ScanBeam = ScanBeam
-			};
-			ctx.UpdateSubresource(ref p, _cbuf);
+				return;
+			}
 
-			ctx.OutputMerger.SetRenderTargets(_rtv);
-			ctx.ClearRenderTargetView(_rtv, new RawColor4(0, 0, 0, 1));
-			float arW = Plugin.ScreenHeight * 4f / 3f;
-			float x = (_dstW - arW) / 2f;
-			ctx.Rasterizer.SetViewport(x, 0, arW, _dstH);
-			ctx.InputAssembler.InputLayout = null;
-			ctx.InputAssembler.PrimitiveTopology = PrimitiveTopology.TriangleList;
-			ctx.VertexShader.Set(_vs);
-			ctx.VertexShader.SetConstantBuffer(0, _cbuf);
-			ctx.PixelShader.Set(_ps);
-			ctx.PixelShader.SetConstantBuffer(0, _cbuf);
-			ctx.PixelShader.SetShaderResource(0, _srv);
-			ctx.PixelShader.SetSampler(0, _sampler);
-			ctx.Draw(3, 0);
+			IntPtr snapshot = _useSnapA ? _snapA : _snapB;
+			_useSnapA = !_useSnapA;
+			System.Buffer.MemoryCopy((void*)data, (void*)snapshot, SrcMaxBytes, bytes);
 
-			ctx.OutputMerger.ResetTargets();
-			ctx.CopyResource(_privateRt, _shared);
-			ctx.Flush();
+			DxHandler.RunOnRenderThread(RenderKey, () =>
+			{
+				if (DxHandler.Device != null)
+				{
+					Blit(DxHandler.Device.ImmediateContext, snapshot, w, h, pitch);
+				}
+			});
+		}
+
+		//Runs on the game's own render thread/context (via DxHandler.RunOnRenderThread) - save and restore
+		//whatever pipeline state we touch so the game's own next draw calls aren't affected.
+		private void Blit(DeviceContext ctx, IntPtr data, int w, int h, int pitch)
+		{
+			RawViewportF prevViewport = ctx.Rasterizer.GetViewports<RawViewportF>()[0];
+			RenderTargetView[] prevRtvs = ctx.OutputMerger.GetRenderTargets(1, out DepthStencilView? prevDsv);
+			RasterizerState? prevRs = ctx.Rasterizer.State;
+			BlendState? prevBlend = ctx.OutputMerger.BlendState;
+			DepthStencilState? prevDss = ctx.OutputMerger.DepthStencilState;
+			VertexShader? prevVs = ctx.VertexShader.Get();
+			PixelShader? prevPs = ctx.PixelShader.Get();
+			InputLayout? prevIl = ctx.InputAssembler.InputLayout;
+			PrimitiveTopology prevTopo = ctx.InputAssembler.PrimitiveTopology;
+
+			try
+			{
+				var region = new ResourceRegion(0, 0, 0, w, h, 1);
+				ctx.UpdateSubresource(_src, 0, region, data, pitch, 0);
+
+				var p = new CrtParams
+				{
+					UvScale = new RawVector2((float)w / SrcMaxW, (float)h / SrcMaxH),
+					SrcSize = new RawVector2(w, h),
+					OutSize = new RawVector2(_dstW, _dstH),
+					MaskStrength = MaskStrength,
+					ScanBeam = ScanBeam
+				};
+				ctx.UpdateSubresource(ref p, _cbuf);
+
+				ctx.OutputMerger.SetRenderTargets(_rtv);
+				ctx.ClearRenderTargetView(_rtv, new RawColor4(0, 0, 0, 1));
+				float arW = Plugin.ScreenHeight * 4f / 3f;
+				float x = (_dstW - arW) / 2f;
+				ctx.Rasterizer.SetViewport(x, 0, arW, _dstH);
+				ctx.Rasterizer.State = null;
+				ctx.OutputMerger.BlendState = null;
+				ctx.OutputMerger.DepthStencilState = null;
+				ctx.InputAssembler.InputLayout = null;
+				ctx.InputAssembler.PrimitiveTopology = PrimitiveTopology.TriangleList;
+				ctx.VertexShader.Set(_vs);
+				ctx.VertexShader.SetConstantBuffer(0, _cbuf);
+				ctx.PixelShader.Set(_ps);
+				ctx.PixelShader.SetConstantBuffer(0, _cbuf);
+				ctx.PixelShader.SetShaderResource(0, _srv);
+				ctx.PixelShader.SetSampler(0, _sampler);
+				ctx.Draw(3, 0);
+
+				ctx.OutputMerger.ResetTargets();
+				ctx.CopyResource(_privateRt, _shared);
+			}
+			finally
+			{
+				ctx.Rasterizer.SetViewport(prevViewport);
+				ctx.OutputMerger.SetRenderTargets(prevDsv, prevRtvs);
+				foreach (RenderTargetView? rtv in prevRtvs)
+				{
+					rtv?.Dispose();
+				}
+				prevDsv?.Dispose();
+
+				ctx.Rasterizer.State = prevRs; prevRs?.Dispose();
+				ctx.OutputMerger.BlendState = prevBlend; prevBlend?.Dispose();
+				ctx.OutputMerger.DepthStencilState = prevDss; prevDss?.Dispose();
+
+				ctx.VertexShader.Set(prevVs); prevVs?.Dispose();
+				ctx.PixelShader.Set(prevPs); prevPs?.Dispose();
+				ctx.InputAssembler.InputLayout = prevIl; prevIl?.Dispose();
+				ctx.InputAssembler.PrimitiveTopology = prevTopo;
+			}
 		}
 
 		public void Dispose()
 		{
+			DxHandler.CancelRenderThreadWork(RenderKey);
+
+			Marshal.FreeHGlobal(_snapA);
+			Marshal.FreeHGlobal(_snapB);
+
 			_cbuf.Dispose();
 			_sampler.Dispose();
 			_ps.Dispose();

@@ -29,8 +29,6 @@ internal sealed class Core : IDisposable
 	private Snes9xRenderer? _snesRenderer;
 	private readonly Texture2D _screenTexture;
 	private readonly Texture2D _snesScreenTexture;
-	private readonly Texture2D? _screenTextureDraw;
-	private readonly Texture2D? _snesScreenTextureDraw;
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
 	{
 		Width = Plugin.ScreenWidth,
@@ -42,7 +40,7 @@ internal sealed class Core : IDisposable
 		CpuAccessFlags = CpuAccessFlags.None,
 		SampleDescription = new SampleDescription(1, 0),
 		Usage = ResourceUsage.Default,
-		OptionFlags = ResourceOptionFlags.Shared
+		OptionFlags = ResourceOptionFlags.None
 	};
 	private static Texture2DDescription _snesTexture2dDescription = new Texture2DDescription
 	{
@@ -55,7 +53,7 @@ internal sealed class Core : IDisposable
 		CpuAccessFlags = CpuAccessFlags.None,
 		SampleDescription = new SampleDescription(1, 0),
 		Usage = ResourceUsage.Default,
-		OptionFlags = ResourceOptionFlags.Shared
+		OptionFlags = ResourceOptionFlags.None
 	};
 	private CancellationTokenSource _renderCancellation = new();
 
@@ -80,15 +78,6 @@ internal sealed class Core : IDisposable
 
 		_screenTexture = new Texture2D(DxHandler.Device, _texture2dDescription);
 		_snesScreenTexture = new Texture2D(DxHandler.Device, _snesTexture2dDescription);
-
-		using (var res = _screenTexture.QueryInterface<SharpDX.DXGI.Resource>())
-		{
-			_screenTextureDraw = DxHandler.DrawDevice?.OpenSharedResource<Texture2D>(res.SharedHandle);
-		}
-		using (var res = _snesScreenTexture.QueryInterface<SharpDX.DXGI.Resource>())
-		{
-			_snesScreenTextureDraw = DxHandler.DrawDevice?.OpenSharedResource<Texture2D>(res.SharedHandle);
-		}
 
 		_getResourceSyncHook = Services.InteropProvider.HookFromAddress<ResourceManager.Delegates.GetResourceSync>(ResourceManager.Addresses.GetResourceSync.Value, GetResourceSyncDetour);
 		_textureOnLoadHook = Services.InteropProvider.HookFromAddress<Texture.Delegates.InitializeContents>(Texture.Addresses.InitializeContents.Value, TexOnLoadDetour);
@@ -179,7 +168,7 @@ internal sealed class Core : IDisposable
 					return;
 				}
 				_mpvRenderer = new MpvRenderer();
-				_mpvRenderer.Initialize(Plugin.ScreenWidth, Plugin.ScreenHeight, _screenTextureDraw, _renderCancellation);
+				_mpvRenderer.Initialize(Plugin.ScreenWidth, Plugin.ScreenHeight, _screenTexture, _renderCancellation);
 				_mpvRenderer.Play(url, playbackPosition, isPlaying);
 				_activeEntityId = entityId;
 				while (true)
@@ -323,7 +312,7 @@ internal sealed class Core : IDisposable
 			{
 				AddSnesPath(path);
 				_snesControlsEnabled = true;
-				_isPlayingSnes = _snesRenderer.Load(_snesScreenTextureDraw, path);
+				_isPlayingSnes = _snesRenderer.Load(_snesScreenTexture, path);
 				_activeEntityId = entityId;
 			}
 			Services.Log.Debug("Starting ROM");
@@ -568,7 +557,6 @@ internal sealed class Core : IDisposable
 			_textureOnLoadHook.Enable(); //Enable Texturehook only for the duration of the specific Resource Load, as hooking Textures from Kernel is unsafe and expensive
 			ResourceHandle* ret = _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown, unkDebugPtr, unkDebugInt);
 			_textureOnLoadHook.Disable();
-			Services.Log.Debug("Screen Texture load attempt:" + path.ToString());
 			_texCase = 0;
 			return ret;
 		}
@@ -613,6 +601,7 @@ internal sealed class Core : IDisposable
 
 					if (texture is not { IsDisposed: false })
 					{
+						Services.Log.Debug("New Texture detected, but our own texture is disposed, skipping");
 						return tex;
 					}
 					
@@ -625,10 +614,13 @@ internal sealed class Core : IDisposable
 
 					if (_views.TryGetValue(key, out var oldView) && (nint)thisPtr->D3D11Texture2D == texture.NativePointer)
 					{
+						Services.Log.Debug("New Texture detected, but already hooked, skipping");
 						//Detected view on this
 						return tex;
 					}
 
+					Services.Log.Debug("New Texture detected, assigning...");
+					
 					var newView = new ShaderResourceView(DxHandler.Device, texture,
 											new ShaderResourceViewDescription
 											{
@@ -639,27 +631,11 @@ internal sealed class Core : IDisposable
 
 					_views[key] = newView;
 
-					nint oldTexPtr = (nint)thisPtr->D3D11Texture2D;
-					nint oldSrvPtr = (nint)thisPtr->D3D11ShaderResourceView;
-
 					Marshal.AddRef(texture.NativePointer);
 					Marshal.AddRef(newView.NativePointer);
 
 					thisPtr->D3D11Texture2D = (void*)texture.NativePointer;
 					thisPtr->D3D11ShaderResourceView = (void*)newView.NativePointer;
-
-					//Release the old TX and SRV
-					Marshal.AddRef(oldTexPtr);
-					int texCount = Marshal.Release(oldTexPtr);
-					Marshal.AddRef(oldSrvPtr);
-					int srvCount = Marshal.Release(oldSrvPtr);
-
-					if (texCount == 1) {
-						Marshal.Release(oldTexPtr);
-					}
-					if (srvCount == 1) { 
-						Marshal.Release(oldSrvPtr);
-					}
 			}
 
 			return tex;
@@ -690,10 +666,6 @@ internal sealed class Core : IDisposable
 		//Do not clean up Texture2D and ShaderResourceView as they may still be part of the currently running VFX
 		//Instead just let it stay in the game until it eventually closes, its not growing anyway
 		_views.Clear();
-
-		//Our own opened views on DxHandler.DrawDevice, not shared with the game - safe to dispose here.
-		_screenTextureDraw?.Dispose();
-		_snesScreenTextureDraw?.Dispose();
 
 		GC.SuppressFinalize(this);
 	}

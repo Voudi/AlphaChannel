@@ -1,62 +1,77 @@
+using System.Collections.Concurrent;
+using Dalamud.Hooking;
 using Dalamud.Plugin;
-using SharpDX.DXGI;
 using D3D11 = SharpDX.Direct3D11;
+using GfxKernel = FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
 
 namespace AlphaChannel;
 
 internal static class DxHandler
 {
 	internal static D3D11.Device? Device { get; private set; }
-	internal static D3D11.Device? DrawDevice { get; private set; }
-	internal static long AdapterLuid { get; private set; }
+
+	private static readonly ConcurrentDictionary<string, Action> _pendingRenderWork = new();
+
+	private unsafe delegate int PresentDelegate(void* swapChain, uint syncInterval, uint flags);
+	private static Hook<PresentDelegate>? _presentHook;
 
 	internal static void Initialise(IDalamudPluginInterface pluginInterface)
 	{
 		Device = new D3D11.Device(pluginInterface.UiBuilder.DeviceHandle);
 
-		// Get the game's device adapter, we'll need that as a reference for the render process.
-		Device? dxgiDevice = Device.QueryInterface<Device>();
-		AdapterLuid = dxgiDevice.Adapter.Description.Luid;
-
-		//Create a separate device for the render process, since the one we have here is shared with the game and thus can't be used for rendering without potentially interfering with the game. 
-		//This is a bit of a hack, but it works and is simpler than setting up a proper shared device.
-		DrawDevice = CreateDrawDevice();
+		HookPresent();
 	}
 
-	private static D3D11.Device? CreateDrawDevice()
+	//Queues 'work' to run once, synchronously, from inside the game's own Present call - the only point at
+	//which touching Device.ImmediateContext from outside the game's own render thread is safe.
+	//A newer call for the same key overwrites an older, not-yet-run one, since only the latest frame matters.
+	internal static void RunOnRenderThread(string key, Action work)
 	{
-		// Find the adapter matching the luid from the parent process
-		Factory1 factory = new();
-		Adapter? gameAdapter = null;
-		foreach (Adapter adapter in factory.Adapters)
-		{
-			if (adapter == null)
-			{
-				continue;
-			}
-
-			if (adapter.Description.Luid == AdapterLuid)
-			{
-				gameAdapter = adapter;
-				break;
-			}
-		}
-
-		if (gameAdapter == null)
-		{
-			string foundLuids = string.Join(",", factory.Adapters.Select(adapter => adapter.Description.Luid));
-			Console.Error.WriteLine($"FATAL: Could not find adapter matching game adapter LUID {AdapterLuid}. Found: {foundLuids}.");
-			return null;
-		}
-
-		D3D11.DeviceCreationFlags flags = D3D11.DeviceCreationFlags.BgraSupport;
-
-		return new D3D11.Device(gameAdapter, flags);
+		_pendingRenderWork[key] = work;
 	}
-	
+
+	internal static void CancelRenderThreadWork(string key)
+	{
+		_pendingRenderWork.TryRemove(key, out _);
+	}
+
+	private static unsafe void HookPresent()
+	{
+		nint swapChainPtr = (nint)GfxKernel.Device.Instance()->SwapChain->DXGISwapChain;
+		nint* vtable = *(nint**)swapChainPtr;
+		nint presentAddress = vtable[8]; //IDXGISwapChain::Present
+
+		_presentHook = Services.InteropProvider.HookFromAddress<PresentDelegate>(presentAddress, PresentDetour);
+		_presentHook.Enable();
+	}
+
+	private static unsafe int PresentDetour(void* swapChain, uint syncInterval, uint flags)
+	{
+		foreach (string key in _pendingRenderWork.Keys)
+		{
+			if (_pendingRenderWork.TryRemove(key, out Action? work))
+			{
+				try
+				{
+					work();
+				}
+				catch (Exception e)
+				{
+					Services.Log.Error($"[DxHandler] Render-thread callback '{key}' failed: {e.Message}");
+				}
+			}
+		}
+
+		return _presentHook!.Original(swapChain, syncInterval, flags);
+	}
+
 	public static void Dispose()
 	{
+		_presentHook?.Disable();
+		_presentHook?.Dispose();
+		_presentHook = null;
+		_pendingRenderWork.Clear();
+
 		Device = null; //Do not dispose this device, as it's owned by the game process.
-		DrawDevice?.Dispose();
 	}
 }
