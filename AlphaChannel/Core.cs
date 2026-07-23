@@ -28,6 +28,7 @@ internal sealed class Core : IDisposable
 
 	private MpvRenderer? _mpvRenderer;
 	private Snes9xRenderer? _snesRenderer;
+	private readonly ScreenPainter _screenPainter;
 	private readonly Texture2D _screenTexture;
 	private readonly Texture2D _snesScreenTexture;
 	private static Texture2DDescription _texture2dDescription = new Texture2DDescription
@@ -79,6 +80,7 @@ internal sealed class Core : IDisposable
 
 		_screenTexture = new Texture2D(DxHandler.Device, _texture2dDescription);
 		_snesScreenTexture = new Texture2D(DxHandler.Device, _snesTexture2dDescription);
+		_screenPainter = new ScreenPainter();
 
 		_getResourceSyncHook = Services.InteropProvider.HookFromAddress<ResourceManager.Delegates.GetResourceSync>(ResourceManager.Addresses.GetResourceSync.Value, GetResourceSyncDetour);
 		_textureOnLoadHook = Services.InteropProvider.HookFromAddress<Texture.Delegates.InitializeContents>(Texture.Addresses.InitializeContents.Value, TexOnLoadDetour);
@@ -133,6 +135,7 @@ internal sealed class Core : IDisposable
 			_mpvRenderer = null;
 		}
 		PenumbraIPC.RemoveTempMod("screenvfx");
+		//_screenPainter.SetTarget(null, null);
 	}
 
 	internal void PlayVideo(uint entityId, string url, int playbackPosition = 0, bool isPlaying = true)
@@ -527,6 +530,9 @@ internal sealed class Core : IDisposable
 		if (_activeEntityId == ownerId)
 		{
 			RefreshActorVFX(Services.LocalPlayerAddr, companion.Address); //This TV is active, play its VFX
+
+			Texture2D screenTexture = _isPlayingSnes ? _snesScreenTexture : _screenTexture;
+			//_screenPainter.SetTarget(screenTexture, companion);
 		}
 	}
 
@@ -677,6 +683,7 @@ internal sealed class Core : IDisposable
 
 		_mpvRenderer?.Dispose();
 		_snesRenderer?.Dispose();
+		_screenPainter.Dispose();
 
 		_textureOnLoadHook.Disable();
 		_textureOnLoadHook.Dispose();

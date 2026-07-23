@@ -827,7 +827,7 @@ internal sealed class ControlWindow : Window, IDisposable
 
 		ImGui.Text("mpv-winbuild");
 		ImGui.SameLine();
-		if (false && mpvUpdateAvailable) //Deactivate updating from inside the plugin for now
+		if (mpvUpdateAvailable) //Deactivate updating from inside the plugin for now
 		{
 			if (Button(installingMPV ? "Installing..." : "Install", "mpvUpdate", disabled: installingMPV))
 			{
@@ -858,7 +858,7 @@ internal sealed class ControlWindow : Window, IDisposable
 
 		ImGui.Text("yt-dlp");
 		ImGui.SameLine();
-		if (false && ytdlpUpdateAvailable)
+		if (ytdlpUpdateAvailable)
 		{
 			if (Button(installingYTDLP ? "Installing..." : "Install", "ytdlpUpdate", disabled: installingYTDLP))
 			{
@@ -889,7 +889,7 @@ internal sealed class ControlWindow : Window, IDisposable
 
 		ImGui.Text("snes9x");
 		ImGui.SameLine();
-		if (false && snesInstallAvailable)
+		if (snesInstallAvailable)
 		{
 			if (Button(installingSNES9X ? "Installing..." : "Install", "snes9xUpdate", disabled: installingSNES9X))
 			{
