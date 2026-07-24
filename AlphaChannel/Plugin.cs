@@ -27,7 +27,6 @@ public class Plugin : IDalamudPlugin, IDisposable
 	internal string AssemblyLocationSnes { get; set; }
 	internal string ROMSLocationSnesDir => Path.Combine(ConfigDir, "roms");
 	internal Dictionary<string, string> PenumbraTempModPaths { get; set;}
-	internal Dictionary<string, string> PenumbraTempScreenPaths { get; set;}
 	internal Dictionary<string, string> PenumbraQRPaths {get; set;}
 
 	internal WindowSystem WindowSystem { get; } = new(PluginName);
@@ -64,7 +63,6 @@ public class Plugin : IDalamudPlugin, IDisposable
 		AssemblyLocationYTDLP = LibResources.GetLocationYTDLP() ?? string.Empty;
 		AssemblyLocationSnes = LibResources.GetLocationSNES9X() ?? string.Empty;
 		PenumbraTempModPaths = LibResources.LoadPenumbraModResources();
-		PenumbraTempScreenPaths = LibResources.LoadPenumbraScreenResources();
 		PenumbraQRPaths = LibResources.LoadPenumbraQRResources();
 
 		Resources.NativeLoader.Register(this);

@@ -146,62 +146,6 @@ internal sealed class Resources : IDisposable
 		return FixTempCopyGamePaths(paths); //just return paths after the bug is fixed
 	}
 
-	internal Dictionary<string, string> LoadPenumbraScreenResources()
-	{
-		Dictionary<string, string> paths = [];
-
-		string oldPath = Path.Combine(_plugin.PluginDir, "resources", "alphachannelscreentex.atex");
-		if (File.Exists(oldPath))
-		{
-			string path = Path.Combine(_plugin.PluginDir, "resources", "alphachannelscreentex_"+_plugin.PluginSessionGUID+".atex");
-			File.Copy(oldPath, path, true);
-			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreentex.atex", path);
-		}
-		else
-		{
-			throw new FileNotFoundException($"Required resource not found: {oldPath}");
-		}
-
-		oldPath = Path.Combine(_plugin.PluginDir, "resources", "alphachannelscreen.avfx");
-		if (File.Exists(oldPath))
-		{
-			string path = Path.Combine(_plugin.PluginDir, "resources", "alphachannelscreen_"+_plugin.PluginSessionGUID+".avfx");
-			File.Copy(oldPath, path, true);
-			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreen_"+_plugin.PluginSessionGUID+".avfx", path);
-		}
-		else
-		{
-			throw new FileNotFoundException($"Required resource not found: {oldPath}");
-		}
-
-		oldPath = Path.Combine(_plugin.PluginDir, "resources", "snesscreen.avfx");
-		if (File.Exists(oldPath))
-		{
-			string path = Path.Combine(_plugin.PluginDir, "resources", "snesscreen_"+_plugin.PluginSessionGUID+".avfx");
-			File.Copy(oldPath, path, true);
-			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreen_"+_plugin.PluginSessionGUID+".avfx", path);
-		}
-		else
-		{
-			throw new FileNotFoundException($"Required resource not found: {oldPath}");
-		}
-
-		oldPath = Path.Combine(_plugin.PluginDir, "resources", "snesscreentex.atex");
-		if (File.Exists(oldPath))
-		{
-			string path = Path.Combine(_plugin.PluginDir, "resources", "snesscreentex_"+_plugin.PluginSessionGUID+".atex");
-			File.Copy(oldPath, path, true);
-			paths.Add("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreentex.atex", path);
-		}
-		else
-		{
-			throw new FileNotFoundException($"Required resource not found: {oldPath}");
-		}
-
-		return FixTempCopyGamePaths(paths); //no need to fix bug here since these wont need to get synced to others anyways, only use the clients vfx for the screen
-		//UPDATE: actually, this needs to be used because the sync aborts sending the other mods at the time of loading these rescources
-	}
-
 	internal Dictionary<string, string> LoadPenumbraModResources()
 	{
 		Dictionary<string, string> paths = new () {

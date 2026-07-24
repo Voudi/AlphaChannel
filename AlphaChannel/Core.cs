@@ -77,7 +77,7 @@ internal sealed class Core : IDisposable
 	private bool _lastIdle = true;
 	private readonly List<string> _recentSnesPaths = [];
 
-	internal unsafe Core(Plugin plugin)
+	internal Core(Plugin plugin)
 	{
 		_plugin = plugin;
 
@@ -86,13 +86,6 @@ internal sealed class Core : IDisposable
 		_screenTexture = new Texture2D(DxHandler.Device, _texture2dDescription);
 		_snesScreenTexture = new Texture2D(DxHandler.Device, _snesTexture2dDescription);
 		_screenPainter = new ScreenPainter();
-
-		_getResourceSyncHook = Services.InteropProvider.HookFromAddress<ResourceManager.Delegates.GetResourceSync>(ResourceManager.Addresses.GetResourceSync.Value, GetResourceSyncDetour);
-		_textureOnLoadHook = Services.InteropProvider.HookFromAddress<Texture.Delegates.InitializeContents>(Texture.Addresses.InitializeContents.Value, TexOnLoadDetour);
-		nint actorVfxCreateAddress = Services.SigScanner.ScanText(ActorVfxCreateSig);
-		_actorVfxCreate = Marshal.GetDelegateForFunctionPointer<ActorVfxCreateDelegate>(actorVfxCreateAddress);
-
-		_getResourceSyncHook.Enable();
 
 		_recentSnesPaths.AddRange(plugin.Config.RecentPaths);
 
@@ -488,111 +481,86 @@ internal sealed class Core : IDisposable
 
 		bool playerCarbuncleFound = false;
 
-		bool hookEnabled = !_getResourceSyncHook.IsDisposed && _getResourceSyncHook.IsEnabled;
-		if (hookEnabled) //Only check for stuff while the hook is activated, which is outside from duties
-		{
-			List<uint> visitedTvs = [];
-			List<uint> visitedCompanions = [];
+		List<uint> visitedTvs = [];
+		List<uint> visitedCompanions = [];
 
-			foreach (var item in Services.Objects.Where(x => x is IBattleNpc && x.BaseId == 13498 && x.ObjectKind is ObjectKind.BattleNpc))
+		foreach (var item in Services.Objects.Where(x => x is IBattleNpc && x.BaseId == 13498 && x.ObjectKind is ObjectKind.BattleNpc))
+		{
+			if (item.Address == IntPtr.Zero)
 			{
-				if (item.Address == IntPtr.Zero)
+				continue;
+			}
+			
+			var character = (Character*)item.Address;
+			if (character != null)
+			{
+				uint ownerId = character->CompanionOwnerId;
+				_companionOwners.TryAdd(ownerId, item);
+				visitedCompanions.Add(ownerId);
+				if(character->DrawObject != null)
 				{
-					continue;
-				}
-				
-				var character = (Character*)item.Address;
-				if (character != null)
-				{
-					uint ownerId = character->CompanionOwnerId;
-					_companionOwners.TryAdd(ownerId, item);
-					visitedCompanions.Add(ownerId);
-					if(character->DrawObject != null)
+					if (character->DrawObject->GetObjectType() == ObjectType.CharacterBase)
 					{
-						if (character->DrawObject->GetObjectType() == ObjectType.CharacterBase)
-						{
-							try
-							{ 
-								var tvDraw = (CharacterBase*)character->DrawObject;
-								if (tvDraw->Models[0] is not null) //TODO: find a better checking method
-								{ //Actually, its not so bad checking it like this, wysiwyg
-									if (tvDraw->Models[0]->MaterialCount >= 1)
+						try
+						{ 
+							var tvDraw = (CharacterBase*)character->DrawObject;
+							if (tvDraw->Models[0] is not null) //TODO: find a better checking method
+							{ //Actually, its not so bad checking it like this, wysiwyg
+								if (tvDraw->Models[0]->MaterialCount >= 1)
+								{
+									if (tvDraw->Models[0]->Materials[0] is not null)
 									{
-										if (tvDraw->Models[0]->Materials[0] is not null)
+										if (tvDraw->Models[0]->Materials[0]->TextureCount >= 4)
 										{
-											if (tvDraw->Models[0]->Materials[0]->TextureCount >= 4)
+											if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture is not null)
 											{
-												if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture is not null)
+												if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture is not null)
 												{
-													if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture is not null)
-													{
-														visitedTvs.Add(ownerId);
-														CheckoutCompanion(ownerId, item);
-														continue;
-													}
+													visitedTvs.Add(ownerId);
+													CheckoutCompanion(ownerId, item);
+													continue;
 												}
 											}
 										}
 									}
 								}
 							}
-							catch (Exception) { }
 						}
+						catch (Exception) { }
 					}
+				}
 
-					if (localPlayerId == ownerId)
-					{
-						playerCarbuncleFound = true;
-					}
+				if (localPlayerId == ownerId)
+				{
+					playerCarbuncleFound = true;
+				}
 
-					if (_tvOwners.TryGetValue(ownerId, out _)) //If entity has been recognized as TV once, keep it playing until its been removed or explicitly turned off to avoid 'sync holes'
-					{
-						visitedTvs.Add(ownerId);
-						CheckoutCompanion(ownerId, item);
-						continue;
-					}
+				if (_tvOwners.TryGetValue(ownerId, out _)) //If entity has been recognized as TV once, keep it playing until its been removed or explicitly turned off to avoid 'sync holes'
+				{
+					visitedTvs.Add(ownerId);
+					CheckoutCompanion(ownerId, item);
+					continue;
 				}
 			}
-
-			//Remove unvisited TVs
-			_tvOwners.Where(owner => !visitedTvs.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
-			{
-				if (_activeEntityId == ownerId)
-				{
-					Services.Log.Warning("Stopping Vid owner not found...");
-					StopVideo();
-				}
-				_tvOwners.Remove(ownerId);
-			});
-
-			//Remove unvisited Companions
-			_companionOwners.Where(owner => !visitedCompanions.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
-			{
-				_companionOwners.Remove(ownerId);
-				_tvOwners.Remove(ownerId);
-			});
 		}
 
-		//Disable hook during duties
-		bool dutyStarted = Services.DutyState.IsDutyStarted;
-		if (dutyStarted && hookEnabled)
+		//Remove unvisited TVs
+		_tvOwners.Where(owner => !visitedTvs.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
 		{
-			if (_activeEntityId != 0)
+			if (_activeEntityId == ownerId)
 			{
+				Services.Log.Warning("Stopping Vid owner not found...");
 				StopVideo();
 			}
-			if (!_getResourceSyncHook.IsDisposed)
-			{
-				_getResourceSyncHook.Disable();
-			}
-		}
-		else if (!dutyStarted && !hookEnabled)
+			_tvOwners.Remove(ownerId);
+		});
+
+		//Remove unvisited Companions
+		_companionOwners.Where(owner => !visitedCompanions.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
 		{
-			if (!_getResourceSyncHook.IsDisposed)
-			{
-				_getResourceSyncHook.Enable();
-			}
-		}
+			_companionOwners.Remove(ownerId);
+			_tvOwners.Remove(ownerId);
+		});
 
 		return playerCarbuncleFound;
 	}
@@ -610,146 +578,8 @@ internal sealed class Core : IDisposable
 		}
 		if (_activeEntityId == ownerId)
 		{
-			RefreshActorVFX(Services.LocalPlayerAddr, companion.Address); //This TV is active, play its VFX
-
 			Texture2D screenTexture = _isPlayingSnes ? _snesScreenTexture : _screenTexture;
 			_screenPainter.SetTarget(screenTexture, companion);
-		}
-	}
-
-	private void RefreshActorVFX(nint addrCaster, nint addrTarget)
-	{
-		if (!PenumbraIPC.CheckTempMod("screenvfx"))
-		{
-			PenumbraIPC.ApplyTempMod("screenvfx", _plugin.PenumbraTempScreenPaths);
-		}
-		else
-		{
-			lock (_screenTextureLock)
-			{
-				if(_isPlayingSnes)
-				{
-					//_actorVfxCreate?.Invoke("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreen_"+_plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
-				}
-				else
-				{
-					//_actorVfxCreate?.Invoke("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreen_"+_plugin.PluginSessionGUID+".avfx", addrCaster, addrTarget, -1, (char)0, 0, (char)0);
-				}
-			}
-		}
-	}
-
-	//https://github.com/0ceal0t/Dalamud-VFXEditor/blob/main/VFXEditor/Interop/Constants.cs
-	private const string ActorVfxCreateSig = "40 53 55 56 57 48 81 EC ?? ?? ?? ?? 0F 29 B4 24 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 ?? ?? ?? ?? 0F B6 AC 24 ?? ?? ?? ?? 0F 28 F3 49 8B F8";
-	private delegate IntPtr ActorVfxCreateDelegate(string path, IntPtr a2, IntPtr a3, float a4, char a5, ushort a6, char a7);
-	private readonly ActorVfxCreateDelegate _actorVfxCreate;
-
-
-	private readonly Hook<ResourceManager.Delegates.GetResourceSync> _getResourceSyncHook;
-	private readonly Hook<Texture.Delegates.InitializeContents> _textureOnLoadHook;
-
-	private unsafe ResourceHandle* GetResourceSyncDetour(ResourceManager* thisPtr, ResourceCategory* category, uint* type, uint* hash, CStringPointer path, void* unknown, void* unkDebugPtr, uint unkDebugInt)
-	{
-		if (path.ToString().Contains("chara/monster/m7002/obj/body/b0001/vfx/texture/alphachannelscreentex"))
-		{
-			_texCase = 1;
-		}
-		else if (path.ToString().Contains("chara/monster/m7002/obj/body/b0001/vfx/texture/snesscreentex"))
-		{
-			_texCase = 2;
-		}
-		if (_texCase > 0)
-		{
-			_textureOnLoadHook.Enable(); //Enable Texturehook only for the duration of the specific Resource Load, as hooking Textures from Kernel is unsafe and expensive
-			ResourceHandle* ret = _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown, unkDebugPtr, unkDebugInt);
-			_textureOnLoadHook.Disable();
-			_texCase = 0;
-			return ret;
-		}
-		else
-		{
-			return _getResourceSyncHook.Original(thisPtr, category, type, hash, path, unknown, unkDebugPtr, unkDebugInt);
-		}
-	}
-	
-	private readonly Lock _screenTextureLock = new();
-	private int _texCase;
-	private unsafe bool TexOnLoadDetour(Texture* thisPtr, void* contents)
-	{
-		try
-		{
-			if (thisPtr == null)
-			{
-				return _textureOnLoadHook.Original(thisPtr, contents);
-			}
-
-			uint w, h;
-			try
-			{
-				w = thisPtr->ActualWidth;
-				h = thisPtr->ActualHeight;
-			}
-			catch { return _textureOnLoadHook.Original(thisPtr, contents); }
-
-			if (w != 1920 || h != 1080)
-			{
-				return _textureOnLoadHook.Original(thisPtr, contents);
-			}
-			bool tex = _textureOnLoadHook.Original(thisPtr, contents);
-			if (!tex)
-			{
-				return tex;
-			}
-
-			lock (_screenTextureLock)
-			{
-					var texture = _texCase == 2 ? _snesScreenTexture : _screenTexture;
-
-					if (texture is not { IsDisposed: false })
-					{
-						Services.Log.Debug("New Texture detected, but our own texture is disposed, skipping");
-						return tex;
-					}
-					
-					if (DxHandler.Device is not { IsDisposed: false })
-					{
-						return tex;
-					}
-
-					nint key = (nint)thisPtr;
-
-					if (_views.TryGetValue(key, out var oldView) && (nint)thisPtr->D3D11Texture2D == texture.NativePointer)
-					{
-						Services.Log.Debug("New Texture detected, but already hooked, skipping");
-						//Detected view on this
-						return tex;
-					}
-
-					Services.Log.Debug("New Texture detected, assigning...");
-					
-					var newView = new ShaderResourceView(DxHandler.Device, texture,
-											new ShaderResourceViewDescription
-											{
-												Format = texture.Description.Format,
-												Dimension = ShaderResourceViewDimension.Texture2D,
-												Texture2D = { MipLevels = texture.Description.MipLevels }
-											});
-
-					_views[key] = newView;
-
-					Marshal.AddRef(texture.NativePointer);
-					Marshal.AddRef(newView.NativePointer);
-
-					thisPtr->D3D11Texture2D = (void*)texture.NativePointer;
-					thisPtr->D3D11ShaderResourceView = (void*)newView.NativePointer;
-			}
-
-			return tex;
-		}
-		catch (Exception ex)
-		{
-			Services.Log.Error(ex.ToString());
-			return false;
 		}
 	}
 
@@ -768,10 +598,6 @@ internal sealed class Core : IDisposable
 		_snesRenderer?.Dispose();
 		_screenPainter.Dispose();
 		Coop.Dispose();
-
-		_textureOnLoadHook.Disable();
-		_textureOnLoadHook.Dispose();
-		_getResourceSyncHook.Dispose();
 
 		//Do not clean up Texture2D and ShaderResourceView as they may still be part of the currently running VFX
 		//Instead just let it stay in the game until it eventually closes, its not growing anyway
