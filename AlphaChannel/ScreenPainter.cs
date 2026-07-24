@@ -78,8 +78,12 @@ internal sealed unsafe class ScreenPainter : IDisposable
 			Texture2D tex : register(t0);
 			SamplerState smp : register(s0);
 
-			float4 PS(VOut i) : SV_TARGET
+			float4 PS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 			{
+				if (!isFrontFace)
+				{
+					return float4(0.333, 0.333, 0.333, 1); //#555555 - back of the screen, not the (mirrored) video
+				}
 				return tex.Sample(smp, i.uv);
 			}";
 
@@ -170,7 +174,7 @@ internal sealed unsafe class ScreenPainter : IDisposable
 	//enough in the frame that the scene's opaque geometry is already there, still depth-tested against it.
 	private void DrawIfReady()
 	{
-		bool hadTargets = TryGetSceneTargets(out nint rtvPtr, out nint dsvPtr);
+		bool hadTargets = TryGetSceneTargets(out nint rtvPtr, out nint dsvPtr, out uint targetWidth, out uint targetHeight);
 		_lastHadTargets = hadTargets;
 		LogDiagnosticsIfDue();
 
@@ -226,6 +230,11 @@ internal sealed unsafe class ScreenPainter : IDisposable
 			ctx.UpdateSubresource(ref p, _cbuf);
 
 			ctx.OutputMerger.SetRenderTargets(dsv, rtv);
+			//Explicit full-target viewport - we never set this before, so whatever viewport the game's last
+			//draw call before Present left bound (could be a sub-region: UI element, shadow pass, anything)
+			//stayed active, meaning our correctly-computed NDC(0,0) landed at that viewport's center instead
+			//of the actual screen center. That's the "math is right but it's drawn in the wrong place" gap.
+			ctx.Rasterizer.SetViewport(0, 0, targetWidth, targetHeight, 0, 1);
 			ctx.InputAssembler.InputLayout = null;
 			ctx.InputAssembler.PrimitiveTopology = PrimitiveTopology.TriangleStrip;
 			ctx.Rasterizer.State = _rasterState;
@@ -260,10 +269,12 @@ internal sealed unsafe class ScreenPainter : IDisposable
 
 	//Pure memory reads - no hooking, no calling into the game. The swapchain owns exactly one back buffer
 	//and one depth buffer, each a Kernel.Texture whose mip-0 render target view doubles as its RTV or DSV.
-	private static bool TryGetSceneTargets(out nint rtvPtr, out nint dsvPtr)
+	private static bool TryGetSceneTargets(out nint rtvPtr, out nint dsvPtr, out uint width, out uint height)
 	{
 		rtvPtr = 0;
 		dsvPtr = 0;
+		width = 0;
+		height = 0;
 
 		GfxKernel.Device* device = GfxKernel.Device.Instance();
 		if (device == null || device->SwapChain == null)
@@ -280,6 +291,8 @@ internal sealed unsafe class ScreenPainter : IDisposable
 
 		rtvPtr = (nint)backBuffer->MipRenderTargets[0].D3D11RenderTargetViewOrDepthStencilView;
 		dsvPtr = (nint)depthStencil->MipRenderTargets[0].D3D11RenderTargetViewOrDepthStencilView;
+		width = device->SwapChain->Width;
+		height = device->SwapChain->Height;
 		return rtvPtr != 0 && dsvPtr != 0;
 	}
 
@@ -306,17 +319,23 @@ internal sealed unsafe class ScreenPainter : IDisposable
 		}
 
 		GfxScene.Camera* camera = &gameCamera->CameraBase.SceneCamera;
-		if (camera->RenderCamera == null)
+		FFXIVClientStructs.FFXIV.Client.Graphics.Render.Camera* renderCamera = camera->RenderCamera;
+		if (renderCamera == null)
 		{
 			return null;
 		}
 
-		//No transpose here: our shader reads worldViewProj as row_major, matching System.Numerics' own
-		//row-vector convention directly, so these need to go in as-is once M44 is corrected.
-		NumericsMatrix4x4 view = ToNumerics(camera->ViewMatrix);
-		view.M44 = 1.0f; //the raw value here isn't reliably 1, which throws off the homogeneous divide
+		//Building view/projection ourselves from plain position/angle data instead of consuming the game's
+		//raw matrices - LookAtVector is confirmed (via logging) to be the orbit target point, not a
+		//direction, and this sidesteps the row/column-major and M44 guessing entirely: all three of our
+		//matrices now come from the same System.Numerics API family, so they're guaranteed consistent.
+		Vector3 camPos = ToNumerics(camera->Position);
+		Vector3 camLookAt = ToNumerics(camera->LookAtVector);
 
-		NumericsMatrix4x4 proj = ToNumerics(camera->RenderCamera->ProjectionMatrix);
+		//Reverted: hand-written LH was demonstrably worse than System.Numerics' right-handed default, so RH
+		//goes back in. Back to isolating the camera math cleanly before touching companion transform again.
+		NumericsMatrix4x4 view = NumericsMatrix4x4.CreateLookAt(camPos, camLookAt, Vector3.UnitY);
+		NumericsMatrix4x4 proj = NumericsMatrix4x4.CreatePerspectiveFieldOfView(renderCamera->FoV, renderCamera->AspectRatio, renderCamera->NearPlane, renderCamera->FarPlane);
 
 		float yaw = _companion.Rotation;
 		Vector3 pos = _companion.Position;
@@ -327,9 +346,42 @@ internal sealed unsafe class ScreenPainter : IDisposable
 			NumericsMatrix4x4.CreateFromAxisAngle(Vector3.UnitY, yaw) *
 			NumericsMatrix4x4.CreateTranslation(pos + rotatedOffset);
 
-		LogTransformIfDue(pos, yaw, camera);
+		//Sanity check: transforming camLookAt through our own view*proj MUST yield NDC (0,0,z) by construction
+		//of the LookAt matrix, regardless of any RH/LH or FOV convention. If it doesn't, the bug is a plain
+		//code error somewhere above, not a math-convention mismatch.
+		Vector4 clipCheck = Vector4.Transform(new Vector4(camLookAt, 1f), view * proj);
+		Vector3 ndcCheck = new(clipCheck.X / clipCheck.W, clipCheck.Y / clipCheck.W, clipCheck.Z / clipCheck.W);
+
+		LogTransformIfDue(pos, yaw, camera, renderCamera, ndcCheck);
 
 		return world * view * proj;
+	}
+
+	//Standard left-handed view/projection matrices (matching D3D11's native convention), row-major for
+	//row-vector use - System.Numerics only ships right-handed equivalents.
+	private static NumericsMatrix4x4 CreateLookAtLH(Vector3 eye, Vector3 target, Vector3 up)
+	{
+		Vector3 zaxis = Vector3.Normalize(target - eye);
+		Vector3 xaxis = Vector3.Normalize(Vector3.Cross(up, zaxis));
+		Vector3 yaxis = Vector3.Cross(zaxis, xaxis);
+
+		return new NumericsMatrix4x4(
+			xaxis.X, yaxis.X, zaxis.X, 0,
+			xaxis.Y, yaxis.Y, zaxis.Y, 0,
+			xaxis.Z, yaxis.Z, zaxis.Z, 0,
+			-Vector3.Dot(xaxis, eye), -Vector3.Dot(yaxis, eye), -Vector3.Dot(zaxis, eye), 1);
+	}
+
+	private static NumericsMatrix4x4 CreatePerspectiveFovLH(float fov, float aspect, float near, float far)
+	{
+		float yScale = 1f / MathF.Tan(fov / 2f);
+		float xScale = yScale / aspect;
+
+		return new NumericsMatrix4x4(
+			xScale, 0, 0, 0,
+			0, yScale, 0, 0,
+			0, 0, far / (far - near), 1,
+			0, 0, -near * far / (far - near), 0);
 	}
 
 	//FFXIVClientStructs' Matrix4x4/Vector3 have the same explicit field layout as their System.Numerics
@@ -340,7 +392,7 @@ internal sealed unsafe class ScreenPainter : IDisposable
 	private static Vector3 ToNumerics(FFXIVClientStructs.FFXIV.Common.Math.Vector3 v)
 		=> Unsafe.As<FFXIVClientStructs.FFXIV.Common.Math.Vector3, Vector3>(ref v);
 
-	private void LogTransformIfDue(Vector3 companionPos, float companionYaw, GfxScene.Camera* camera)
+	private void LogTransformIfDue(Vector3 companionPos, float companionYaw, GfxScene.Camera* camera, FFXIVClientStructs.FFXIV.Client.Graphics.Render.Camera* renderCamera, Vector3 ndcCheck)
 	{
 		DateTime now = DateTime.UtcNow;
 		if ((now - _lastTransformLog).TotalSeconds < 1)
@@ -352,8 +404,9 @@ internal sealed unsafe class ScreenPainter : IDisposable
 		Vector3 camPos = ToNumerics(camera->Position);
 		Vector3 camLookAt = ToNumerics(camera->LookAtVector);
 		Quaternion camRot = ToNumerics(camera->Rotation);
+		Vector3? playerPos = Services.Objects.LocalPlayer?.Position;
 
-		Services.Log.Debug($"[ScreenPainter] xf: companionPos={companionPos} yaw={companionYaw:0.000} | camPos={camPos} camLookAt={camLookAt} camRot={camRot}");
+		Services.Log.Debug($"[ScreenPainter] xf: companionPos={companionPos} yaw={companionYaw:0.000} playerPos={playerPos} | camPos={camPos} camLookAt={camLookAt} camRot={camRot} | fov={renderCamera->FoV:0.000} aspect={renderCamera->AspectRatio:0.000} near={renderCamera->NearPlane:0.000} far={renderCamera->FarPlane:0.000} | ndcCheck={ndcCheck}");
 	}
 
 	private static Quaternion ToNumerics(FFXIVClientStructs.FFXIV.Common.Math.Quaternion q)
