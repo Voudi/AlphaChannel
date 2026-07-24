@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Dalamud.Game.ClientState.Objects.Types;
 using SharpDX.D3DCompiler;
 using SharpDX.Direct3D;
 using SharpDX.Direct3D11;
@@ -23,10 +22,17 @@ namespace AlphaChannel;
 //our detour logic but an environment-level conflict. So: no depth testing, the quad always draws on top.
 internal sealed unsafe class ScreenPainter : IDisposable
 {
-	//Rough starting guesses - tune live in-game until the quad lines up with the actual TV screen.
-	internal Vector3 LocalOffset = new(0f, 1.0f, 0f);
-	internal float Width = 1.0f;
-	internal float Height = 0.6f;
+	//Base quad size before Scale is applied - rough starting guess, tune live in-game.
+	private const float BaseWidth = 1.0f;
+	private const float BaseHeight = 0.6f;
+
+	//Absolute world transform for the screen quad. Unlike the old companion-relative offset, this is a
+	//fixed world position/yaw set once per "spawn" (see Core.SpawnScreenInFrontOfLocalPlayer) and updated
+	//live from either the local Settings UI or a remote player's synced state - it does not track any
+	//game object's movement afterwards.
+	internal Vector3 WorldPosition;
+	internal float WorldYaw;
+	internal float Scale = 1.0f;
 
 	private readonly VertexShader _vs;
 	private readonly PixelShader _ps;
@@ -37,7 +43,6 @@ internal sealed unsafe class ScreenPainter : IDisposable
 
 	private Texture2D? _texture;
 	private ShaderResourceView? _srv;
-	private IGameObject? _companion;
 
 	//Wrapping the swapchain's own persistent back buffer/depth buffer views via SharpDX AddRefs/Releases them.
 	//Doing that fresh every single frame (60+ times/sec) tears down the engine's own refcount on objects it
@@ -119,20 +124,17 @@ internal sealed unsafe class ScreenPainter : IDisposable
 		DxHandler.OnPresent += DrawIfReady;
 	}
 
-	//Called from Core whenever the active video texture / target TV changes. Pass null to stop painting.
-	internal void SetTarget(Texture2D? texture, IGameObject? companion)
+	//Called from Core whenever the active video texture changes. Pass null to stop painting.
+	internal void SetTarget(Texture2D? texture)
 	{
-		//Compare by address, not reference - the object table may hand out a fresh wrapper instance for the
-		//same underlying actor on every scan, so reference equality alone would never skip the SRV rebuild.
-		if (ReferenceEquals(texture, _texture) && companion?.Address == _companion?.Address)
+		if (ReferenceEquals(texture, _texture))
 		{
-			return; //Nothing changed - avoid recreating the SRV on every 1s companion scan.
+			return; //Nothing changed.
 		}
 
 		_srv?.Dispose();
 		_srv = null;
 		_texture = texture;
-		_companion = companion;
 
 		if (texture != null)
 		{
@@ -145,11 +147,20 @@ internal sealed unsafe class ScreenPainter : IDisposable
 		}
 	}
 
+	//Cheap per-tick update of where/how big to draw the quad - called continuously so live Settings edits
+	//and remote-synced host movement are reflected immediately, without touching the SRV.
+	internal void SetTransform(Vector3 worldPosition, float worldYaw, float scale)
+	{
+		WorldPosition = worldPosition;
+		WorldYaw = worldYaw;
+		Scale = scale;
+	}
+
 	//Runs every frame from DxHandler's Present hook. Reads the swapchain's own current back buffer and
 	//depth buffer straight out of FFXIVClientStructs (no context hook needed) and draws into them.
 	private void DrawIfReady()
 	{
-		if (!TryGetSceneTargets(out nint rtvPtr, out nint dsvPtr, out uint targetWidth, out uint targetHeight) || _srv == null || _companion == null)
+		if (!TryGetSceneTargets(out nint rtvPtr, out nint dsvPtr, out uint targetWidth, out uint targetHeight) || _srv == null)
 		{
 			return;
 		}
@@ -266,11 +277,6 @@ internal sealed unsafe class ScreenPainter : IDisposable
 
 	private NumericsMatrix4x4? ComputeWorldViewProj()
 	{
-		if (_companion == null)
-		{
-			return null;
-		}
-
 		//The "active game camera" (Client.Game.Control.CameraManager) is a different object from the plain
 		//scene-graph camera (Client.Graphics.Scene.CameraManager) - go through the game-level camera and
 		//down into its embedded scene camera instead of grabbing the scene one directly.
@@ -301,14 +307,10 @@ internal sealed unsafe class ScreenPainter : IDisposable
 		NumericsMatrix4x4 view = NumericsMatrix4x4.CreateLookAt(camPos, camLookAt, Vector3.UnitY);
 		NumericsMatrix4x4 proj = NumericsMatrix4x4.CreatePerspectiveFieldOfView(renderCamera->FoV, renderCamera->AspectRatio, renderCamera->NearPlane, renderCamera->FarPlane);
 
-		float yaw = _companion.Rotation;
-		Vector3 pos = _companion.Position;
-		Vector3 rotatedOffset = Vector3.Transform(LocalOffset, Quaternion.CreateFromAxisAngle(Vector3.UnitY, yaw));
-
 		NumericsMatrix4x4 world =
-			NumericsMatrix4x4.CreateScale(Width, Height, 1f) *
-			NumericsMatrix4x4.CreateFromAxisAngle(Vector3.UnitY, yaw) *
-			NumericsMatrix4x4.CreateTranslation(pos + rotatedOffset);
+			NumericsMatrix4x4.CreateScale(BaseWidth * Scale, BaseHeight * Scale, 1f) *
+			NumericsMatrix4x4.CreateFromAxisAngle(Vector3.UnitY, WorldYaw) *
+			NumericsMatrix4x4.CreateTranslation(WorldPosition);
 
 		return world * view * proj;
 	}

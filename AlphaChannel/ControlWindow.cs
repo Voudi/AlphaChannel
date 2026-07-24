@@ -31,6 +31,7 @@ internal sealed class ControlWindow : Window, IDisposable
 	private readonly List<string> _videoQueue = [];
 	private string _twitchChannel = "";
 	private string _coopJoinCode = "";
+	private string _screenPresetName = "";
 	private string _activeTabName = "";
 	private string _activeVideoSource = "";
 	private float _volume = 25;
@@ -1121,6 +1122,65 @@ internal sealed class ControlWindow : Window, IDisposable
 		}
 	}
 
+	private void DrawScreenPositionSettings()
+	{
+		bool screenActive = _core.TVIsActive(Services.LocalPlayerId);
+
+		WithDisabled(!screenActive, () =>
+		{
+			Vector3 pos = _core.ScreenPosition;
+			float scale = _core.ScreenScale;
+			bool changed = false;
+
+			ImGui.SetNextItemWidth(65);
+			changed |= ImGui.InputFloat("X##screenPosX", ref pos.X);
+			ImGui.SameLine();
+			ImGui.SetNextItemWidth(65);
+			changed |= ImGui.InputFloat("Y##screenPosY", ref pos.Y);
+			ImGui.SameLine();
+			ImGui.SetNextItemWidth(65);
+			changed |= ImGui.InputFloat("Z##screenPosZ", ref pos.Z);
+
+			ImGui.SetNextItemWidth(65);
+			changed |= ImGui.InputFloat("Scale##screenScale", ref scale);
+
+			if (changed)
+			{
+				_core.SetScreenPosition(pos, scale);
+			}
+
+			ImGui.SetNextItemWidth(150);
+			ImGui.InputTextWithHint("##screenPresetName", "Preset name...", ref _screenPresetName, 50);
+			ImGui.SameLine();
+			if (Button("Save Preset", "saveScreenPreset", disabled: string.IsNullOrWhiteSpace(_screenPresetName)))
+			{
+				_core.SaveScreenPreset(_screenPresetName);
+				_screenPresetName = "";
+			}
+		});
+
+		List<ScreenPositionPreset> presets = _core.GetScreenPresets();
+		if (presets.Count > 0)
+		{
+			ImGui.Text("Saved Presets:");
+		}
+		foreach (ScreenPositionPreset preset in presets)
+		{
+			WithDisabled(!screenActive, () =>
+			{
+				if (ImGui.Button(preset.Name + "##applyScreenPreset" + preset.Name))
+				{
+					_core.ApplyScreenPreset(preset);
+				}
+			});
+			ImGui.SameLine();
+			if (IconButton(FontAwesomeIcon.Times, "removeScreenPreset" + preset.Name))
+			{
+				_core.RemoveScreenPreset(preset.Name);
+			}
+		}
+	}
+
 	private void DrawSettings()
 	{
 		ImGui.BeginChild("##scrollListHost" + _plugin.Name, new Vector2(0, 0), true);
@@ -1232,6 +1292,9 @@ internal sealed class ControlWindow : Window, IDisposable
 		{
 			_core.HideNearbyNameplates = hideNearbyNameplates;
 		}
+
+		SectionHeader("Screen Position");
+		DrawScreenPositionSettings();
 
 		SectionHeader("YouTube");
 

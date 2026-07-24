@@ -77,6 +77,15 @@ internal sealed class Core : IDisposable
 	private bool _lastIdle = true;
 	private readonly List<string> _recentSnesPaths = [];
 
+	//Default placement for a freshly (re)spawned screen: straight ahead of the local player.
+	private const float DefaultScreenSpawnDistance = 2.0f;
+	private const float DefaultScreenHeightOffset = 1.0f;
+
+	private readonly List<ScreenPositionPreset> _screenPresets = [];
+	internal Vector3 ScreenPosition { get; private set; }
+	internal float ScreenYaw { get; private set; }
+	internal float ScreenScale { get; private set; } = 1.0f;
+
 	internal Core(Plugin plugin)
 	{
 		_plugin = plugin;
@@ -88,6 +97,7 @@ internal sealed class Core : IDisposable
 		_screenPainter = new ScreenPainter();
 
 		_recentSnesPaths.AddRange(plugin.Config.RecentPaths);
+		_screenPresets.AddRange(plugin.Config.ScreenPresets);
 
 		Coop.OnRemoteInput += (port, id, pressed) => _snesRenderer?.SetButton(port, id, pressed);
 
@@ -181,7 +191,7 @@ internal sealed class Core : IDisposable
 			_mpvRenderer = null;
 		}
 		PenumbraIPC.RemoveTempMod("screenvfx");
-		_screenPainter.SetTarget(null, null);
+		_screenPainter.SetTarget(null);
 	}
 
 	internal void PlayVideo(uint entityId, string url, int playbackPosition = 0, bool isPlaying = true)
@@ -190,6 +200,8 @@ internal sealed class Core : IDisposable
 		{
 			return;
 		}
+
+		AssignScreenForSession(entityId, _screenTexture);
 
 		if (entityId == Services.LocalPlayerId)
 		{
@@ -362,6 +374,7 @@ internal sealed class Core : IDisposable
 			{
 				AddSnesPath(path);
 				_snesControlsEnabled = true;
+				AssignScreenForSession(entityId, _snesScreenTexture);
 				_isPlayingSnes = _snesRenderer.Load(_snesScreenTexture, path);
 				_snesRenderer.ApplyEffect(SnesEffect, SnesEffectMaskStrength, SnesEffectScanBeam);
 				_activeEntityId = entityId;
@@ -412,6 +425,77 @@ internal sealed class Core : IDisposable
 	{
 		return [.. _recentSnesPaths];
 	}
+
+	//Places the screen 2 units in front of (and slightly above) the local player, facing the way they're
+	//facing. Called every time the local player's own screen (re)spawns - i.e. whenever a new video/ROM
+	//session starts - never while just continuing an already-running one.
+	private void SpawnScreenInFrontOfLocalPlayer()
+	{
+		if (!Services.LocalPlayerExists)
+		{
+			return;
+		}
+
+		var localPlayer = Services.Objects.LocalPlayer!;
+		float yaw = localPlayer.Rotation;
+		Vector3 forward = Vector3.Transform(Vector3.UnitZ, Quaternion.CreateFromAxisAngle(Vector3.UnitY, yaw));
+
+		ScreenPosition = localPlayer.Position + forward * DefaultScreenSpawnDistance + new Vector3(0, DefaultScreenHeightOffset, 0);
+		ScreenYaw = yaw + MathF.PI; //Face back towards the player, not away from them.
+		ScreenScale = 1.0f;
+
+		_screenPainter.SetTransform(ScreenPosition, ScreenYaw, ScreenScale);
+	}
+
+	//Live, unsaved position/scale edit from the Settings UI - only meaningful while hosting our own screen.
+	internal void SetScreenPosition(Vector3 position, float scale)
+	{
+		ScreenPosition = position;
+		ScreenScale = scale;
+
+		if (TVIsActive(Services.LocalPlayerId))
+		{
+			_screenPainter.SetTransform(ScreenPosition, ScreenYaw, ScreenScale);
+			APIHelper?.NotifyScreenMoved();
+		}
+	}
+
+	//Applied when a remote player we're watching moves/rescales their screen (synced via IPCVideoState).
+	internal void ApplyRemoteScreenTransform(Vector3 position, float yaw, float scale)
+	{
+		_screenPainter.SetTransform(position, yaw, scale);
+	}
+
+	internal List<ScreenPositionPreset> GetScreenPresets()
+	{
+		return [.. _screenPresets];
+	}
+
+	internal void SaveScreenPreset(string name)
+	{
+		if (string.IsNullOrWhiteSpace(name))
+		{
+			return;
+		}
+
+		_screenPresets.RemoveAll(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+		_screenPresets.Add(new ScreenPositionPreset { Name = name, X = ScreenPosition.X, Y = ScreenPosition.Y, Z = ScreenPosition.Z, Scale = ScreenScale });
+
+		_plugin.Config.ScreenPresets = _screenPresets;
+		_plugin.Config.Save();
+	}
+
+	internal void RemoveScreenPreset(string name)
+	{
+		_screenPresets.RemoveAll(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+		_plugin.Config.ScreenPresets = _screenPresets;
+		_plugin.Config.Save();
+	}
+
+	internal void ApplyScreenPreset(ScreenPositionPreset preset)
+	{
+		SetScreenPosition(new Vector3(preset.X, preset.Y, preset.Z), preset.Scale);
+	}
 	internal bool IsPlayingSnes()
 	{
 		return _isPlayingSnes;
@@ -450,6 +534,32 @@ internal sealed class Core : IDisposable
 		if (CoopJoinActive && Coop.IsPaired)
 		{
 			Input.OnFrameworkUpdateAsCoopJoiner(Coop, keyUpEvents);
+		}
+	}
+
+	//Hands the painter its texture and, if this is a genuinely new session (not just the same owner's
+	//content continuing/changing), places the screen: 2 units in front of us if we're the one turning it
+	//on, or wherever its owner last synced it to if we're joining someone else's. Must run synchronously on
+	//the caller's thread, before any outgoing state broadcast (e.g. OnVideoStarted) picks up ScreenPosition -
+	//callers of PlayVideo/PlaySnes are always on the main thread already, so this is safe to do directly
+	//rather than deferring it to a per-frame poll.
+	private void AssignScreenForSession(uint entityId, Texture2D screenTexture)
+	{
+		bool isNewSession = _activeEntityId != entityId;
+		_screenPainter.SetTarget(screenTexture);
+
+		if (!isNewSession)
+		{
+			return;
+		}
+
+		if (entityId == Services.LocalPlayerId)
+		{
+			SpawnScreenInFrontOfLocalPlayer();
+		}
+		else if (APIHelper != null && APIHelper.RemoteStates.TryGetValue(entityId, out APIHelper.IPCVideoState? state))
+		{
+			ApplyRemoteScreenTransform(new Vector3(state.ScreenX, state.ScreenY, state.ScreenZ), state.ScreenYaw, state.ScreenScale);
 		}
 	}
 
@@ -572,15 +682,7 @@ internal sealed class Core : IDisposable
 
 	private void CheckoutCompanion(uint ownerId, IGameObject companion)
 	{
-		if (!_tvOwners.TryGetValue(ownerId, out _))
-		{
-			_tvOwners.Add(ownerId, companion);
-		}
-		if (_activeEntityId == ownerId)
-		{
-			Texture2D screenTexture = _isPlayingSnes ? _snesScreenTexture : _screenTexture;
-			_screenPainter.SetTarget(screenTexture, companion);
-		}
+		_tvOwners.TryAdd(ownerId, companion);
 	}
 
 	public void Dispose()

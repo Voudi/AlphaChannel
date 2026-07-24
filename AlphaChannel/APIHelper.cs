@@ -19,7 +19,12 @@ public class APIHelper
         [property: JsonRequired] string State,
         [property: JsonRequired] string Url,
         [property: JsonRequired] int PlaybackPosition,
-        [property: JsonRequired] long Timestamp);
+        [property: JsonRequired] long Timestamp,
+        [property: JsonRequired] float ScreenX,
+        [property: JsonRequired] float ScreenY,
+        [property: JsonRequired] float ScreenZ,
+        [property: JsonRequired] float ScreenYaw,
+        [property: JsonRequired] float ScreenScale);
 
     internal APIHelper(Plugin plugin, Core core, Resources resources)
     {
@@ -44,7 +49,13 @@ public class APIHelper
         int pos = (int)_core.GetInfo()[0];
         string stateStr = _core.GetPaused() ? "paused" : "playing";
 
-        return JsonConvert.SerializeObject(new IPCVideoState(stateStr, Uri.EscapeDataString(url), pos, _resources.CurrentTimeNTPNormalizedMilliseconds));
+        return JsonConvert.SerializeObject(BuildState(stateStr, Uri.EscapeDataString(url), pos));
+    }
+
+    private IPCVideoState BuildState(string state, string escapedUrl, int playbackPosition)
+    {
+        return new IPCVideoState(state, escapedUrl, playbackPosition, _resources.CurrentTimeNTPNormalizedMilliseconds,
+            _core.ScreenPosition.X, _core.ScreenPosition.Y, _core.ScreenPosition.Z, _core.ScreenYaw, _core.ScreenScale);
     }
 
     internal void SetRemoteState(nint addr, string stateJSON)
@@ -82,10 +93,13 @@ public class APIHelper
             return;
         }
 
-        state = _remoteStates[playerId.Value] = new IPCVideoState(state.State, Uri.UnescapeDataString(state.Url), state.PlaybackPosition, state.Timestamp);
+        state = _remoteStates[playerId.Value] = new IPCVideoState(state.State, Uri.UnescapeDataString(state.Url), state.PlaybackPosition, state.Timestamp,
+            state.ScreenX, state.ScreenY, state.ScreenZ, state.ScreenYaw, state.ScreenScale);
 
         if (foundState && oldState != null && _core.TVIsActive(playerId.Value))
         {
+            _core.ApplyRemoteScreenTransform(new(state.ScreenX, state.ScreenY, state.ScreenZ), state.ScreenYaw, state.ScreenScale);
+
             if (oldState.Url != state.Url && state.Url != string.Empty)
             {
                 switch (state.State)
@@ -133,7 +147,7 @@ public class APIHelper
     internal void OnVideoStarted(string url, int position, bool isPlaying)
     {
         string stateStr = isPlaying ? "playing" : "paused";
-        string json = JsonConvert.SerializeObject(new IPCVideoState(stateStr, Uri.EscapeDataString(url), position, _resources.CurrentTimeNTPNormalizedMilliseconds));
+        string json = JsonConvert.SerializeObject(BuildState(stateStr, Uri.EscapeDataString(url), position));
 
         ApiProvider.NotifyStateChange(json, json);
         _=NotifyStateDebug(json);
@@ -151,7 +165,7 @@ public class APIHelper
         if (string.IsNullOrEmpty(url)) { return; }
 
         int pos = (int)_core.GetInfo()[0];
-        string json = JsonConvert.SerializeObject(new IPCVideoState(paused ? "paused" : "playing", Uri.EscapeDataString(url), pos, _resources.CurrentTimeNTPNormalizedMilliseconds));
+        string json = JsonConvert.SerializeObject(BuildState(paused ? "paused" : "playing", Uri.EscapeDataString(url), pos));
 
         ApiProvider.NotifyStateChange(json, json);
         _=NotifyStateDebug(json);
@@ -166,7 +180,23 @@ public class APIHelper
         }
 
         string stateStr = _core.GetPaused() ? "paused" : "playing";
-        string json = JsonConvert.SerializeObject(new IPCVideoState(stateStr, Uri.EscapeDataString(url), seconds, _resources.CurrentTimeNTPNormalizedMilliseconds));
+        string json = JsonConvert.SerializeObject(BuildState(stateStr, Uri.EscapeDataString(url), seconds));
+        ApiProvider.NotifyStateChange(json, json);
+        _=NotifyStateDebug(json);
+    }
+
+    //A pure position/scale edit (Settings UI or preset apply) doesn't touch playback, so re-broadcast the
+    //current playback state as-is - just with fresh screen coordinates - rather than one of the specific
+    //video-state transitions above.
+    internal void NotifyScreenMoved()
+    {
+        string? url = _core.GetCurrentUrl();
+        if (string.IsNullOrEmpty(url)) { return; }
+
+        int pos = (int)_core.GetInfo()[0];
+        string stateStr = _core.GetPaused() ? "paused" : "playing";
+        string json = JsonConvert.SerializeObject(BuildState(stateStr, Uri.EscapeDataString(url), pos));
+
         ApiProvider.NotifyStateChange(json, json);
         _=NotifyStateDebug(json);
     }
@@ -175,7 +205,7 @@ public class APIHelper
     {
         string? url = _core.GetCurrentUrl();
         int pos = (int)_core.GetInfo()[0];
-        string json = JsonConvert.SerializeObject(new IPCVideoState("paused", url != null ? Uri.EscapeDataString(url) : string.Empty, pos, _resources.CurrentTimeNTPNormalizedMilliseconds));
+        string json = JsonConvert.SerializeObject(BuildState("paused", url != null ? Uri.EscapeDataString(url) : string.Empty, pos));
         ApiProvider.NotifyStateChange(json, json);
         _=NotifyStateDebug(json);
     }
