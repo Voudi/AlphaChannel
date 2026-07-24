@@ -130,10 +130,10 @@ internal sealed class ControlWindow : Window, IDisposable
 
 	private void DrawHeader()
 	{
-		Color(ImGuiCol.Text, RokuAccent, () => IconFont(() => ImGui.Text(FontAwesomeIcon.Tv.ToIconString())));
+		Color(ImGuiCol.Text, _rokuAccent, () => IconFont(() => ImGui.Text(FontAwesomeIcon.Tv.ToIconString())));
 		ImGui.SameLine();
-		Color(ImGuiCol.Text, RokuText, () => ImGui.Text("AlphaChannel"));
-		Color(ImGuiCol.Separator, RokuAccent, () => ImGui.Separator());
+		Color(ImGuiCol.Text, _rokuText, () => ImGui.Text("AlphaChannel"));
+		Color(ImGuiCol.Separator, _rokuAccent, () => ImGui.Separator());
 		ImGui.Spacing();
 	}
 
@@ -1078,7 +1078,7 @@ internal sealed class ControlWindow : Window, IDisposable
 		{
 			ImGui.Text("Share this code:");
 			ImGui.SameLine();
-			Color(ImGuiCol.Text, RokuAccent, () => ImGui.Text(_core.Coop.RoomCode));
+			Color(ImGuiCol.Text, _rokuAccent, () => ImGui.Text(_core.Coop.RoomCode));
 			ImGui.SameLine();
 			if (IconButton(FontAwesomeIcon.Clipboard, "coopCodeCopy" + localPlayerId))
 			{
@@ -1317,14 +1317,14 @@ internal sealed class ControlWindow : Window, IDisposable
 		public void Dispose() => ImGui.PopStyleVar();
 	}
 
-	private static readonly Vector4 RokuBg = new(0.06f, 0.02f, 0.12f, 1.0f);
-	private static readonly Vector4 RokuBgChild = new(0.10f, 0.04f, 0.18f, 1.0f);
-	private static readonly Vector4 RokuPurple = new(0.40f, 0.18f, 0.58f, 1.0f);
-	private static readonly Vector4 RokuPurpleHovered = new(0.52f, 0.24f, 0.72f, 1.0f);
-	private static readonly Vector4 RokuPurpleActive = new(0.30f, 0.13f, 0.45f, 1.0f);
-	private static readonly Vector4 RokuAccent = new(0.72f, 0.42f, 0.90f, 1.0f);
-	private static readonly Vector4 RokuText = new(0.95f, 0.95f, 0.98f, 1.0f);
-	private static readonly Vector4 RokuBorder = new(0.40f, 0.18f, 0.58f, 0.6f);
+	private static readonly Vector4 _rokuBg = new(0.06f, 0.02f, 0.12f, 1.0f);
+	private static readonly Vector4 _rokuBgChild = new(0.10f, 0.04f, 0.18f, 1.0f);
+	private static readonly Vector4 _rokuPurple = new(0.40f, 0.18f, 0.58f, 1.0f);
+	private static readonly Vector4 _rokuPurpleHovered = new(0.52f, 0.24f, 0.72f, 1.0f);
+	private static readonly Vector4 _rokuPurpleActive = new(0.30f, 0.13f, 0.45f, 1.0f);
+	private static readonly Vector4 _rokuAccent = new(0.72f, 0.42f, 0.90f, 1.0f);
+	private static readonly Vector4 _rokuText = new(0.95f, 0.95f, 0.98f, 1.0f);
+	private static readonly Vector4 _rokuBorder = new(0.40f, 0.18f, 0.58f, 0.6f);
 
 	private readonly struct RokuTheme : IDisposable
 	{
@@ -1333,25 +1333,25 @@ internal sealed class ControlWindow : Window, IDisposable
 
 		public RokuTheme()
 		{
-			ImGui.PushStyleColor(ImGuiCol.WindowBg, RokuBg);
-			ImGui.PushStyleColor(ImGuiCol.ChildBg, RokuBgChild);
-			ImGui.PushStyleColor(ImGuiCol.TitleBg, RokuBgChild);
-			ImGui.PushStyleColor(ImGuiCol.TitleBgActive, RokuPurpleActive);
-			ImGui.PushStyleColor(ImGuiCol.Border, RokuBorder);
-			ImGui.PushStyleColor(ImGuiCol.FrameBg, RokuPurpleActive);
-			ImGui.PushStyleColor(ImGuiCol.FrameBgHovered, RokuPurple);
-			ImGui.PushStyleColor(ImGuiCol.FrameBgActive, RokuPurpleHovered);
-			ImGui.PushStyleColor(ImGuiCol.Button, RokuPurple);
-			ImGui.PushStyleColor(ImGuiCol.ButtonHovered, RokuPurpleHovered);
-			ImGui.PushStyleColor(ImGuiCol.ButtonActive, RokuPurpleActive);
-			ImGui.PushStyleColor(ImGuiCol.Tab, RokuBgChild);
-			ImGui.PushStyleColor(ImGuiCol.TabHovered, RokuPurpleHovered);
-			ImGui.PushStyleColor(ImGuiCol.TabActive, RokuPurple);
-			ImGui.PushStyleColor(ImGuiCol.SliderGrab, RokuAccent);
-			ImGui.PushStyleColor(ImGuiCol.SliderGrabActive, RokuAccent);
-			ImGui.PushStyleColor(ImGuiCol.CheckMark, RokuAccent);
-			ImGui.PushStyleColor(ImGuiCol.Text, RokuText);
-			ImGui.PushStyleColor(ImGuiCol.Separator, RokuPurple);
+			ImGui.PushStyleColor(ImGuiCol.WindowBg, _rokuBg);
+			ImGui.PushStyleColor(ImGuiCol.ChildBg, _rokuBgChild);
+			ImGui.PushStyleColor(ImGuiCol.TitleBg, _rokuBgChild);
+			ImGui.PushStyleColor(ImGuiCol.TitleBgActive, _rokuPurpleActive);
+			ImGui.PushStyleColor(ImGuiCol.Border, _rokuBorder);
+			ImGui.PushStyleColor(ImGuiCol.FrameBg, _rokuPurpleActive);
+			ImGui.PushStyleColor(ImGuiCol.FrameBgHovered, _rokuPurple);
+			ImGui.PushStyleColor(ImGuiCol.FrameBgActive, _rokuPurpleHovered);
+			ImGui.PushStyleColor(ImGuiCol.Button, _rokuPurple);
+			ImGui.PushStyleColor(ImGuiCol.ButtonHovered, _rokuPurpleHovered);
+			ImGui.PushStyleColor(ImGuiCol.ButtonActive, _rokuPurpleActive);
+			ImGui.PushStyleColor(ImGuiCol.Tab, _rokuBgChild);
+			ImGui.PushStyleColor(ImGuiCol.TabHovered, _rokuPurpleHovered);
+			ImGui.PushStyleColor(ImGuiCol.TabActive, _rokuPurple);
+			ImGui.PushStyleColor(ImGuiCol.SliderGrab, _rokuAccent);
+			ImGui.PushStyleColor(ImGuiCol.SliderGrabActive, _rokuAccent);
+			ImGui.PushStyleColor(ImGuiCol.CheckMark, _rokuAccent);
+			ImGui.PushStyleColor(ImGuiCol.Text, _rokuText);
+			ImGui.PushStyleColor(ImGuiCol.Separator, _rokuPurple);
 
 			ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 14f);
 			ImGui.PushStyleVar(ImGuiStyleVar.ChildRounding, 12f);
@@ -1374,7 +1374,7 @@ internal sealed class ControlWindow : Window, IDisposable
 
 	private static void SectionHeader(string text)
 	{
-		Color(ImGuiCol.Text, RokuAccent, () => ImGui.Text(text.ToUpperInvariant()));
+		Color(ImGuiCol.Text, _rokuAccent, () => ImGui.Text(text.ToUpperInvariant()));
 		ImGui.Spacing();
 	}
 
