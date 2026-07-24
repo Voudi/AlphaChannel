@@ -26,6 +26,7 @@ namespace AlphaChannel
 		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_get_property(IntPtr ctx, string name, int format, out double data);
 		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_get_property(IntPtr ctx, string name, int format, IntPtr data);
 		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr mpv_get_property_string(IntPtr ctx, string name);
+		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_set_property_string(IntPtr ctx, string name, string data);
 		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern void mpv_free(IntPtr data);
 
 		[StructLayout(LayoutKind.Sequential)]
@@ -263,7 +264,7 @@ namespace AlphaChannel
 					{
 						string startStr = ((int)playbackPosition).ToString(System.Globalization.CultureInfo.InvariantCulture);
 						string pauseStr = !isPlaying ? ",pause=yes" : string.Empty;
-						_ = mpv_command(_mpvCtx, ["loadfile", url, "replace", "0", $"start={startStr}{pauseStr}", null!]);	
+						_ = mpv_command(_mpvCtx, ["loadfile", url, "replace", "0", $"start={startStr}{pauseStr}", null!]);
 					}
 				}
 			}
@@ -468,6 +469,61 @@ namespace AlphaChannel
 			}
 		}
 
+		private string AudioVisualizerFilter => $"[aid1] asplit [ao][a]; [a] showcqt=s={_width}x{_height} [vo]";
+
+		private bool IsAudioOnly()
+		{
+			if (_mpvCtx == IntPtr.Zero)
+			{
+				return false;
+			}
+
+			IntPtr formatPtr = mpv_get_property_string(_mpvCtx, "video-format");
+			if (formatPtr == IntPtr.Zero)
+			{
+				return true;
+			}
+
+			try
+			{
+				string? format = Marshal.PtrToStringUTF8(formatPtr);
+				if (string.IsNullOrEmpty(format))
+				{
+					return true;
+				}
+			}
+			finally
+			{
+				mpv_free(formatPtr);
+			}
+
+			// A video track exists, but it might just be embedded cover art (e.g. mp3 tags).
+			IntPtr imagePtr = Marshal.AllocHGlobal(4);
+			try
+			{
+				int rc = mpv_get_property(_mpvCtx, "current-tracks/video/image", 3, imagePtr);
+				return rc >= 0 && Marshal.ReadInt32(imagePtr) == 1;
+			}
+			finally
+			{
+				Marshal.FreeHGlobal(imagePtr);
+			}
+		}
+
+		private void UpdateAudioVisualizer()
+		{
+			lock (_mpvLock)
+			{
+				if (_mpvCtx == IntPtr.Zero)
+				{
+					return;
+				}
+
+				bool audioOnly = IsAudioOnly();
+				_ = mpv_set_property_string(_mpvCtx, "lavfi-complex", audioOnly ? AudioVisualizerFilter : string.Empty);
+			}
+		}
+
 		public bool IsEofReached()
 		{
 			if (_closed)
@@ -558,14 +614,14 @@ namespace AlphaChannel
                         case 7: // MPV_EVENT_END_FILE
 								break;
                         
-                        case 8:  Services.Log.Verbose("[MPV] FILE_LOADED");      break;
-                        case 14: Services.Log.Verbose("[MPV] CLIENT_MESSAGE");   break;
-                        case 15: Services.Log.Verbose("[MPV] VIDEO_RECONFIG");   break;
-                        case 16: Services.Log.Verbose("[MPV] AUDIO_RECONFIG");   break;
-                        case 17: Services.Log.Verbose("[MPV] SEEK");             break;
-                        case 18: Services.Log.Verbose("[MPV] PLAYBACK_RESTART"); break;
-                        case 19: Services.Log.Verbose("[MPV] PROPERTY_CHANGE");  break;
-                        case 22: Services.Log.Verbose("[MPV] HOOK");             break;
+                        case 8:  Services.Log.Verbose("[MPV] FILE_LOADED"); UpdateAudioVisualizer(); break;
+                        case 16: Services.Log.Verbose("[MPV] CLIENT_MESSAGE");   break;
+                        case 17: Services.Log.Verbose("[MPV] VIDEO_RECONFIG"); UpdateAudioVisualizer(); break;
+                        case 18: Services.Log.Verbose("[MPV] AUDIO_RECONFIG"); UpdateAudioVisualizer(); break;
+                        case 20: Services.Log.Verbose("[MPV] SEEK");             break;
+                        case 21: Services.Log.Verbose("[MPV] PLAYBACK_RESTART"); break;
+                        case 22: Services.Log.Verbose("[MPV] PROPERTY_CHANGE");  break;
+                        case 25: Services.Log.Verbose("[MPV] HOOK");             break;
 
                         default:
                             break;

@@ -204,7 +204,7 @@ internal sealed class ControlWindow : Window, IDisposable
 	private long _lastMilliSecond6ms;
 	internal void OnFrameworkUpdate()
 	{
-		if (_lastMilliSecond6ms + 6 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+		if (_lastMilliSecond6ms + 100 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 		{
 			_lastMilliSecond6ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
@@ -276,9 +276,10 @@ internal sealed class ControlWindow : Window, IDisposable
 			}
 		}
 		
-		if(_mpvIsIdle != _core.GetIdle())
+		bool idle = _core.GetIdle();
+		if (_mpvIsIdle != idle)
 		{
-			_mpvIsIdle = _core.GetIdle();
+			_mpvIsIdle = idle;
 			if (_mpvIsIdle) { _pauseToggle = true; }
 		}
 		else if(_pauseToggle != _core.GetPaused())

@@ -170,9 +170,8 @@ internal sealed class Core : IDisposable
 			{
 				if (_mpvRenderer != null)
 				{
-					_mpvRenderer.Play(url, playbackPosition, isPlaying);
-					_activeEntityId = entityId;
-					return;
+					_mpvRenderer?.Stop();
+					_mpvRenderer = null;
 				}
 				_mpvRenderer = new MpvRenderer();
 				_mpvRenderer.Initialize(Plugin.ScreenWidth, Plugin.ScreenHeight, _screenTexture, _renderCancellation);
