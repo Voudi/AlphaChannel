@@ -469,8 +469,9 @@ namespace AlphaChannel
 			}
 		}
 
-		private string AudioVisualizerFilter => $"[aid1] asplit [ao][a]; [a] showcqt=s={_width}x{_height} [vo]";
+		private const string AudioVisualizerFilter = "[aid1] asplit [ao][a]; [a] showcqt [vo]";
 
+		//As of now, http1.0 mp3 streams are not supported by libmpv, it creates some stuttering and audio glitches.
 		private bool IsAudioOnly()
 		{
 			if (_mpvCtx == IntPtr.Zero)
