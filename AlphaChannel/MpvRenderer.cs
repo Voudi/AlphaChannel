@@ -110,7 +110,7 @@ namespace AlphaChannel
 			_stridePtr = Marshal.AllocHGlobal(IntPtr.Size);
 			Marshal.WriteIntPtr(_stridePtr, new IntPtr(_width * 4));
 
-			_formatPtr = Marshal.StringToHGlobalAnsi("bgra");
+			_formatPtr = Marshal.StringToHGlobalAnsi("bgr0");
 
 			_renderParamsPtr = Marshal.AllocHGlobal(Marshal.SizeOf<MpvRenderParam>() * 5);
 			Marshal.StructureToPtr(new MpvRenderParam { Type = 17, Data = _sizePtr }, _renderParamsPtr, false);

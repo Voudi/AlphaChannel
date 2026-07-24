@@ -36,12 +36,6 @@ internal sealed class Resources : IDisposable
 	{
 		_httpClient.Dispose();
 
-		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "alphachannelscreentex_*.atex").ToList().ForEach(File.Delete);
-		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "alphachannelscreen_*.avfx").ToList().ForEach(File.Delete);
-		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "snesscreentex_*.atex").ToList().ForEach(File.Delete);
-		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "snesscreen_*.avfx").ToList().ForEach(File.Delete);
-		Directory.GetFiles(Path.Combine(_plugin.PluginDir, "resources"), "tvqr_*.avfx").ToList().ForEach(File.Delete);
-
 		GC.SuppressFinalize(this);
 	}
 
