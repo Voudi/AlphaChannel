@@ -9,7 +9,6 @@ using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Interface;
 using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Windowing;
-using Penumbra.Api.IpcSubscribers;
 
 namespace AlphaChannel;
 
@@ -18,8 +17,6 @@ internal sealed class ControlWindow : Window, IDisposable
 	private readonly Plugin _plugin;
 	private readonly Core _core;
 	private readonly APIHelper _apiHelper;
-
-	private bool _playerCarbuncleFound;
 	
 	//Resource vars
 	private bool _updatingMPV;
@@ -203,7 +200,6 @@ internal sealed class ControlWindow : Window, IDisposable
 		PlayLocalUrl(next, "YouTube");
 	}
 
-	private long _lastMilliSecond5000ms;
 	private long _lastMilliSecond1500ms;
 	private long _lastMilliSecond6ms;
 	internal void OnFrameworkUpdate()
@@ -218,18 +214,10 @@ internal sealed class ControlWindow : Window, IDisposable
 		{
 			_lastMilliSecond1500ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-			_playerCarbuncleFound = _core.ScanForCompanions();
-
 			if (Services.LocalPlayerExists)
 			{
 				_visiblePlayers = Services.Objects.Where(x => x is IPlayerCharacter).OrderBy(x => x.Name.TextValue);
 			}
-		}
-		if (_lastMilliSecond5000ms + 5000 < DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
-		{
-			_lastMilliSecond5000ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-			_core.RedrawIfNeeded();
 		}
 	}
 
@@ -516,212 +504,187 @@ internal sealed class ControlWindow : Window, IDisposable
 		ImGui.BeginChild("##scrollListHost" + _plugin.Name, new Vector2(0, 0), true);
 		Vector4 textColor;
 		uint localPlayerId = Services.LocalPlayerId;
-		if (_playerCarbuncleFound || _core.TVIsVisible(localPlayerId)) //Checks if players Carbuncle or TV exists
+
+		SectionHeader("Now Playing");
+
+		bool playerTVRunning = _core.TVIsActive(localPlayerId);
+		bool youTubeIsActive = playerTVRunning && _activeVideoSource == "YouTube";
+		bool urlEmpty = string.IsNullOrEmpty(_inputURL);
+		bool urlExists = _core.ValidateURL(_inputURL, out _);
+		bool refreshNeeded = youTubeIsActive && !string.IsNullOrEmpty(_inputURL) && urlExists;
+
+		if (!_core.IsPlayingSnes())
 		{
-			SectionHeader("Now Playing");
+			ImGui.SameLine();
 
-			bool playerTVRunning = _core.TVIsActive(localPlayerId);
-			bool youTubeIsActive = playerTVRunning && _activeVideoSource == "YouTube";
-			bool urlEmpty = string.IsNullOrEmpty(_inputURL);
-			bool urlExists = _core.ValidateURL(_inputURL, out _);
-			bool refreshNeeded = youTubeIsActive && !string.IsNullOrEmpty(_inputURL) && urlExists;
-
-			if (IconButton(FontAwesomeIcon.Cat, "powerbutton" + localPlayerId,
-				_playerCarbuncleFound ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f), true))
+			bool hostPlayDisabled = !urlExists && !youTubeIsActive && _videoQueue.Count == 0;
+			Vector4? hostPlayColor = youTubeIsActive ? new Vector4(1.0f, 0.0f, 0.0f, 1.0f) : (hostPlayDisabled ? new Vector4(0.5f, 0.5f, 0.5f, 1.0f) : null);
+			FontAwesomeIcon hostPlayIcon = youTubeIsActive ? FontAwesomeIcon.Stop : FontAwesomeIcon.Play;
+			if (IconButton(hostPlayIcon, "playbutton" + localPlayerId, hostPlayColor, true, disabled: hostPlayDisabled))
 			{
-				if (_playerCarbuncleFound)
+				if (youTubeIsActive)
 				{
-					PenumbraIPC.ApplyTempMod("companion", _plugin.PenumbraTempModPaths);
-					PenumbraIPC.ApplyTempMod("qr", _plugin.PenumbraQRPaths);
-					PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId));
+					StopVideo();
 				}
-				else
+				else if (urlExists)
 				{
-					PenumbraIPC.RemoveTempMod("companion");
-					PenumbraIPC.RemoveTempMod("qr");
-					PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId));
-					_core.RemoveCompanion();
-					_core.StopVideo();
-				}
-			}
-
-			if (!_playerCarbuncleFound && !_core.IsPlayingSnes())
-			{
-				ImGui.SameLine();
-
-				bool hostPlayDisabled = !urlExists && !youTubeIsActive && _videoQueue.Count == 0;
-				Vector4? hostPlayColor = youTubeIsActive ? new Vector4(1.0f, 0.0f, 0.0f, 1.0f) : (hostPlayDisabled ? new Vector4(0.5f, 0.5f, 0.5f, 1.0f) : null);
-				FontAwesomeIcon hostPlayIcon = youTubeIsActive ? FontAwesomeIcon.Stop : FontAwesomeIcon.Play;
-				if (IconButton(hostPlayIcon, "playbutton" + localPlayerId, hostPlayColor, true, disabled: hostPlayDisabled))
-				{
-					if (youTubeIsActive)
-					{
-						StopVideo();
-					}
-					else if (urlExists)
-					{
-						StartVideo(localPlayerId);
-						_urlPlaceholder = _inputURL;
-						_inputURL = string.Empty;
-						_twitchChannel = "";
-					}
-					else if (_videoQueue.Count > 0)
-					{
-						PlayNextQueued();
-						_twitchChannel = "";
-					}
-				}
-				Tooltip(youTubeIsActive ? "Stop" : "Play");
-
-				if (playerTVRunning)
-				{
-					ImGui.SameLine();
-					Vector4? hostPauseColor = refreshNeeded || _mpvIsIdle || _pauseToggle ? new Vector4(0.0f, 1.0f, 1.0f, 1.0f) : null;
-					FontAwesomeIcon pauseIcon = refreshNeeded ? FontAwesomeIcon.ArrowRight : (_mpvIsDone ? FontAwesomeIcon.Repeat : (_pauseToggle || _mpvIsIdle ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause));
-					Color(ImGuiCol.Text, hostPauseColor, () =>
-					{
-						if (IconButton(pauseIcon, "pausebutton" + localPlayerId, isBig: true))
-						{
-							if(refreshNeeded)
-							{
-								if (urlExists)
-								{
-									StartVideo(localPlayerId);
-								}
-
-								_urlPlaceholder = _inputURL;
-								_inputURL = string.Empty;
-							}
-							else
-							{
-								if (_mpvIsDone)
-								{
-									SeekPlayer(0);
-								}
-								
-								if(_mpvIsIdle)
-								{
-									_core.Pause(false);
-									_pauseToggle = false;
-								}
-								else
-								{
-									_pauseToggle = !_pauseToggle;
-									_core.Pause(_pauseToggle);
-								}
-							}
-						}
-					});
-					Tooltip(refreshNeeded ? "Load new URL..." : (_mpvIsIdle ? "Replay" : (_pauseToggle ? "Pause" : "Resume")));
-					ImGui.SameLine();
-					Style(ImGuiStyleVar.FramePadding, new Vector2(0, 8), () =>
-					{
-						IconFont(() =>
-						{
-							ImGui.SetNextItemWidth(104);
-							ImGui.SliderFloat("##volumebar" + localPlayerId, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
-							if (ImGui.IsItemActive()) { SetVolume(_volume, true); _sliderActive = true; }
-							if (ImGui.IsItemDeactivatedAfterEdit()) { SetVolume(_volume, true); _sliderActive = false; }
-						});
-					});
-					
-					Tooltip(((int)_volume)+"");
-				}
-
-				if (IconButton(FontAwesomeIcon.Clipboard, "clipboard" + localPlayerId))
-				{
-					ImGui.SetClipboardText(string.IsNullOrEmpty(_inputURL) && playerTVRunning ? _urlPlaceholder : _inputURL);
-				}
-				Tooltip("Copy URL to clipboard");
-				ImGui.SameLine();
-
-				textColor = (urlExists || urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f);
-				Color(ImGuiCol.Border, (!playerTVRunning && !urlEmpty) ? textColor : null, () =>
-				{
-					Style(ImGuiStyleVar.FrameBorderSize, 1.0f, () =>
-					{
-						ImGui.SetNextItemWidth(217);
-						ImGui.InputText("##URL", ref _inputURL, 1000, ImGuiInputTextFlags.None);
-					});
-				});
-				// Detect if the input is focused
-				if (ImGui.IsItemActive())
-				{
-					_urlInputActive = true;
-				}
-				else if (ImGui.IsItemDeactivated())
-				{
-					_urlInputActive = false;
-				}
-				// Render placeholder if input is empty and unfocused
-				if (!_urlInputActive && string.IsNullOrEmpty(_inputURL))
-				{
-					var pos = ImGui.GetItemRectMin();
-					var max = ImGui.GetItemRectMax();
-
-					float maxWidth = max.X - pos.X;
-
-					string placeholder = _urlPlaceholder;
-
-					Vector2 textSize = ImGui.CalcTextSize(placeholder);
-
-					while (textSize.X > maxWidth && placeholder.Length > 0)
-					{
-						placeholder = placeholder[..^1];
-						textSize = ImGui.CalcTextSize(placeholder + "........");
-					}
-
-					if (!placeholder.Equals(_urlPlaceholder, StringComparison.Ordinal))
-					{
-						placeholder += "...";
-					}
-
-					ImGui.GetWindowDrawList().AddText(new Vector2(pos.X + 3, pos.Y + 2), ImGui.GetColorU32(new Vector4(0.6f, 0.6f, 0.6f, 1.0f)), placeholder);
-				}
-
-				if (playerTVRunning)
-				{
-					if (_seekerExactTime > 0)
-					{
-						DrawScrollingText(_seekerExactTime > 0 ? _mediaTitle : " ", 249);
-					}
-
-					ImGui.SetNextItemWidth(250);
-					Color(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1), () =>
-					{
-						ImGui.SliderFloat("##seeker" + localPlayerId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
-						if (ImGui.IsItemActive()) { _sliderActive = true; }
-						if (ImGui.IsItemDeactivatedAfterEdit()) { SeekPlayer(_seeker); _sliderActive = false; }
-					});
-				}
-
-				if (Button("Add to Queue", "addQueue" + localPlayerId, disabled: !urlExists))
-				{
-					_videoQueue.Add(_inputURL);
+					StartVideo(localPlayerId);
+					_urlPlaceholder = _inputURL;
 					_inputURL = string.Empty;
 					_twitchChannel = "";
 				}
-
-				ImGui.SameLine();
-
-				if (Button("Next", "queueNext" + localPlayerId, disabled: _videoQueue.Count == 0))
+				else if (_videoQueue.Count > 0)
 				{
 					PlayNextQueued();
+					_twitchChannel = "";
 				}
-
-				ImGui.SameLine();
-
-				if (Button("Clear", "queueClear" + localPlayerId, disabled: _videoQueue.Count == 0))
-				{
-					_videoQueue.Clear();
-				}
-
-				DrawQueue();
 			}
-		}
-		else
-		{
-			EmptyState(FontAwesomeIcon.Cat, "You have not summoned", "your Blue Carbuncle.");
+			Tooltip(youTubeIsActive ? "Stop" : "Play");
+
+			if (playerTVRunning)
+			{
+				ImGui.SameLine();
+				Vector4? hostPauseColor = refreshNeeded || _mpvIsIdle || _pauseToggle ? new Vector4(0.0f, 1.0f, 1.0f, 1.0f) : null;
+				FontAwesomeIcon pauseIcon = refreshNeeded ? FontAwesomeIcon.ArrowRight : (_mpvIsDone ? FontAwesomeIcon.Repeat : (_pauseToggle || _mpvIsIdle ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause));
+				Color(ImGuiCol.Text, hostPauseColor, () =>
+				{
+					if (IconButton(pauseIcon, "pausebutton" + localPlayerId, isBig: true))
+					{
+						if(refreshNeeded)
+						{
+							if (urlExists)
+							{
+								StartVideo(localPlayerId);
+							}
+
+							_urlPlaceholder = _inputURL;
+							_inputURL = string.Empty;
+						}
+						else
+						{
+							if (_mpvIsDone)
+							{
+								SeekPlayer(0);
+							}
+							
+							if(_mpvIsIdle)
+							{
+								_core.Pause(false);
+								_pauseToggle = false;
+							}
+							else
+							{
+								_pauseToggle = !_pauseToggle;
+								_core.Pause(_pauseToggle);
+							}
+						}
+					}
+				});
+				Tooltip(refreshNeeded ? "Load new URL..." : (_mpvIsIdle ? "Replay" : (_pauseToggle ? "Pause" : "Resume")));
+				ImGui.SameLine();
+				Style(ImGuiStyleVar.FramePadding, new Vector2(0, 8), () =>
+				{
+					IconFont(() =>
+					{
+						ImGui.SetNextItemWidth(104);
+						ImGui.SliderFloat("##volumebar" + localPlayerId, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
+						if (ImGui.IsItemActive()) { SetVolume(_volume, true); _sliderActive = true; }
+						if (ImGui.IsItemDeactivatedAfterEdit()) { SetVolume(_volume, true); _sliderActive = false; }
+					});
+				});
+				
+				Tooltip(((int)_volume)+"");
+			}
+
+			if (IconButton(FontAwesomeIcon.Clipboard, "clipboard" + localPlayerId))
+			{
+				ImGui.SetClipboardText(string.IsNullOrEmpty(_inputURL) && playerTVRunning ? _urlPlaceholder : _inputURL);
+			}
+			Tooltip("Copy URL to clipboard");
+			ImGui.SameLine();
+
+			textColor = (urlExists || urlEmpty) ? new Vector4(0.3f, 0.8f, 0.3f, 1f) : new Vector4(0.8f, 0.3f, 0.3f, 1f);
+			Color(ImGuiCol.Border, (!playerTVRunning && !urlEmpty) ? textColor : null, () =>
+			{
+				Style(ImGuiStyleVar.FrameBorderSize, 1.0f, () =>
+				{
+					ImGui.SetNextItemWidth(217);
+					ImGui.InputText("##URL", ref _inputURL, 1000, ImGuiInputTextFlags.None);
+				});
+			});
+			// Detect if the input is focused
+			if (ImGui.IsItemActive())
+			{
+				_urlInputActive = true;
+			}
+			else if (ImGui.IsItemDeactivated())
+			{
+				_urlInputActive = false;
+			}
+			// Render placeholder if input is empty and unfocused
+			if (!_urlInputActive && string.IsNullOrEmpty(_inputURL))
+			{
+				var pos = ImGui.GetItemRectMin();
+				var max = ImGui.GetItemRectMax();
+
+				float maxWidth = max.X - pos.X;
+
+				string placeholder = _urlPlaceholder;
+
+				Vector2 textSize = ImGui.CalcTextSize(placeholder);
+
+				while (textSize.X > maxWidth && placeholder.Length > 0)
+				{
+					placeholder = placeholder[..^1];
+					textSize = ImGui.CalcTextSize(placeholder + "........");
+				}
+
+				if (!placeholder.Equals(_urlPlaceholder, StringComparison.Ordinal))
+				{
+					placeholder += "...";
+				}
+
+				ImGui.GetWindowDrawList().AddText(new Vector2(pos.X + 3, pos.Y + 2), ImGui.GetColorU32(new Vector4(0.6f, 0.6f, 0.6f, 1.0f)), placeholder);
+			}
+
+			if (playerTVRunning)
+			{
+				if (_seekerExactTime > 0)
+				{
+					DrawScrollingText(_seekerExactTime > 0 ? _mediaTitle : " ", 249);
+				}
+
+				ImGui.SetNextItemWidth(250);
+				Color(ImGuiCol.SliderGrab, new Vector4(0.8f, 0.3f, 0.3f, 1), () =>
+				{
+					ImGui.SliderFloat("##seeker" + localPlayerId, ref _seeker, 0, 100, $"{_seekerTimeMinutes}:{_seekerTimeSeconds:00} / {_seekerDurationMinutes}:{_seekerDurationSeconds:00}");
+					if (ImGui.IsItemActive()) { _sliderActive = true; }
+					if (ImGui.IsItemDeactivatedAfterEdit()) { SeekPlayer(_seeker); _sliderActive = false; }
+				});
+			}
+
+			if (Button("Add to Queue", "addQueue" + localPlayerId, disabled: !urlExists))
+			{
+				_videoQueue.Add(_inputURL);
+				_inputURL = string.Empty;
+				_twitchChannel = "";
+			}
+
+			ImGui.SameLine();
+
+			if (Button("Next", "queueNext" + localPlayerId, disabled: _videoQueue.Count == 0))
+			{
+				PlayNextQueued();
+			}
+
+			ImGui.SameLine();
+
+			if (Button("Clear", "queueClear" + localPlayerId, disabled: _videoQueue.Count == 0))
+			{
+				_videoQueue.Clear();
+			}
+
+			DrawQueue();
 		}
 		
 		ImGui.EndChild();
@@ -733,79 +696,50 @@ internal sealed class ControlWindow : Window, IDisposable
 
 		uint localPlayerId = Services.LocalPlayerId;
 
-		if (_playerCarbuncleFound || _core.TVIsVisible(localPlayerId))
+		SectionHeader("Twitch");
+
+		bool playerTVRunning = _core.TVIsActive(localPlayerId);
+		bool twitchIsActive = playerTVRunning && _activeVideoSource == "Twitch";
+		bool channelExists = !string.IsNullOrWhiteSpace(_twitchChannel);
+
+		ImGui.SameLine();
+
+		bool playDisabled = !channelExists && !twitchIsActive;
+		Vector4? playColor = twitchIsActive ? new Vector4(1.0f, 0.0f, 0.0f, 1.0f) : (playDisabled ? new Vector4(0.5f, 0.5f, 0.5f, 1.0f) : null);
+		FontAwesomeIcon playIcon = twitchIsActive ? FontAwesomeIcon.Stop : FontAwesomeIcon.Play;
+		if (IconButton(playIcon, "twitchplay" + localPlayerId, playColor, true, disabled: playDisabled))
 		{
-			SectionHeader("Twitch");
-
-			bool playerTVRunning = _core.TVIsActive(localPlayerId);
-			bool twitchIsActive = playerTVRunning && _activeVideoSource == "Twitch";
-			bool channelExists = !string.IsNullOrWhiteSpace(_twitchChannel);
-
-			if (IconButton(FontAwesomeIcon.Cat, "powertwitch" + localPlayerId,
-				_playerCarbuncleFound ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f), true))
+			if (twitchIsActive)
 			{
-				if (_playerCarbuncleFound)
-				{
-					PenumbraIPC.ApplyTempMod("companion", _plugin.PenumbraTempModPaths);
-					PenumbraIPC.ApplyTempMod("qr", _plugin.PenumbraQRPaths);
-					PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId));
-				}
-				else
-				{
-					PenumbraIPC.RemoveTempMod("companion");
-					PenumbraIPC.RemoveTempMod("qr");
-					PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId));
-					_core.RemoveCompanion();
-					_core.StopVideo();
-				}
+				StopVideo();
 			}
-
-			if (!_playerCarbuncleFound)
+			else if (channelExists)
 			{
-				ImGui.SameLine();
-
-				bool playDisabled = !channelExists && !twitchIsActive;
-				Vector4? playColor = twitchIsActive ? new Vector4(1.0f, 0.0f, 0.0f, 1.0f) : (playDisabled ? new Vector4(0.5f, 0.5f, 0.5f, 1.0f) : null);
-				FontAwesomeIcon playIcon = twitchIsActive ? FontAwesomeIcon.Stop : FontAwesomeIcon.Play;
-				if (IconButton(playIcon, "twitchplay" + localPlayerId, playColor, true, disabled: playDisabled))
-				{
-					if (twitchIsActive)
-					{
-						StopVideo();
-					}
-					else if (channelExists)
-					{
-						PlayLocalUrl(NormalizeTwitchUrl(_twitchChannel), "Twitch");
-						_inputURL = "";
-					}
-				}
-				Tooltip(twitchIsActive ? "Stop" : "Play");
-
-				if (playerTVRunning)
-				{
-					ImGui.SameLine();
-					Style(ImGuiStyleVar.FramePadding, new Vector2(0, 8), () =>
-					{
-						IconFont(() =>
-						{
-							ImGui.SetNextItemWidth(104);
-							ImGui.SliderFloat("##volumebartwitch" + localPlayerId, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
-							if (ImGui.IsItemActive()) { SetVolume(_volume, true); _sliderActive = true; }
-							if (ImGui.IsItemDeactivatedAfterEdit()) { SetVolume(_volume, true); _sliderActive = false; }
-						});
-					});
-					Tooltip(((int)_volume) + "");
-				}
-
-				ImGui.Text("Channel:");
-				ImGui.SetNextItemWidth(217);
-				ImGui.InputText("##twitchChannel", ref _twitchChannel, 100, ImGuiInputTextFlags.None);
+				PlayLocalUrl(NormalizeTwitchUrl(_twitchChannel), "Twitch");
+				_inputURL = "";
 			}
 		}
-		else
+		Tooltip(twitchIsActive ? "Stop" : "Play");
+
+		if (playerTVRunning)
 		{
-			EmptyState(FontAwesomeIcon.Cat, "You have not summoned", "your Blue Carbuncle.");
+			ImGui.SameLine();
+			Style(ImGuiStyleVar.FramePadding, new Vector2(0, 8), () =>
+			{
+				IconFont(() =>
+				{
+					ImGui.SetNextItemWidth(104);
+					ImGui.SliderFloat("##volumebartwitch" + localPlayerId, ref _volume, 0, 100, _volume < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volume <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
+					if (ImGui.IsItemActive()) { SetVolume(_volume, true); _sliderActive = true; }
+					if (ImGui.IsItemDeactivatedAfterEdit()) { SetVolume(_volume, true); _sliderActive = false; }
+				});
+			});
+			Tooltip(((int)_volume) + "");
 		}
+
+		ImGui.Text("Channel:");
+		ImGui.SetNextItemWidth(217);
+		ImGui.InputText("##twitchChannel", ref _twitchChannel, 100, ImGuiInputTextFlags.None);
 
 		ImGui.EndChild();
 	}
@@ -863,196 +797,168 @@ internal sealed class ControlWindow : Window, IDisposable
 		uint localPlayerId = Services.LocalPlayerId;
 		bool snesExists = !string.IsNullOrEmpty(_plugin.AssemblyLocationSnes);
 
-		if ( _playerCarbuncleFound || _core.TVIsVisible(localPlayerId))
+		bool playerTVRunning = _core.TVIsActive(localPlayerId);
+			
+		if (playerTVRunning && _core.IsPlayingSnes())
 		{
-			bool playerTVRunning = _core.TVIsActive(localPlayerId);
-
-			if (IconButton(FontAwesomeIcon.Cat, "powersnes",
-				_playerCarbuncleFound ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f) : new Vector4(0.0f, 1.0f, 0.0f, 1.0f), true))
+			ImGui.SameLine();
+			if (IconButton(FontAwesomeIcon.Stop, "stopgame", new Vector4(1.0f, 0.0f, 0.0f, 1.0f), true))
 			{
-				if (_playerCarbuncleFound)
+				StopVideo();
+			}
+
+			ImGui.SameLine();
+
+			if (IconButton(FontAwesomeIcon.Gamepad, "alphaenablecontrols",
+				_core.IsPlayingSnes() && _core.IsSnesControlsEnabled() ? new Vector4(0.0f, 1.0f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f), true))
+			{
+				_core.EnableSnesControls(!_core.IsSnesControlsEnabled());
+			}
+			Tooltip((_core.IsPlayingSnes() && _core.IsSnesControlsEnabled()) ? "Unplug Controller" : "Plug in Controller");
+
+			ImGui.SameLine();
+
+			Style(ImGuiStyleVar.FramePadding, new Vector2(0, 8), () =>
+			{
+				IconFont(() =>
 				{
-					PenumbraIPC.ApplyTempMod("companion", _plugin.PenumbraTempModPaths);
-					PenumbraIPC.ApplyTempMod("qr", _plugin.PenumbraQRPaths);
-					PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId));
+					ImGui.SetNextItemWidth(104);
+					ImGui.SliderFloat("##volumebarsnes", ref _volumesnes, 0, 100, _volumesnes < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volumesnes <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
+					if (ImGui.IsItemActive()) { SetVolume(_volumesnes); _sliderActive = true; }
+					if (ImGui.IsItemDeactivatedAfterEdit()) { SetVolume(_volumesnes); _sliderActive = false; }
+				});
+			});
+			Tooltip(((int)_volumesnes)+"");
+		}
+
+		if (snesExists)
+		{
+			if (ImGui.CollapsingHeader("TV Effect##" + localPlayerId, ImGuiTreeNodeFlags.DefaultOpen))
+			{
+				string[] effectNames = ["None", "CRT Scanlines"];
+				int effectIndex = (int)_core.SnesEffect;
+				ImGui.SetNextItemWidth(217);
+				if (ImGui.Combo("##snesEffect" + localPlayerId, ref effectIndex, effectNames, effectNames.Length))
+				{
+					_core.SetSnesEffect((Snes9xEffect)effectIndex, _core.SnesEffectMaskStrength, _core.SnesEffectScanBeam);
 				}
-				else
+
+				if (_core.SnesEffect == Snes9xEffect.CrtScanlines)
 				{
-					PenumbraIPC.RemoveTempMod("companion");
-					PenumbraIPC.RemoveTempMod("qr");
-					PenumbraIPC.Redraw(_core.GetCompanionIndex(localPlayerId));
-					_core.RemoveCompanion();
+					float mask = _core.SnesEffectMaskStrength;
+					ImGui.SetNextItemWidth(217);
+					if (ImGui.SliderFloat("Mask Strength##" + localPlayerId, ref mask, 0f, 1f))
+					{
+						_core.SetSnesEffect(_core.SnesEffect, mask, _core.SnesEffectScanBeam);
+					}
+
+					float beam = _core.SnesEffectScanBeam;
+					ImGui.SetNextItemWidth(217);
+					if (ImGui.SliderFloat("Scan Beam##" + localPlayerId, ref beam, 0.5f, 6f))
+					{
+						_core.SetSnesEffect(_core.SnesEffect, _core.SnesEffectMaskStrength, beam);
+					}
 				}
 			}
 
-			if (!_playerCarbuncleFound)
+			if (ImGui.CollapsingHeader("Co-op##" + localPlayerId, ImGuiTreeNodeFlags.DefaultOpen))
 			{
-				if (playerTVRunning && _core.IsPlayingSnes())
+				DrawCoop(localPlayerId);
+			}
+		}
+
+		if (snesExists && (!playerTVRunning || _core.IsPlayingSnes()))
+		{
+			if(ImGui.CollapsingHeader("Load ROM##" + localPlayerId, ImGuiTreeNodeFlags.DefaultOpen))
+			{
+				List<string> paths = _core.GetRecentSnesPaths();
+				if(paths.Count > 0)
 				{
-					ImGui.SameLine();
-					if (IconButton(FontAwesomeIcon.Stop, "stopgame", new Vector4(1.0f, 0.0f, 0.0f, 1.0f), true))
+					ImGui.Text("Open Recent:");
+				}
+				int cnt = 1;
+				foreach(string path in paths)
+				{
+					if(ImGui.Button(cnt++ + ". " + Path.GetFileName(path)))
 					{
-						StopVideo();
-					}
-
-					ImGui.SameLine();
-
-					if (IconButton(FontAwesomeIcon.Gamepad, "alphaenablecontrols",
-						_core.IsPlayingSnes() && _core.IsSnesControlsEnabled() ? new Vector4(0.0f, 1.0f, 1.0f, 1.0f) : new Vector4(1.0f, 1.0f, 1.0f, 1.0f), true))
-					{
-						_core.EnableSnesControls(!_core.IsSnesControlsEnabled());
-					}
-					Tooltip((_core.IsPlayingSnes() && _core.IsSnesControlsEnabled()) ? "Unplug Controller" : "Plug in Controller");
-
-					ImGui.SameLine();
-
-					Style(ImGuiStyleVar.FramePadding, new Vector2(0, 8), () =>
-					{
-						IconFont(() =>
+						if (File.Exists(path))
 						{
-							ImGui.SetNextItemWidth(104);
-							ImGui.SliderFloat("##volumebarsnes", ref _volumesnes, 0, 100, _volumesnes < 1 ? FontAwesomeIcon.VolumeMute.ToIconString() : (_volumesnes <= 60 ? FontAwesomeIcon.VolumeDown.ToIconString() : FontAwesomeIcon.VolumeUp.ToIconString()));
-							if (ImGui.IsItemActive()) { SetVolume(_volumesnes); _sliderActive = true; }
-							if (ImGui.IsItemDeactivatedAfterEdit()) { SetVolume(_volumesnes); _sliderActive = false; }
-						});
+							_core.PlaySnes(Services.LocalPlayerId, path);
+						}
+						else
+						{
+							Plugin.ErrorPopup("Could not find file: " + path);
+							_core.RemoveSnesPath(path);
+						}
+					}
+				}
+				if (Button("Open ROM Folder", "openRomFolder", null, isBig:true))
+				{
+					Process.Start(new ProcessStartInfo
+					{
+						FileName = _plugin.ROMSLocationSnesDir,
+						UseShellExecute = true
 					});
-					Tooltip(((int)_volumesnes)+"");
 				}
 
-				if (snesExists)
+				ImGui.SameLine();
+
+				if (Button("Select ROM", "selectRom", isBig:true))
 				{
-					if (ImGui.CollapsingHeader("TV Effect##" + localPlayerId, ImGuiTreeNodeFlags.DefaultOpen))
-					{
-						string[] effectNames = ["None", "CRT Scanlines"];
-						int effectIndex = (int)_core.SnesEffect;
-						ImGui.SetNextItemWidth(217);
-						if (ImGui.Combo("##snesEffect" + localPlayerId, ref effectIndex, effectNames, effectNames.Length))
+					_fileDialog.OpenFileDialog(
+						"load SNES ROM",
+						"SNES ROMs{.sfc,.smc},All Files{.*}",
+						(success, paths) =>
 						{
-							_core.SetSnesEffect((Snes9xEffect)effectIndex, _core.SnesEffectMaskStrength, _core.SnesEffectScanBeam);
-						}
-
-						if (_core.SnesEffect == Snes9xEffect.CrtScanlines)
-						{
-							float mask = _core.SnesEffectMaskStrength;
-							ImGui.SetNextItemWidth(217);
-							if (ImGui.SliderFloat("Mask Strength##" + localPlayerId, ref mask, 0f, 1f))
-							{
-								_core.SetSnesEffect(_core.SnesEffect, mask, _core.SnesEffectScanBeam);
-							}
-
-							float beam = _core.SnesEffectScanBeam;
-							ImGui.SetNextItemWidth(217);
-							if (ImGui.SliderFloat("Scan Beam##" + localPlayerId, ref beam, 0.5f, 6f))
-							{
-								_core.SetSnesEffect(_core.SnesEffect, _core.SnesEffectMaskStrength, beam);
-							}
-						}
-					}
-
-					if (ImGui.CollapsingHeader("Co-op##" + localPlayerId, ImGuiTreeNodeFlags.DefaultOpen))
-					{
-						DrawCoop(localPlayerId);
-					}
+							if (!success || paths.Count == 0) { return; }
+							string romPath = paths[0];
+							
+							_core.PlaySnes(Services.LocalPlayerId, romPath);
+						},
+						1,
+						_plugin.ROMSLocationSnesDir,
+						false);
 				}
+			}
+			if(ImGui.CollapsingHeader("Input Configuration##" + localPlayerId))
+			{
+				const string pressAKey = "Awaiting keypress... (click=abort)";
 
-				if (snesExists && (!playerTVRunning || _core.IsPlayingSnes()))
+				foreach (Snes9xInput key in _core.Input.SnesKeyMap.Keys)
 				{
-					if(ImGui.CollapsingHeader("Load ROM##" + localPlayerId, ImGuiTreeNodeFlags.DefaultOpen))
+					_core.Input.SnesKeyMap.TryGetValue(key, out string? boundKey);
+					float pos = ImGui.GetCursorPosX();
+					ImGui.Text(key.ToString());
+					ImGui.SameLine();
+					ImGui.SetCursorPosX(pos + 70);
+					string label = (_awaitKeyPress == (int)key ? pressAKey : string.IsNullOrEmpty(boundKey) || boundKey == "NO_KEY" ? "Unmapped" : boundKey) + "##keymap" + key;
+
+					if (ImGui.Button(label))
 					{
-						List<string> paths = _core.GetRecentSnesPaths();
-						if(paths.Count > 0)
-						{
-							ImGui.Text("Open Recent:");
-						}
-						int cnt = 1;
-						foreach(string path in paths)
-						{
-							if(ImGui.Button(cnt++ + ". " + Path.GetFileName(path)))
-							{
-								if (File.Exists(path))
-								{
-									_core.PlaySnes(Services.LocalPlayerId, path);
-								}
-								else
-								{
-									Plugin.ErrorPopup("Could not find file: " + path);
-									_core.RemoveSnesPath(path);
-								}
-							}
-						}
-						if (Button("Open ROM Folder", "openRomFolder", null, isBig:true))
-						{
-							Process.Start(new ProcessStartInfo
-							{
-								FileName = _plugin.ROMSLocationSnesDir,
-								UseShellExecute = true
-							});
-						}
-
-						ImGui.SameLine();
-
-						if (Button("Select ROM", "selectRom", isBig:true))
-						{
-							_fileDialog.OpenFileDialog(
-								"load SNES ROM",
-								"SNES ROMs{.sfc,.smc},All Files{.*}",
-								(success, paths) =>
-								{
-									if (!success || paths.Count == 0) { return; }
-									string romPath = paths[0];
-									
-									_core.PlaySnes(Services.LocalPlayerId, romPath);
-								},
-								1,
-								_plugin.ROMSLocationSnesDir,
-								false);
-						}
+						_awaitKeyPress = _awaitKeyPress == (int)key ? -1 : (int)key;
 					}
-					if(ImGui.CollapsingHeader("Input Configuration##" + localPlayerId))
-					{
-						const string pressAKey = "Awaiting keypress... (click=abort)";
 
-						foreach (Snes9xInput key in _core.Input.SnesKeyMap.Keys)
+					if (_awaitKeyPress == (int)key)
+					{
+						if (_core.Input.TryDetectInput(out string detectedKey))
 						{
-							_core.Input.SnesKeyMap.TryGetValue(key, out string? boundKey);
-							float pos = ImGui.GetCursorPosX();
-							ImGui.Text(key.ToString());
-							ImGui.SameLine();
-							ImGui.SetCursorPosX(pos + 70);
-							string label = (_awaitKeyPress == (int)key ? pressAKey : string.IsNullOrEmpty(boundKey) || boundKey == "NO_KEY" ? "Unmapped" : boundKey) + "##keymap" + key;
-
-							if (ImGui.Button(label))
-							{
-								_awaitKeyPress = _awaitKeyPress == (int)key ? -1 : (int)key;
-							}
-
-							if (_awaitKeyPress == (int)key)
-							{
-								if (_core.Input.TryDetectInput(out string detectedKey))
-								{
-									_core.Input.AssignKey(key, detectedKey);
-									_awaitKeyPress = -1;
-								}
-							}
+							_core.Input.AssignKey(key, detectedKey);
+							_awaitKeyPress = -1;
 						}
-					}
-				}
-				else
-				{
-					if(!snesExists)
-					{
-						EmptyState(FontAwesomeIcon.Gamepad, "Snes9x not found...");
-					}
-					else
-					{
-						EmptyState(FontAwesomeIcon.Film, "Video player is running");
 					}
 				}
 			}
 		}
 		else
 		{
-			EmptyState(FontAwesomeIcon.Cat, "You have not summoned", "your Blue Carbuncle.");
+			if(!snesExists)
+			{
+				EmptyState(FontAwesomeIcon.Gamepad, "Snes9x not found...");
+			}
+			else
+			{
+				EmptyState(FontAwesomeIcon.Film, "Video player is running");
+			}
 		}
 
 		ImGui.EndChild();

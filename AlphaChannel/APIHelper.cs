@@ -6,12 +6,11 @@ namespace AlphaChannel;
 
 public class APIHelper
 {
-    private readonly Plugin _plugin;
     private readonly Core _core;
     private readonly Resources _resources;
-    private readonly Dictionary<uint, IPCVideoState> _remoteStates = [];
 
     internal IReadOnlyDictionary<uint, IPCVideoState> RemoteStates => _remoteStates;
+	private readonly Dictionary<uint, IPCVideoState> _remoteStates = [];
 
     internal event Action<IGameObject?, IPCVideoState>? OnNewPlayerSeen;
 
@@ -26,9 +25,8 @@ public class APIHelper
         [property: JsonRequired] float ScreenYaw,
         [property: JsonRequired] float ScreenScale);
 
-    internal APIHelper(Plugin plugin, Core core, Resources resources)
+    internal APIHelper(Core core, Resources resources)
     {
-        _plugin = plugin;
         _core = core;
         _resources = resources;
     }
@@ -150,13 +148,11 @@ public class APIHelper
         string json = JsonConvert.SerializeObject(BuildState(stateStr, Uri.EscapeDataString(url), position));
 
         ApiProvider.NotifyStateChange(json, json);
-        _=NotifyStateDebug(json);
     }
 
     internal void OnVideoStopped()
     {
         ApiProvider.NotifyStateChange(null, null);
-        _=NotifyStateDebug(null);
     }
 
     internal async Task OnPaused(bool paused)
@@ -168,7 +164,6 @@ public class APIHelper
         string json = JsonConvert.SerializeObject(BuildState(paused ? "paused" : "playing", Uri.EscapeDataString(url), pos));
 
         ApiProvider.NotifyStateChange(json, json);
-        _=NotifyStateDebug(json);
     }
 
     internal void OnSeeked(int seconds)
@@ -182,12 +177,8 @@ public class APIHelper
         string stateStr = _core.GetPaused() ? "paused" : "playing";
         string json = JsonConvert.SerializeObject(BuildState(stateStr, Uri.EscapeDataString(url), seconds));
         ApiProvider.NotifyStateChange(json, json);
-        _=NotifyStateDebug(json);
     }
 
-    //A pure position/scale edit (Settings UI or preset apply) doesn't touch playback, so re-broadcast the
-    //current playback state as-is - just with fresh screen coordinates - rather than one of the specific
-    //video-state transitions above.
     internal void NotifyScreenMoved()
     {
         string? url = _core.GetCurrentUrl();
@@ -198,7 +189,6 @@ public class APIHelper
         string json = JsonConvert.SerializeObject(BuildState(stateStr, Uri.EscapeDataString(url), pos));
 
         ApiProvider.NotifyStateChange(json, json);
-        _=NotifyStateDebug(json);
     }
 
     internal void OnIdleReached()
@@ -207,13 +197,5 @@ public class APIHelper
         int pos = (int)_core.GetInfo()[0];
         string json = JsonConvert.SerializeObject(BuildState("paused", url != null ? Uri.EscapeDataString(url) : string.Empty, pos));
         ApiProvider.NotifyStateChange(json, json);
-        _=NotifyStateDebug(json);
     }
-
-    internal async Task NotifyStateDebug(string? json)
-    {
-        await _plugin.TextureTranslate.EncodeToTexAsync(json, _plugin.PenumbraQRPaths.First(p => p.Key.Equals(PenumbraWatcher.WatchFor, StringComparison.OrdinalIgnoreCase)).Value);
-        _core.ScheduleRedraw();
-    }
-    
 }

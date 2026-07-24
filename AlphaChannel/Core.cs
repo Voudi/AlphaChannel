@@ -1,21 +1,8 @@
-using System.Collections.Concurrent;
 using System.Numerics;
-using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
-using Dalamud.Game.ClientState.Objects.Types;
-using Dalamud.Game.Gui.NamePlate;
-using Dalamud.Hooking;
-using FFXIVClientStructs.FFXIV.Client.Game.Character;
-using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
-using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
-using FFXIVClientStructs.FFXIV.Client.System.Resource;
-using FFXIVClientStructs.FFXIV.Client.System.Resource.Handle;
-using InteropGenerator.Runtime;
-using SharpDX.Direct3D;
 using SharpDX.Direct3D11;
 using SharpDX.DXGI;
-using Dalamud.Game.ClientState.Objects.Enums;
-using NoireLib;
+using static AlphaChannel.APIHelper;
 
 namespace AlphaChannel;
 
@@ -24,10 +11,7 @@ internal sealed class Core : IDisposable
 	private Plugin _plugin;
 
 	private uint _activeEntityId; //Currently running TV PlayerId
-	private readonly Dictionary<uint, IGameObject> _tvOwners = []; //PlayerEntityID, Companion
-	private readonly Dictionary<uint, IGameObject> _companionOwners = []; //PlayerEntityID, Companion
-	private readonly ConcurrentDictionary<nint, ShaderResourceView> _views = new();
-
+	
 	private MpvRenderer? _mpvRenderer;
 	private Snes9xRenderer? _snesRenderer;
 	private readonly ScreenPainter _screenPainter;
@@ -101,8 +85,6 @@ internal sealed class Core : IDisposable
 
 		Coop.OnRemoteInput += (port, id, pressed) => _snesRenderer?.SetButton(port, id, pressed);
 
-		Services.NamePlateGui.OnNamePlateUpdate += OnNamePlateUpdate;
-
 		HideNearbyNameplates = plugin.Config.HideNearbyNameplates;
 		SnesEffect = plugin.Config.SnesEffect;
 		SnesEffectMaskStrength = plugin.Config.SnesEffectMaskStrength;
@@ -120,33 +102,6 @@ internal sealed class Core : IDisposable
 			_plugin.Config.Save();
 		}
 	}
-	private const float NameplateHideRadius = 3.0f;
-
-	private void OnNamePlateUpdate(INamePlateUpdateContext context, IReadOnlyList<INamePlateUpdateHandler> handlers)
-	{
-		if (!HideNearbyNameplates || _tvOwners.Count == 0) { return; }
-
-		foreach (INamePlateUpdateHandler handler in handlers)
-		{
-			IGameObject? obj = handler.GameObject;
-			if (obj == null) { continue; }
-
-			foreach (IGameObject companion in _tvOwners.Values)
-			{
-				if (Vector3.Distance(obj.Position, companion.Position) <= NameplateHideRadius)
-				{
-					handler.VisibilityFlags = 0;
-					handler.RemoveName();
-					handler.RemoveTitle();
-					handler.RemoveFreeCompanyTag();
-					handler.RemoveStatusPrefix();
-					handler.RemoveTargetSuffix();
-					handler.RemoveLevelPrefix();
-					break;
-				}
-			}
-		}
-	}
 
 	internal bool TVIsActive(uint entityId)
 	{
@@ -155,16 +110,7 @@ internal sealed class Core : IDisposable
 
 	internal bool TVIsVisible(uint entityId)
 	{
-		return _tvOwners.TryGetValue(entityId, out _);
-	}
-
-	internal ushort GetCompanionIndex(uint entityId)
-	{
-		if(!_companionOwners.TryGetValue(entityId, out IGameObject? result))
-		{
-			return ushort.MaxValue;
-		}
-		return result.ObjectIndex;
+		return APIHelper?.RemoteStates.TryGetValue(entityId, out _) ?? false;
 	}
 
 	internal void StopVideo()
@@ -190,7 +136,6 @@ internal sealed class Core : IDisposable
 			_mpvRenderer?.Stop();
 			_mpvRenderer = null;
 		}
-		PenumbraIPC.RemoveTempMod("screenvfx");
 		_screenPainter.SetTarget(null);
 	}
 
@@ -557,153 +502,18 @@ internal sealed class Core : IDisposable
 		{
 			SpawnScreenInFrontOfLocalPlayer();
 		}
-		else if (APIHelper != null && APIHelper.RemoteStates.TryGetValue(entityId, out APIHelper.IPCVideoState? state))
+		else if (APIHelper != null && APIHelper.RemoteStates.TryGetValue(entityId, out IPCVideoState? state))
 		{
 			ApplyRemoteScreenTransform(new Vector3(state.ScreenX, state.ScreenY, state.ScreenZ), state.ScreenYaw, state.ScreenScale);
 		}
 	}
 
-	internal void RedrawIfNeeded()
-	{
-		if(_redrawScheduled)
-		{
-			_redrawScheduled = false;
-			_=NoireService.Framework.RunOnTick(() =>
-			{
-				PenumbraIPC.Redraw(GetCompanionIndex(Services.LocalPlayerId));
-			});
-		}
-	}
-
-	private bool _redrawScheduled;
-	internal void ScheduleRedraw()
-	{
-		_redrawScheduled = true;
-	}
-
-	internal unsafe bool ScanForCompanions()
-	{
-		uint? localPlayerId = Services.Objects.LocalPlayer?.EntityId;
-		if(localPlayerId == null)
-		{
-			return false;
-		}
-
-		bool playerCarbuncleFound = false;
-
-		List<uint> visitedTvs = [];
-		List<uint> visitedCompanions = [];
-
-		foreach (var item in Services.Objects.Where(x => x is IBattleNpc && x.BaseId == 13498 && x.ObjectKind is ObjectKind.BattleNpc))
-		{
-			if (item.Address == IntPtr.Zero)
-			{
-				continue;
-			}
-			
-			var character = (Character*)item.Address;
-			if (character != null)
-			{
-				uint ownerId = character->CompanionOwnerId;
-				_companionOwners.TryAdd(ownerId, item);
-				visitedCompanions.Add(ownerId);
-				if(character->DrawObject != null)
-				{
-					if (character->DrawObject->GetObjectType() == ObjectType.CharacterBase)
-					{
-						try
-						{ 
-							var tvDraw = (CharacterBase*)character->DrawObject;
-							if (tvDraw->Models[0] is not null) //TODO: find a better checking method
-							{ //Actually, its not so bad checking it like this, wysiwyg
-								if (tvDraw->Models[0]->MaterialCount >= 1)
-								{
-									if (tvDraw->Models[0]->Materials[0] is not null)
-									{
-										if (tvDraw->Models[0]->Materials[0]->TextureCount >= 4)
-										{
-											if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture is not null)
-											{
-												if (tvDraw->Models[0]->Materials[0]->Textures[3].Texture->Texture is not null)
-												{
-													visitedTvs.Add(ownerId);
-													CheckoutCompanion(ownerId, item);
-													continue;
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-						catch (Exception) { }
-					}
-				}
-
-				if (localPlayerId == ownerId)
-				{
-					playerCarbuncleFound = true;
-				}
-
-				if (_tvOwners.TryGetValue(ownerId, out _)) //If entity has been recognized as TV once, keep it playing until its been removed or explicitly turned off to avoid 'sync holes'
-				{
-					visitedTvs.Add(ownerId);
-					CheckoutCompanion(ownerId, item);
-					continue;
-				}
-			}
-		}
-
-		//Remove unvisited TVs
-		_tvOwners.Where(owner => !visitedTvs.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
-		{
-			if (_activeEntityId == ownerId)
-			{
-				Services.Log.Warning("Stopping Vid owner not found...");
-				StopVideo();
-			}
-			_tvOwners.Remove(ownerId);
-		});
-
-		//Remove unvisited Companions
-		_companionOwners.Where(owner => !visitedCompanions.Contains(owner.Key)).Select(owner => owner.Key).ToList().ForEach(ownerId =>
-		{
-			_companionOwners.Remove(ownerId);
-			_tvOwners.Remove(ownerId);
-		});
-
-		return playerCarbuncleFound;
-	}
-
-	internal void RemoveCompanion()
-	{
-		_tvOwners.Remove(Services.LocalPlayerId);
-	}
-
-	private void CheckoutCompanion(uint ownerId, IGameObject companion)
-	{
-		_tvOwners.TryAdd(ownerId, companion);
-	}
-
 	public void Dispose()
 	{
-		Services.NamePlateGui.OnNamePlateUpdate -= OnNamePlateUpdate;
-
-		PenumbraIPC.Dispose();
-		uint localPlayerId = Services.LocalPlayerId;
-		if(_tvOwners.TryGetValue(localPlayerId, out _))
-		{
-			PenumbraIPC.Redraw(GetCompanionIndex(localPlayerId)); //Special case: Redraw one last time after dispose
-		}
-
 		_mpvRenderer?.Dispose();
 		_snesRenderer?.Dispose();
 		_screenPainter.Dispose();
 		Coop.Dispose();
-
-		//Do not clean up Texture2D and ShaderResourceView as they may still be part of the currently running VFX
-		//Instead just let it stay in the game until it eventually closes, its not growing anyway
-		_views.Clear();
 
 		GC.SuppressFinalize(this);
 	}
