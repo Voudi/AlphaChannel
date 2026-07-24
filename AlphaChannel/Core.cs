@@ -113,7 +113,7 @@ internal sealed class Core : IDisposable
 
 	internal void StopVideo()
 	{
-		if (TVIsActive(Services.LocalPlayerId) && !IsPlayingSnes())
+		if (Services.Objects.LocalPlayer?.EntityId is not null && TVIsActive(Services.LocalPlayerId) && !IsPlayingSnes())
 		{
 			APIHelper?.OnVideoStopped();
 		}
@@ -135,7 +135,7 @@ internal sealed class Core : IDisposable
 			_mpvRenderer = null;
 		}
 		PenumbraIPC.RemoveTempMod("screenvfx");
-		//_screenPainter.SetTarget(null, null);
+		_screenPainter.SetTarget(null, null);
 	}
 
 	internal void PlayVideo(uint entityId, string url, int playbackPosition = 0, bool isPlaying = true)
@@ -532,7 +532,7 @@ internal sealed class Core : IDisposable
 			RefreshActorVFX(Services.LocalPlayerAddr, companion.Address); //This TV is active, play its VFX
 
 			Texture2D screenTexture = _isPlayingSnes ? _snesScreenTexture : _screenTexture;
-			//_screenPainter.SetTarget(screenTexture, companion);
+			_screenPainter.SetTarget(screenTexture, companion);
 		}
 	}
 
