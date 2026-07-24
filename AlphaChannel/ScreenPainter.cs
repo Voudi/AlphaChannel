@@ -7,6 +7,7 @@ using SharpDX.Direct3D11;
 using Buffer = SharpDX.Direct3D11.Buffer;
 using GfxKernel = FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
 using GfxScene = FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
+using GfxGui = FFXIVClientStructs.FFXIV.Component.GUI;
 using GameControl = FFXIVClientStructs.FFXIV.Client.Game.Control;
 using NumericsMatrix4x4 = System.Numerics.Matrix4x4;
 
@@ -53,23 +54,33 @@ internal sealed unsafe class ScreenPainter : IDisposable
 	private RenderTargetView? _cachedRtv;
 	private DepthStencilView? _cachedDsv;
 
-	//TEMPORARY: backup diagnostic in case the reversed-Z/GreaterEqual guess is wrong - reads the real depth
-	//at a near point (screen centre, where the player usually stands) and a far point (near the top of the
-	//screen, usually background) so a wrong comparison direction shows up immediately in the log instead of
-	//needing another round of "add more logging".
-	private Texture2D? _depthProbeStagingTex;
-	private DateTime _lastDepthProbeLog = DateTime.MinValue;
+	//Native game UI (inventory, chat, hotbars, ...) is already fully composited into the back buffer by the
+	//time our Present hook runs - only Dalamud's own ImGui overlay draws later than us. The scene depth
+	//buffer has no concept of 2D UI at all, so depth testing alone can't stop us from painting over it; the
+	//pixel shader discards fragments that fall inside any currently-visible native UI window's screen rect
+	//instead, using bounds read straight from FFXIVClientStructs (AtkUnitBase/AtkResNode) - no hook needed.
+	private const int MaxUiRects = 64;
 
 	[StructLayout(LayoutKind.Sequential)]
-	private struct ScreenParams
+	private unsafe struct ScreenParams
 	{
 		public NumericsMatrix4x4 WorldViewProj;
+		public int UiRectCount;
+		private fixed float _pad[3];
+		public fixed float UiRects[MaxUiRects * 4]; //Each rect: screenX, screenY, width, height (pixels).
 	}
 
 	internal ScreenPainter()
 	{
 		const string hlsl = @"
-			cbuffer Params : register(b0) { row_major float4x4 worldViewProj; };
+			#define MAX_UI_RECTS 64
+			cbuffer Params : register(b0)
+			{
+				row_major float4x4 worldViewProj;
+				int uiRectCount;
+				float3 _pad;
+				float4 uiRects[MAX_UI_RECTS]; //xy = screen pos, zw = size, in pixels
+			};
 			struct VOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 
 			static const float2 corners[4] = { float2(-1,-1), float2(-1,1), float2(1,-1), float2(1,1) };
@@ -88,6 +99,16 @@ internal sealed unsafe class ScreenPainter : IDisposable
 
 			float4 PS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 			{
+				for (int r = 0; r < uiRectCount; r++)
+				{
+					float4 rect = uiRects[r];
+					if (i.pos.x >= rect.x && i.pos.x < rect.x + rect.z &&
+						i.pos.y >= rect.y && i.pos.y < rect.y + rect.w)
+					{
+						discard;
+					}
+				}
+
 				if (!isFrontFace)
 				{
 					return float4(0.333, 0.333, 0.333, 1); //#555555 - back of the screen, not the (mirrored) video
@@ -128,7 +149,7 @@ internal sealed unsafe class ScreenPainter : IDisposable
 			DepthComparison = Comparison.GreaterEqual
 		});
 
-		_cbuf = new Buffer(DxHandler.Device, Marshal.SizeOf<ScreenParams>(), ResourceUsage.Default,
+		_cbuf = new Buffer(DxHandler.Device, sizeof(ScreenParams), ResourceUsage.Default,
 			BindFlags.ConstantBuffer, CpuAccessFlags.None, ResourceOptionFlags.None, 0);
 
 		DxHandler.OnPresent += DrawIfReady;
@@ -204,8 +225,6 @@ internal sealed unsafe class ScreenPainter : IDisposable
 
 		DeviceContext ctx = DxHandler.Device!.ImmediateContext;
 
-		ProbeDepthIfDue(ctx, dsv, targetWidth, targetHeight);
-
 		RenderTargetView[] prevRtvs = ctx.OutputMerger.GetRenderTargets(1, out DepthStencilView? prevDsv);
 		VertexShader? prevVs = ctx.VertexShader.Get();
 		PixelShader? prevPs = ctx.PixelShader.Get();
@@ -218,7 +237,10 @@ internal sealed unsafe class ScreenPainter : IDisposable
 		try
 		{
 			var p = new ScreenParams { WorldViewProj = worldViewProj.Value };
-			ctx.UpdateSubresource(ref p, _cbuf);
+			p.UiRectCount = CollectUiRects(ref p);
+			//p is a stack local, its address is already stable, no `fixed` needed to take it.
+			ScreenParams* pp = &p;
+			ctx.UpdateSubresource(new SharpDX.DataBox((nint)pp), _cbuf);
 
 			ctx.OutputMerger.SetRenderTargets(dsv, rtv);
 			//Explicit full-target viewport - we never set this before, so whatever viewport the game's last
@@ -234,6 +256,7 @@ internal sealed unsafe class ScreenPainter : IDisposable
 			ctx.VertexShader.Set(_vs);
 			ctx.VertexShader.SetConstantBuffer(0, _cbuf);
 			ctx.PixelShader.Set(_ps);
+			ctx.PixelShader.SetConstantBuffer(0, _cbuf);
 			ctx.PixelShader.SetShaderResource(0, _srv);
 			ctx.PixelShader.SetSampler(0, _sampler);
 			ctx.Draw(4, 0);
@@ -258,66 +281,57 @@ internal sealed unsafe class ScreenPainter : IDisposable
 		}
 	}
 
-	private void ProbeDepthIfDue(DeviceContext ctx, DepthStencilView dsv, uint targetWidth, uint targetHeight)
+	//Pure memory reads - walks every currently-loaded native UI window (AtkUnitBase) and, for the visible
+	//ones, records its on-screen rect from its root node. No hook, no game calls - same risk profile as
+	//TryGetSceneTargets below.
+	private static int CollectUiRects(ref ScreenParams p)
 	{
-		DateTime now = DateTime.UtcNow;
-		if ((now - _lastDepthProbeLog).TotalSeconds < 2)
+		GfxGui.AtkStage* stage = GfxGui.AtkStage.Instance();
+		if (stage == null || stage->RaptureAtkUnitManager == null)
 		{
-			return;
+			return 0;
 		}
-		_lastDepthProbeLog = now;
 
-		try
+		//Some loaded addons are invisible-but-"IsVisible" full-screen backdrops/overlays (loading-screen
+		//fades, click-blockers, etc.), not actual windows - a single one of those among AllLoadedUnitsList
+		//would otherwise mask out the entire draw. Real windows never span nearly the whole screen.
+		float maxWidth = stage->ScreenSize.Width * 0.9f;
+		float maxHeight = stage->ScreenSize.Height * 0.9f;
+
+		int count = 0;
+		System.Span<FFXIVClientStructs.Interop.Pointer<GfxGui.AtkUnitBase>> entries = stage->RaptureAtkUnitManager->AllLoadedUnitsList.Entries;
+		for (int i = 0; i < entries.Length && count < MaxUiRects; i++)
 		{
-			using SharpDX.Direct3D11.Resource depthResource = dsv.Resource;
-			using Texture2D depthTex = depthResource.QueryInterface<Texture2D>();
-			SharpDX.DXGI.Format format = depthTex.Description.Format;
-
-			if (_depthProbeStagingTex == null)
+			GfxGui.AtkUnitBase* unit = entries[i].Value;
+			if (unit == null || !unit->IsVisible || unit->Alpha == 0 || unit->RootNode == null || unit->RootNode->Color.A == 0 || unit->WindowNode == null)
 			{
-				_depthProbeStagingTex = new Texture2D(DxHandler.Device, new Texture2DDescription
-				{
-					Width = 1,
-					Height = 1,
-					MipLevels = 1,
-					ArraySize = 1,
-					Format = format,
-					SampleDescription = new SharpDX.DXGI.SampleDescription(1, 0),
-					Usage = ResourceUsage.Staging,
-					BindFlags = BindFlags.None,
-					CpuAccessFlags = CpuAccessFlags.Read,
-					OptionFlags = ResourceOptionFlags.None
-				});
+				continue;
 			}
 
-			string near = ReadDepthTexel(ctx, depthTex, format, (int)(targetWidth / 2), (int)(targetHeight / 2));
-			string far = ReadDepthTexel(ctx, depthTex, format, (int)(targetWidth / 2), (int)(targetHeight * 0.1));
-			Services.Log.Debug($"[ScreenPainter] depthProbe: fmt={format} near(centre)={near} far(top)={far}");
+			//GetBounds is the same engine-computed bounding box FFXIV itself uses for mouse-collision testing
+			//against this node - the actual current rendered extent, in real screen pixels, accounting for
+			//scale/resolution/borders already. No guessing at Width/Height/ScreenX/Y or a fudge-factor padding.
+			FFXIVClientStructs.FFXIV.Common.Math.Bounds bounds;
+			unit->RootNode->GetBounds(&bounds);
+
+			float x = bounds.Pos1.X;
+			float y = bounds.Pos1.Y;
+			float width = bounds.Pos2.X - bounds.Pos1.X;
+			float height = bounds.Pos2.Y - bounds.Pos1.Y;
+			if (width <= 0 || height <= 0 || width >= maxWidth || height >= maxHeight)
+			{
+				continue;
+			}
+
+			int baseIndex = count * 4;
+			p.UiRects[baseIndex + 0] = x;
+			p.UiRects[baseIndex + 1] = y;
+			p.UiRects[baseIndex + 2] = width;
+			p.UiRects[baseIndex + 3] = height;
+			count++;
 		}
-		catch (Exception e)
-		{
-			Services.Log.Debug($"[ScreenPainter] depthProbe failed: {e.Message}");
-		}
-	}
 
-	private string ReadDepthTexel(DeviceContext ctx, Texture2D depthTex, SharpDX.DXGI.Format format, int px, int py)
-	{
-		var region = new ResourceRegion(px, py, 0, px + 1, py + 1, 1);
-		ctx.CopySubresourceRegion(depthTex, 0, region, _depthProbeStagingTex, 0);
-
-		SharpDX.DataBox box = ctx.MapSubresource(_depthProbeStagingTex, 0, MapMode.Read, SharpDX.Direct3D11.MapFlags.None);
-		uint raw;
-		unsafe
-		{
-			raw = *(uint*)box.DataPointer;
-		}
-		ctx.UnmapSubresource(_depthProbeStagingTex, 0);
-
-		float decoded = format == SharpDX.DXGI.Format.R24G8_Typeless
-			? (raw & 0x00FFFFFFu) / 16777215f
-			: BitConverter.UInt32BitsToSingle(raw);
-
-		return $"{decoded:0.000000}";
+		return count;
 	}
 
 	//Pure memory reads - no hooking, no calling into the game. Colour comes from the swapchain's own back
@@ -431,7 +445,6 @@ internal sealed unsafe class ScreenPainter : IDisposable
 		_srv?.Dispose();
 		_cachedRtv?.Dispose();
 		_cachedDsv?.Dispose();
-		_depthProbeStagingTex?.Dispose();
 		_cbuf.Dispose();
 		_depthState.Dispose();
 		_rasterState.Dispose();
