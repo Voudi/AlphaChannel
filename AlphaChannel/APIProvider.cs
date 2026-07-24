@@ -38,7 +38,7 @@ public static class ApiProvider
         _onReady.SendMessage();
     }
 
-    public static void NotifyStateChange(string? fullState) //Full and partial states are basically the same in this project due to NTP timestamp usage instead of updating states periodically
+    public static void NotifyStateChange(string? fullState)
         => _stateChange?.SendMessage(fullState);
 
     public static void DeInit()
