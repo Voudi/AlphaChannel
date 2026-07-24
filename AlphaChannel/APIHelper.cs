@@ -147,12 +147,12 @@ public class APIHelper
         string stateStr = isPlaying ? "playing" : "paused";
         string json = JsonConvert.SerializeObject(BuildState(stateStr, Uri.EscapeDataString(url), position));
 
-        ApiProvider.NotifyStateChange(json, json);
+        ApiProvider.NotifyStateChange(json);
     }
 
     internal void OnVideoStopped()
     {
-        ApiProvider.NotifyStateChange(null, null);
+        ApiProvider.NotifyStateChange(null);
     }
 
     internal async Task OnPaused(bool paused)
@@ -163,7 +163,7 @@ public class APIHelper
         int pos = (int)_core.GetInfo()[0];
         string json = JsonConvert.SerializeObject(BuildState(paused ? "paused" : "playing", Uri.EscapeDataString(url), pos));
 
-        ApiProvider.NotifyStateChange(json, json);
+        ApiProvider.NotifyStateChange(json);
     }
 
     internal void OnSeeked(int seconds)
@@ -176,7 +176,7 @@ public class APIHelper
 
         string stateStr = _core.GetPaused() ? "paused" : "playing";
         string json = JsonConvert.SerializeObject(BuildState(stateStr, Uri.EscapeDataString(url), seconds));
-        ApiProvider.NotifyStateChange(json, json);
+        ApiProvider.NotifyStateChange(json);
     }
 
     internal void NotifyScreenMoved()
@@ -188,7 +188,7 @@ public class APIHelper
         string stateStr = _core.GetPaused() ? "paused" : "playing";
         string json = JsonConvert.SerializeObject(BuildState(stateStr, Uri.EscapeDataString(url), pos));
 
-        ApiProvider.NotifyStateChange(json, json);
+        ApiProvider.NotifyStateChange(json);
     }
 
     internal void OnIdleReached()
@@ -196,6 +196,6 @@ public class APIHelper
         string? url = _core.GetCurrentUrl();
         int pos = (int)_core.GetInfo()[0];
         string json = JsonConvert.SerializeObject(BuildState("paused", url != null ? Uri.EscapeDataString(url) : string.Empty, pos));
-        ApiProvider.NotifyStateChange(json, json);
+        ApiProvider.NotifyStateChange(json);
     }
 }
