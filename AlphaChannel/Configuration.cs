@@ -11,6 +11,18 @@ public class Configuration : IPluginConfiguration
 
     public Dictionary<Snes9xInput, string> KeyMappings { get; set; } = [];
     public List<string> RecentPaths { get; set; } = [];
+    public string RelayUrl { get; set; } = "";
+
+    public int YoutubeMaxQuality { get; set; } = 1080; //0 = best available, otherwise a max height cap in px
+    public int YoutubeDefaultVolume { get; set; } = 25;
+    public bool YoutubeHardwareDecoding { get; set; }
+    public bool YoutubeDisableTlsVerify { get; set; }
+
+    public bool HideNearbyNameplates { get; set; } = true;
+
+    public Snes9xEffect SnesEffect { get; set; } = Snes9xEffect.CrtScanlines;
+    public float SnesEffectMaskStrength { get; set; } = 0.30f;
+    public float SnesEffectScanBeam { get; set; } = 2.5f;
 
 	[NonSerialized] private IDalamudPluginInterface _pi = null!;
 

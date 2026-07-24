@@ -47,5 +47,6 @@ public class Services
 	[PluginService]
 	public static IDataManager Data { get; private set; } = null!;
 
-	
+	[PluginService]
+	public static INamePlateGui NamePlateGui { get; private set; } = null!;
 }

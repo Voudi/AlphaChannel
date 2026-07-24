@@ -9,6 +9,7 @@ internal sealed class InputManager
 
 	internal Dictionary<Snes9xInput, string> SnesKeyMap { get; } = [];
 	private readonly Dictionary<VirtualKey, bool> _heldState = [];
+	private readonly Dictionary<Snes9xInput, bool> _lastSentCoopState = [];
 
 	internal enum GamePadSticks
 	{
@@ -129,10 +130,8 @@ internal sealed class InputManager
 		_plugin.Config.Save();
 	}
 
-	internal void OnFrameworkUpdate(bool isPlayingSnes, bool controlsEnabled, Snes9xRenderer? snesRenderer)
+	internal void OnFrameworkUpdate(bool isPlayingSnes, bool controlsEnabled, Snes9xRenderer? snesRenderer, HashSet<int> keyUpEvents)
 	{
-		HashSet<int> keyUpEvents = _plugin.WindowKeyUpReader.Consume();
-
 		if (!isPlayingSnes || !controlsEnabled)
 		{
 			return;
@@ -166,5 +165,45 @@ internal sealed class InputManager
 			}
 		}
 		snesRenderer?.OnFrameworkUpdate();
+	}
+
+	//Mirrors OnFrameworkUpdate's key-hold logic, but for a co-op joiner who isn't running the emulator locally:
+	//sends button state to the host over the relay instead of calling SetButton directly, and only on change.
+	internal void OnFrameworkUpdateAsCoopJoiner(CoopClient coop, HashSet<int> keyUpEvents)
+	{
+		foreach (Snes9xInput key in SnesKeyMap.Keys)
+		{
+			bool pressedNow;
+			if (SnesKeyMap.TryGetValue(key, out string? virtualKeyString)
+				&& virtualKeyString != null
+				&& virtualKeyString != VirtualKey.NO_KEY.ToString()
+				&& Enum.TryParse(virtualKeyString, out VirtualKey virtualKey)
+				&& IsSnesKeyMappable(virtualKey))
+			{
+				bool pressed = Services.KeyState[virtualKey];
+				_heldState.TryGetValue(virtualKey, out bool held);
+				if (pressed) { held = true; }
+				if (keyUpEvents.Contains((int)virtualKey)) { held = false; }
+				_heldState[virtualKey] = held;
+				pressedNow = held;
+				if (pressed) { Services.KeyState[virtualKey] = false; }
+			}
+			else if (SnesKeyMap.TryGetValue(key, out string? gamePadString)
+				&& gamePadString != null
+				&& gamePadString != VirtualKey.NO_KEY.ToString())
+			{
+				pressedNow = IsGamePadButtonPressed(GetGamePadButtonId(gamePadString));
+			}
+			else
+			{
+				continue;
+			}
+
+			if (!_lastSentCoopState.TryGetValue(key, out bool lastSent) || lastSent != pressedNow)
+			{
+				_lastSentCoopState[key] = pressedNow;
+				_ = coop.SendInputAsync(1, (int)key, pressedNow);
+			}
+		}
 	}
 }

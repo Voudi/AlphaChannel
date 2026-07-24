@@ -64,20 +64,31 @@ namespace AlphaChannel
 			_snapA = Marshal.AllocHGlobal(_frameBytes);
 			_snapB = Marshal.AllocHGlobal(_frameBytes);
 
+			int maxQuality = _pluginInstance?.Config.YoutubeMaxQuality ?? Plugin.ScreenHeight;
+			string ytdlFormat = maxQuality > 0
+				? $"bestvideo[height<={maxQuality}][ext=mp4]+bestaudio/best[height<={maxQuality}]"
+				: "bestvideo[ext=mp4]+bestaudio/best";
+			bool hwDecoding = _pluginInstance?.Config.YoutubeHardwareDecoding ?? false;
+			int defaultVolume = _pluginInstance?.Config.YoutubeDefaultVolume ?? 25;
+			bool disableTlsVerify = _pluginInstance?.Config.YoutubeDisableTlsVerify ?? false;
+
 			_mpvCtx = mpv_create();
 			_ = mpv_set_option_string(_mpvCtx, "vo", "libmpv");
-			_ = mpv_set_option_string(_mpvCtx, "hwdec", "no");
+			_ = mpv_set_option_string(_mpvCtx, "hwdec", hwDecoding ? "auto-safe" : "no");
 			_ = mpv_set_option_string(_mpvCtx, "profile", "sw-fast");
 			_ = mpv_set_option_string(_mpvCtx, "ytdl", "yes");
 			_ = mpv_set_option_string(_mpvCtx, "script-opts", $"ytdl_hook-ytdl_path={_pluginInstance?.AssemblyLocationYTDLP}");
-			_ = mpv_set_option_string(_mpvCtx, "ytdl-format", $"bestvideo[height<={Plugin.ScreenHeight}][ext=mp4]+bestaudio/best[height<={Plugin.ScreenHeight}]");
+			_ = mpv_set_option_string(_mpvCtx, "ytdl-format", ytdlFormat);
 			_ = mpv_set_option_string(_mpvCtx, "terminal", "yes");
-			_ = mpv_set_option_string(_mpvCtx, "volume", "25");
+			_ = mpv_set_option_string(_mpvCtx, "volume", defaultVolume.ToString(System.Globalization.CultureInfo.InvariantCulture));
 			_ = mpv_set_option_string(_mpvCtx, "msg-level", "all=warn,ffmpeg=error");
 			_ = mpv_set_option_string(_mpvCtx, "ytdl-raw-options", "force-ipv4=,hls-use-mpegts=");
 			_ = mpv_set_option_string(_mpvCtx, "idle", "yes");
 			_ = mpv_set_option_string(_mpvCtx, "keep-open", "yes");
-			//_ = mpv_set_option_string(_mpvCtx, "tls-verify", "no"); TODO: Make it optional to disable TLS verification because WINE is a bitch
+			if (disableTlsVerify)
+			{
+				_ = mpv_set_option_string(_mpvCtx, "tls-verify", "no");
+			}
 			_ = mpv_request_log_messages(_mpvCtx, "warn");
 			_ = mpv_initialize(_mpvCtx);
 

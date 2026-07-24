@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Game.Gui.NamePlate;
 using Dalamud.Hooking;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
@@ -66,6 +68,9 @@ internal sealed class Core : IDisposable
 	private bool _snesControlsEnabled;
 	internal InputManager Input { get; }
 
+	internal CoopClient Coop { get; } = new();
+	internal bool CoopJoinActive { get; set; }
+
 	internal APIHelper? APIHelper { get; set; }
 
 	private bool _lastIdle = true;
@@ -88,6 +93,54 @@ internal sealed class Core : IDisposable
 		_getResourceSyncHook.Enable();
 
 		_recentSnesPaths.AddRange(plugin.Config.RecentPaths);
+
+		Coop.OnRemoteInput += (port, id, pressed) => _snesRenderer?.SetButton(port, id, pressed);
+
+		Services.NamePlateGui.OnNamePlateUpdate += OnNamePlateUpdate;
+
+		HideNearbyNameplates = plugin.Config.HideNearbyNameplates;
+		SnesEffect = plugin.Config.SnesEffect;
+		SnesEffectMaskStrength = plugin.Config.SnesEffectMaskStrength;
+		SnesEffectScanBeam = plugin.Config.SnesEffectScanBeam;
+	}
+
+	private bool _hideNearbyNameplates = true;
+	internal bool HideNearbyNameplates
+	{
+		get => _hideNearbyNameplates;
+		set
+		{
+			_hideNearbyNameplates = value;
+			_plugin.Config.HideNearbyNameplates = value;
+			_plugin.Config.Save();
+		}
+	}
+	private const float NameplateHideRadius = 3.0f;
+
+	private void OnNamePlateUpdate(INamePlateUpdateContext context, IReadOnlyList<INamePlateUpdateHandler> handlers)
+	{
+		if (!HideNearbyNameplates || _tvOwners.Count == 0) { return; }
+
+		foreach (INamePlateUpdateHandler handler in handlers)
+		{
+			IGameObject? obj = handler.GameObject;
+			if (obj == null) { continue; }
+
+			foreach (IGameObject companion in _tvOwners.Values)
+			{
+				if (Vector3.Distance(obj.Position, companion.Position) <= NameplateHideRadius)
+				{
+					handler.VisibilityFlags = 0;
+					handler.RemoveName();
+					handler.RemoveTitle();
+					handler.RemoveFreeCompanyTag();
+					handler.RemoveStatusPrefix();
+					handler.RemoveTargetSuffix();
+					handler.RemoveLevelPrefix();
+					break;
+				}
+			}
+		}
 	}
 
 	internal bool TVIsActive(uint entityId)
@@ -314,6 +367,7 @@ internal sealed class Core : IDisposable
 				AddSnesPath(path);
 				_snesControlsEnabled = true;
 				_isPlayingSnes = _snesRenderer.Load(_snesScreenTexture, path);
+				_snesRenderer.ApplyEffect(SnesEffect, SnesEffectMaskStrength, SnesEffectScanBeam);
 				_activeEntityId = entityId;
 			}
 			Services.Log.Debug("Starting ROM");
@@ -325,7 +379,24 @@ internal sealed class Core : IDisposable
 
 		return _isPlayingSnes;
 	}
-	
+
+	internal Snes9xEffect SnesEffect { get; private set; } = Snes9xEffect.CrtScanlines;
+	internal float SnesEffectMaskStrength { get; private set; } = 0.30f;
+	internal float SnesEffectScanBeam { get; private set; } = 2.5f;
+
+	internal void SetSnesEffect(Snes9xEffect effect, float maskStrength, float scanBeam)
+	{
+		SnesEffect = effect;
+		SnesEffectMaskStrength = maskStrength;
+		SnesEffectScanBeam = scanBeam;
+		_snesRenderer?.ApplyEffect(effect, maskStrength, scanBeam);
+
+		_plugin.Config.SnesEffect = effect;
+		_plugin.Config.SnesEffectMaskStrength = maskStrength;
+		_plugin.Config.SnesEffectScanBeam = scanBeam;
+		_plugin.Config.Save();
+	}
+
 	internal void RemoveSnesPath(string path)
 	{
 		_recentSnesPaths.Remove(path);
@@ -357,6 +428,8 @@ internal sealed class Core : IDisposable
 	{
 		_snesControlsEnabled = enabled;
 	}
+	internal event Action? OnLocalVideoIdle;
+
 	internal void OnFrameworkUpdate()
 	{
 		if (Services.LocalPlayerExists && TVIsActive(Services.LocalPlayerId) && !IsPlayingSnes())
@@ -365,6 +438,7 @@ internal sealed class Core : IDisposable
 			if (idle && !_lastIdle)
 			{
 				APIHelper?.OnIdleReached();
+				OnLocalVideoIdle?.Invoke();
 			}
 			_lastIdle = idle;
 		}
@@ -373,7 +447,14 @@ internal sealed class Core : IDisposable
 			_lastIdle = true;
 		}
 
-		Input.OnFrameworkUpdate(_isPlayingSnes, _snesControlsEnabled, _snesRenderer);
+		HashSet<int> keyUpEvents = _plugin.WindowKeyUpReader.Consume();
+
+		Input.OnFrameworkUpdate(_isPlayingSnes, _snesControlsEnabled, _snesRenderer, keyUpEvents);
+
+		if (CoopJoinActive && Coop.IsPaired)
+		{
+			Input.OnFrameworkUpdateAsCoopJoiner(Coop, keyUpEvents);
+		}
 	}
 
 	internal void RedrawIfNeeded()
@@ -668,6 +749,8 @@ internal sealed class Core : IDisposable
 
 	public void Dispose()
 	{
+		Services.NamePlateGui.OnNamePlateUpdate -= OnNamePlateUpdate;
+
 		PenumbraIPC.Dispose();
 		uint localPlayerId = Services.LocalPlayerId;
 		if(_tvOwners.TryGetValue(localPlayerId, out _))
@@ -677,6 +760,7 @@ internal sealed class Core : IDisposable
 
 		_mpvRenderer?.Dispose();
 		_snesRenderer?.Dispose();
+		Coop.Dispose();
 
 		_textureOnLoadHook.Disable();
 		_textureOnLoadHook.Dispose();
