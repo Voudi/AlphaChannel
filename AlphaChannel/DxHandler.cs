@@ -10,8 +10,8 @@ internal static class DxHandler
 {
 	internal static D3D11.Device? Device { get; private set; }
 
-	//Bumped once per Present call - lets other hooks (e.g. an OMSetRenderTargets hook that may fire many
-	//times per frame) tell whether they've already done their once-per-frame work for the current frame.
+	//Bumped once per Present call - lets other hooks tell whether they've already done their once-per-frame
+	//work for the current frame.
 	internal static ulong FrameIndex { get; private set; }
 
 	private static readonly ConcurrentDictionary<string, Action> _pendingRenderWork = new();
