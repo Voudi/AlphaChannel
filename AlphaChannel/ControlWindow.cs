@@ -1036,6 +1036,7 @@ internal sealed class ControlWindow : Window, IDisposable
 		WithDisabled(!screenActive, () =>
 		{
 			Vector3 pos = _core.ScreenPosition;
+			float rotationDegrees = _core.ScreenYaw * (180f / MathF.PI);
 			float scale = _core.ScreenScale;
 			bool changed = false;
 
@@ -1050,10 +1051,18 @@ internal sealed class ControlWindow : Window, IDisposable
 
 			ImGui.SetNextItemWidth(65);
 			changed |= ImGui.InputFloat("Scale##screenScale", ref scale);
+			ImGui.SameLine();
+			ImGui.SetNextItemWidth(65);
+			if (ImGui.InputFloat("R##screenRotation", ref rotationDegrees))
+			{
+				rotationDegrees %= 360f;
+				if (rotationDegrees < 0f) { rotationDegrees += 360f; }
+				changed = true;
+			}
 
 			if (changed)
 			{
-				_core.SetScreenPosition(pos, scale);
+				_core.SetScreenPosition(pos, rotationDegrees * (MathF.PI / 180f), scale);
 			}
 
 			ImGui.SetNextItemWidth(150);

@@ -11,6 +11,7 @@ public class ScreenPositionPreset
     public float X { get; set; }
     public float Y { get; set; }
     public float Z { get; set; }
+    public float RotationDegrees { get; set; }
     public float Scale { get; set; } = 1.0f;
 }
 

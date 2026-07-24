@@ -392,9 +392,10 @@ internal sealed class Core : IDisposable
 	}
 
 	//Live, unsaved position/scale edit from the Settings UI - only meaningful while hosting our own screen.
-	internal void SetScreenPosition(Vector3 position, float scale)
+	internal void SetScreenPosition(Vector3 position, float yaw, float scale)
 	{
 		ScreenPosition = position;
+		ScreenYaw = yaw;
 		ScreenScale = scale;
 
 		if (TVIsActive(Services.LocalPlayerId))
@@ -423,7 +424,7 @@ internal sealed class Core : IDisposable
 		}
 
 		_screenPresets.RemoveAll(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-		_screenPresets.Add(new ScreenPositionPreset { Name = name, X = ScreenPosition.X, Y = ScreenPosition.Y, Z = ScreenPosition.Z, Scale = ScreenScale });
+		_screenPresets.Add(new ScreenPositionPreset { Name = name, X = ScreenPosition.X, Y = ScreenPosition.Y, Z = ScreenPosition.Z, RotationDegrees = ScreenYaw * (180f / MathF.PI), Scale = ScreenScale });
 
 		_plugin.Config.ScreenPresets = _screenPresets;
 		_plugin.Config.Save();
@@ -438,7 +439,7 @@ internal sealed class Core : IDisposable
 
 	internal void ApplyScreenPreset(ScreenPositionPreset preset)
 	{
-		SetScreenPosition(new Vector3(preset.X, preset.Y, preset.Z), preset.Scale);
+		SetScreenPosition(new Vector3(preset.X, preset.Y, preset.Z), preset.RotationDegrees * (MathF.PI / 180f), preset.Scale);
 	}
 	internal bool IsPlayingSnes()
 	{
