@@ -37,6 +37,25 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 		private Texture2D? _targetTexture;
 		private CrtLottesScaler? _scaler;
 		private Snes9xAudio? _audio;
+
+		internal Snes9xEffect Effect { get; private set; } = Snes9xEffect.CrtScanlines;
+		internal float EffectMaskStrength { get; private set; } = 0.30f;
+		internal float EffectScanBeam { get; private set; } = 2.5f;
+
+		internal void ApplyEffect(Snes9xEffect effect, float maskStrength, float scanBeam)
+		{
+			Effect = effect;
+			EffectMaskStrength = maskStrength;
+			EffectScanBeam = scanBeam;
+
+			if (_scaler != null)
+			{
+				_scaler.Effect = effect;
+				_scaler.MaskStrength = maskStrength;
+				_scaler.ScanBeam = scanBeam;
+			}
+		}
+
 		private Thread? _runThread;
 		private CancellationTokenSource? _cancel;
 		private volatile bool _running;
@@ -209,6 +228,9 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 				{
 					Services.Log.Debug("[SNES9X] diag: constructing CrtLottesScaler");
 					_scaler = new CrtLottesScaler(DxHandler.Device, _targetTexture);
+					_scaler.Effect = Effect;
+					_scaler.MaskStrength = EffectMaskStrength;
+					_scaler.ScanBeam = EffectScanBeam;
 					Services.Log.Debug("[SNES9X] diag: CrtLottesScaler constructed");
 				}
 
@@ -578,6 +600,12 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 		A = 8, X = 9, L = 10, R = 11
 	}
 
+	public enum Snes9xEffect
+	{
+		None = 0,
+		CrtScanlines = 1
+	}
+
 	//probably not gonna go for crt royale
 	internal sealed class CrtLottesScaler : IDisposable
 	{
@@ -591,6 +619,7 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 		private readonly RenderTargetView _rtv;
 		private readonly VertexShader _vs;
 		private readonly PixelShader _ps;
+		private readonly PixelShader _psPassthrough;
 		private readonly SamplerState _sampler;
 		private readonly SharpDX.Direct3D11.Buffer _cbuf;
 		private readonly int _dstW, _dstH;
@@ -603,6 +632,7 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 
 		internal float MaskStrength = 0.30f; //intensity
 		internal float ScanBeam = 2.5f;
+		internal Snes9xEffect Effect = Snes9xEffect.CrtScanlines;
 
 		[StructLayout(LayoutKind.Sequential)]
 		private struct CrtParams
@@ -695,13 +725,19 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 
 									col *= 1.0 + maskStrength * 0.6; // compensate mask dimming
 									return float4(saturate(col), 1.0);
+								}
+
+								float4 PSPassthrough(VOut i) : SV_TARGET {
+									return float4(tex.Sample(smp, i.uv).rgb, 1.0);
 								}";
 
 			using (var vsb = ShaderBytecode.Compile(hlsl, "VS", "vs_4_0"))
 			using (var psb = ShaderBytecode.Compile(hlsl, "PS", "ps_4_0"))
+			using (var psPassthroughB = ShaderBytecode.Compile(hlsl, "PSPassthrough", "ps_4_0"))
 			{
 				_vs = new VertexShader(dev, vsb);
 				_ps = new PixelShader(dev, psb);
+				_psPassthrough = new PixelShader(dev, psPassthroughB);
 			}
 
 			_sampler = new SamplerState(dev, new SamplerStateDescription
@@ -785,7 +821,7 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 				ctx.InputAssembler.PrimitiveTopology = PrimitiveTopology.TriangleList;
 				ctx.VertexShader.Set(_vs);
 				ctx.VertexShader.SetConstantBuffer(0, _cbuf);
-				ctx.PixelShader.Set(_ps);
+				ctx.PixelShader.Set(Effect == Snes9xEffect.None ? _psPassthrough : _ps);
 				ctx.PixelShader.SetConstantBuffer(0, _cbuf);
 				ctx.PixelShader.SetShaderResource(0, _srv);
 				ctx.PixelShader.SetSampler(0, _sampler);
@@ -824,6 +860,7 @@ internal sealed class Snes9xRenderer(Plugin plugin) : IDisposable
 			_cbuf.Dispose();
 			_sampler.Dispose();
 			_ps.Dispose();
+			_psPassthrough.Dispose();
 			_vs.Dispose();
 			_rtv.Dispose();
 			_srv.Dispose();
