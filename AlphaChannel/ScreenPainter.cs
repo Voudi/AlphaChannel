@@ -15,11 +15,11 @@ namespace AlphaChannel;
 //Paints our video texture directly into the 3D world at the TV's location as a screen-aligned quad,
 //drawn with its own unlit shader so world lighting doesn't affect it - independent of the VFX/material
 //system entirely. Every frame (from DxHandler's Present hook) it reads the swapchain's own current back
-//buffer and depth buffer directly from FFXIVClientStructs and draws straight into them - no
-//ID3D11DeviceContext hook of any kind. Hooking OMSetRenderTargets (needed to find the real scene depth
-//buffer for occlusion, since the swapchain's own DepthStencil only ever holds a stale clear value by
-//Present time) crashes the game here, reproducibly, inside Dalamud's own hooking machinery - not a bug in
-//our detour logic but an environment-level conflict. So: no depth testing, the quad always draws on top.
+//buffer plus the engine's real scene depth buffer directly from FFXIVClientStructs and draws straight
+//into them - no ID3D11DeviceContext hook of any kind. (Hooking OMSetRenderTargets to find the scene depth
+//buffer crashed the game reproducibly - turned out unnecessary anyway: RenderTargetManager already exposes
+//it as a plain field. The swapchain's own DepthStencil, by contrast, only ever holds a stale clear value
+//by Present time - confirmed via readback - which is why depth testing against it never worked.)
 internal sealed unsafe class ScreenPainter : IDisposable
 {
 	//Base quad size before Scale is applied - rough starting guess, tune live in-game.
@@ -52,6 +52,13 @@ internal sealed unsafe class ScreenPainter : IDisposable
 	private nint _cachedDsvPtr;
 	private RenderTargetView? _cachedRtv;
 	private DepthStencilView? _cachedDsv;
+
+	//TEMPORARY: backup diagnostic in case the reversed-Z/GreaterEqual guess is wrong - reads the real depth
+	//at a near point (screen centre, where the player usually stands) and a far point (near the top of the
+	//screen, usually background) so a wrong comparison direction shows up immediately in the log instead of
+	//needing another round of "add more logging".
+	private Texture2D? _depthProbeStagingTex;
+	private DateTime _lastDepthProbeLog = DateTime.MinValue;
 
 	[StructLayout(LayoutKind.Sequential)]
 	private struct ScreenParams
@@ -112,10 +119,13 @@ internal sealed unsafe class ScreenPainter : IDisposable
 			CullMode = SharpDX.Direct3D11.CullMode.None
 		});
 
+		//Reversed-Z (near=1, far=0) - the common convention for modern D3D11 engines, matched with a
+		//reversed-Z projection matrix below so our own computed depth is on the same scale as the real buffer.
 		_depthState = new DepthStencilState(DxHandler.Device, new DepthStencilStateDescription
 		{
-			IsDepthEnabled = false,
-			DepthWriteMask = DepthWriteMask.Zero
+			IsDepthEnabled = true,
+			DepthWriteMask = DepthWriteMask.Zero,
+			DepthComparison = Comparison.GreaterEqual
 		});
 
 		_cbuf = new Buffer(DxHandler.Device, Marshal.SizeOf<ScreenParams>(), ResourceUsage.Default,
@@ -194,6 +204,8 @@ internal sealed unsafe class ScreenPainter : IDisposable
 
 		DeviceContext ctx = DxHandler.Device!.ImmediateContext;
 
+		ProbeDepthIfDue(ctx, dsv, targetWidth, targetHeight);
+
 		RenderTargetView[] prevRtvs = ctx.OutputMerger.GetRenderTargets(1, out DepthStencilView? prevDsv);
 		VertexShader? prevVs = ctx.VertexShader.Get();
 		PixelShader? prevPs = ctx.PixelShader.Get();
@@ -246,8 +258,72 @@ internal sealed unsafe class ScreenPainter : IDisposable
 		}
 	}
 
-	//Pure memory reads - no hooking, no calling into the game. The swapchain owns exactly one back buffer
-	//and one depth buffer, each a Kernel.Texture whose mip-0 render target view doubles as its RTV or DSV.
+	private void ProbeDepthIfDue(DeviceContext ctx, DepthStencilView dsv, uint targetWidth, uint targetHeight)
+	{
+		DateTime now = DateTime.UtcNow;
+		if ((now - _lastDepthProbeLog).TotalSeconds < 2)
+		{
+			return;
+		}
+		_lastDepthProbeLog = now;
+
+		try
+		{
+			using SharpDX.Direct3D11.Resource depthResource = dsv.Resource;
+			using Texture2D depthTex = depthResource.QueryInterface<Texture2D>();
+			SharpDX.DXGI.Format format = depthTex.Description.Format;
+
+			if (_depthProbeStagingTex == null)
+			{
+				_depthProbeStagingTex = new Texture2D(DxHandler.Device, new Texture2DDescription
+				{
+					Width = 1,
+					Height = 1,
+					MipLevels = 1,
+					ArraySize = 1,
+					Format = format,
+					SampleDescription = new SharpDX.DXGI.SampleDescription(1, 0),
+					Usage = ResourceUsage.Staging,
+					BindFlags = BindFlags.None,
+					CpuAccessFlags = CpuAccessFlags.Read,
+					OptionFlags = ResourceOptionFlags.None
+				});
+			}
+
+			string near = ReadDepthTexel(ctx, depthTex, format, (int)(targetWidth / 2), (int)(targetHeight / 2));
+			string far = ReadDepthTexel(ctx, depthTex, format, (int)(targetWidth / 2), (int)(targetHeight * 0.1));
+			Services.Log.Debug($"[ScreenPainter] depthProbe: fmt={format} near(centre)={near} far(top)={far}");
+		}
+		catch (Exception e)
+		{
+			Services.Log.Debug($"[ScreenPainter] depthProbe failed: {e.Message}");
+		}
+	}
+
+	private string ReadDepthTexel(DeviceContext ctx, Texture2D depthTex, SharpDX.DXGI.Format format, int px, int py)
+	{
+		var region = new ResourceRegion(px, py, 0, px + 1, py + 1, 1);
+		ctx.CopySubresourceRegion(depthTex, 0, region, _depthProbeStagingTex, 0);
+
+		SharpDX.DataBox box = ctx.MapSubresource(_depthProbeStagingTex, 0, MapMode.Read, SharpDX.Direct3D11.MapFlags.None);
+		uint raw;
+		unsafe
+		{
+			raw = *(uint*)box.DataPointer;
+		}
+		ctx.UnmapSubresource(_depthProbeStagingTex, 0);
+
+		float decoded = format == SharpDX.DXGI.Format.R24G8_Typeless
+			? (raw & 0x00FFFFFFu) / 16777215f
+			: BitConverter.UInt32BitsToSingle(raw);
+
+		return $"{decoded:0.000000}";
+	}
+
+	//Pure memory reads - no hooking, no calling into the game. Colour comes from the swapchain's own back
+	//buffer (that's what's actually presented), but depth comes from RenderTargetManager's own DepthStencil
+	//field - the real opaque-scene depth buffer, as opposed to the swapchain's own DepthStencil (which only
+	//ever holds a stale clear value by this point in the frame).
 	private static bool TryGetSceneTargets(out nint rtvPtr, out nint dsvPtr, out uint width, out uint height)
 	{
 		rtvPtr = 0;
@@ -262,14 +338,27 @@ internal sealed unsafe class ScreenPainter : IDisposable
 		}
 
 		GfxKernel.Texture* backBuffer = device->SwapChain->BackBuffer;
-		GfxKernel.Texture* depthStencil = device->SwapChain->DepthStencil;
-		if (backBuffer == null || depthStencil == null || backBuffer->MipRenderTargets == null || depthStencil->MipRenderTargets == null)
+		if (backBuffer == null || backBuffer->MipRenderTargets == null)
+		{
+			return false;
+		}
+
+		FFXIVClientStructs.FFXIV.Client.Graphics.Render.RenderTargetManager* rtm = FFXIVClientStructs.FFXIV.Client.Graphics.Render.RenderTargetManager.Instance();
+		GfxKernel.Texture* sceneDepth = rtm != null ? rtm->DepthStencil : null;
+		if (rtm == null || sceneDepth == null || sceneDepth->MipRenderTargets == null)
+		{
+			return false;
+		}
+		//Binding an RTV and DSV together in one draw call requires matching dimensions - if the internal
+		//render resolution differs from the swapchain's (e.g. a "rendering resolution" scale setting below
+		//100%), skip this frame rather than pairing mismatched targets.
+		if (rtm->Resolution_Width != device->SwapChain->Width || rtm->Resolution_Height != device->SwapChain->Height)
 		{
 			return false;
 		}
 
 		rtvPtr = (nint)backBuffer->MipRenderTargets[0].D3D11RenderTargetViewOrDepthStencilView;
-		dsvPtr = (nint)depthStencil->MipRenderTargets[0].D3D11RenderTargetViewOrDepthStencilView;
+		dsvPtr = (nint)sceneDepth->MipRenderTargets[0].D3D11RenderTargetViewOrDepthStencilView;
 		width = device->SwapChain->Width;
 		height = device->SwapChain->Height;
 		return rtvPtr != 0 && dsvPtr != 0;
@@ -305,7 +394,7 @@ internal sealed unsafe class ScreenPainter : IDisposable
 		Vector3 camLookAt = ToNumerics(camera->LookAtVector);
 
 		NumericsMatrix4x4 view = NumericsMatrix4x4.CreateLookAt(camPos, camLookAt, Vector3.UnitY);
-		NumericsMatrix4x4 proj = NumericsMatrix4x4.CreatePerspectiveFieldOfView(renderCamera->FoV, renderCamera->AspectRatio, renderCamera->NearPlane, renderCamera->FarPlane);
+		NumericsMatrix4x4 proj = CreatePerspectiveFieldOfViewReversedZ(renderCamera->FoV, renderCamera->AspectRatio, renderCamera->NearPlane, renderCamera->FarPlane);
 
 		NumericsMatrix4x4 world =
 			NumericsMatrix4x4.CreateScale(BaseWidth * Scale, BaseHeight * Scale, 1f) *
@@ -313,6 +402,21 @@ internal sealed unsafe class ScreenPainter : IDisposable
 			NumericsMatrix4x4.CreateTranslation(WorldPosition);
 
 		return world * view * proj;
+	}
+
+	//Same X/Y as System.Numerics' right-handed CreatePerspectiveFieldOfView (M34=-1 layout), but with the Z
+	//terms re-derived so near->1 and far->0 in NDC instead of near->0/far->1, matching FFXIV's reversed-Z
+	//depth buffer.
+	private static NumericsMatrix4x4 CreatePerspectiveFieldOfViewReversedZ(float fov, float aspect, float near, float far)
+	{
+		float yScale = 1f / MathF.Tan(fov / 2f);
+		float xScale = yScale / aspect;
+
+		return new NumericsMatrix4x4(
+			xScale, 0, 0, 0,
+			0, yScale, 0, 0,
+			0, 0, near / (far - near), -1,
+			0, 0, near * far / (far - near), 0);
 	}
 
 	//FFXIVClientStructs' Vector3 has the same explicit field layout as System.Numerics', so a raw
@@ -327,6 +431,7 @@ internal sealed unsafe class ScreenPainter : IDisposable
 		_srv?.Dispose();
 		_cachedRtv?.Dispose();
 		_cachedDsv?.Dispose();
+		_depthProbeStagingTex?.Dispose();
 		_cbuf.Dispose();
 		_depthState.Dispose();
 		_rasterState.Dispose();
