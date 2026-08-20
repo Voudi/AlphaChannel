@@ -1364,9 +1364,6 @@ ImGui.GetColorU32(Vector4.One));
     }
 
     // Ko-fi brand pink — left-nav footer above the version. Alternates ask ↔ CTA every 30s.
-    private static readonly Vector4 KofiPink = new(0.98f, 0.29f, 0.55f, 1f);
-    private static readonly Vector4 KofiPinkHover = new(1f, 0.40f, 0.62f, 1f);
-    private static readonly Vector4 KofiPinkActive = new(0.85f, 0.20f, 0.45f, 1f);
 
     private static readonly Vector4 PatreonOrange = new(1f, 0.55f, 0.15f, 1f);
     private static readonly Vector4 PatreonOrangeHover = new(1f, 0.68f, 0.30f, 1f);
@@ -1479,39 +1476,12 @@ ImGui.GetColorU32(Vector4.One));
 
         ImGui.SetCursorScreenPos(buttonOrigin);
 
-        if (ImGui.InvisibleButton("##kofiDonate", size))
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo("https://ko-fi.com/alphachannel") { UseShellExecute = true });
-            }
-            catch (Exception exception)
-            {
-                AepLog.Warning($"[Donate] Failed to open browser: {exception.Message}");
-            }
-        }
 
         var hovered = ImGui.IsItemHovered();
         var drawList = ImGui.GetWindowDrawList();
-
-        drawList.AddRect(
-            buttonOrigin,
-            buttonOrigin + size,
-            ImGui.GetColorU32(hovered ? KofiPinkHover : KofiPink),
-            8f,
-            ImDrawFlags.None,
-            1f);
-
-        var textSize = ImGui.CalcTextSize(label, false, width);
-        var textPos = buttonOrigin + new Vector2(
-            (width - textSize.X) * 0.5f,
-            (height - textSize.Y) * 0.5f);
-
-        drawList.AddText(
-    textPos,
-    ImGui.GetColorU32(hovered ? KofiPinkHover : KofiPink),
-    label);
     }
+
+       
 
     private static string? cachedVersionText;
 
