@@ -25,6 +25,11 @@ internal sealed partial class MainWindow
     private string homeSearch = string.Empty;
     private string? pendingPlayerSearch;
     private bool homeSearchPopupOpen;
+
+    // Temporary favourite state.
+    // UI-only for now — not persisted to backend.
+    private readonly HashSet<string> temporaryFavouriteVideos = new();
+
     private Vector2 homeSearchInputPos;
     private ISharedImmediateTexture? addFriendImage;
     private readonly Dictionary<string, ISharedImmediateTexture?> capabilityImages = new();
@@ -1512,6 +1517,9 @@ internal sealed partial class MainWindow
 
         var actionClicked = false;
 
+        var isFavourite =
+            temporaryFavouriteVideos.Contains(result.Url);
+
         if (hovered)
         {
             // Darken the thumbnail so the controls stand out.
@@ -1544,6 +1552,110 @@ internal sealed partial class MainWindow
                 9f,
                 ImDrawFlags.None,
                 1f);
+
+            // -----------------------------------------------------
+            // Favourite
+            // -----------------------------------------------------
+
+            const float favouriteButtonSize = 27f;
+
+            var favouriteMin =
+                new Vector2(
+                    origin.X + width - favouriteButtonSize - 7f,
+                    origin.Y + 7f);
+
+            var favouriteMax =
+                favouriteMin +
+                new Vector2(
+                    favouriteButtonSize,
+                    favouriteButtonSize);
+
+            var mouse =
+                ImGui.GetMousePos();
+
+            var favouriteHovered =
+                mouse.X >= favouriteMin.X &&
+                mouse.X <= favouriteMax.X &&
+                mouse.Y >= favouriteMin.Y &&
+                mouse.Y <= favouriteMax.Y;
+
+            // Small dark floating button.
+            drawList.AddCircleFilled(
+                favouriteMin +
+                new Vector2(
+                    favouriteButtonSize * 0.5f,
+                    favouriteButtonSize * 0.5f),
+                favouriteButtonSize * 0.5f,
+                ImGui.GetColorU32(
+                    favouriteHovered
+                        ? new Vector4(
+                            0.10f,
+                            0.12f,
+                            0.17f,
+                            0.96f)
+                        : new Vector4(
+                            0.05f,
+                            0.06f,
+                            0.09f,
+                            0.86f)));
+
+            // Subtle border.
+            drawList.AddCircle(
+                favouriteMin +
+                new Vector2(
+                    favouriteButtonSize * 0.5f,
+                    favouriteButtonSize * 0.5f),
+                favouriteButtonSize * 0.5f,
+                ImGui.GetColorU32(
+                    favouriteHovered
+                        ? AccentHover
+                        : new Vector4(
+                            1f,
+                            1f,
+                            1f,
+                            0.28f)),
+                24,
+                1f);
+
+            // Heart icon.
+            var favouriteIcon =
+                isFavourite
+                    ? FontAwesomeIcon.Heart
+                    : FontAwesomeIcon.Heart;
+
+            var favouriteGlyph =
+                favouriteIcon.ToIconString();
+
+            Vector2 favouriteGlyphSize;
+
+            using (ImRaii.PushFont(UiBuilder.IconFont))
+            {
+                favouriteGlyphSize =
+                    ImGui.CalcTextSize(favouriteGlyph);
+
+                drawList.AddText(
+                    favouriteMin +
+                    new Vector2(
+                        (favouriteButtonSize - favouriteGlyphSize.X) * 0.5f,
+                        (favouriteButtonSize - favouriteGlyphSize.Y) * 0.5f),
+                    ImGui.GetColorU32(
+                        isFavourite
+                            ? AccentHover
+                            : favouriteHovered
+                                ? Vector4.One
+                                : new Vector4(
+                                    1f,
+                                    1f,
+                                    1f,
+                                    0.82f)),
+                    favouriteGlyph);
+            }
+
+            if (favouriteHovered)
+            {
+                ImGui.SetMouseCursor(
+                    ImGuiMouseCursor.Hand);
+            }
 
             const float buttonGap = 6f;
             const float buttonHeight = 28f;
@@ -1586,9 +1698,6 @@ internal sealed partial class MainWindow
                 new Vector2(
                     queueWidth,
                     buttonHeight);
-
-            var mouse =
-                ImGui.GetMousePos();
 
             var playHovered =
                 mouse.X >= playMin.X &&
@@ -1735,7 +1844,25 @@ internal sealed partial class MainWindow
 
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
-                if (playHovered)
+                // Favourite
+                if (favouriteHovered)
+                {
+                    actionClicked = true;
+
+                    if (isFavourite)
+                    {
+                        temporaryFavouriteVideos.Remove(
+                            result.Url);
+                    }
+                    else
+                    {
+                        temporaryFavouriteVideos.Add(
+                            result.Url);
+                    }
+                }
+
+                // Play
+                else if (playHovered)
                 {
                     actionClicked = true;
 
@@ -1747,6 +1874,8 @@ internal sealed partial class MainWindow
                             result.Duration,
                             result.ThumbnailUrl));
                 }
+
+                // Queue
                 else if (queueHovered)
                 {
                     actionClicked = true;
