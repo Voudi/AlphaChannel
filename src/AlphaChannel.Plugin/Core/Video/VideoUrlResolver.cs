@@ -546,6 +546,56 @@ internal sealed class VideoUrlResolver
         return enriched.ToList();
     }
 
+    public async Task<VideoSearchEntry> EnrichSearchResultAsync(
+    VideoSearchEntry result,
+    CancellationToken token)
+    {
+        try
+        {
+            var video =
+                await youtube.Videos
+                    .GetAsync(
+                        result.Url,
+                        token)
+                    .ConfigureAwait(false);
+
+            var thumbnail =
+                video.Thumbnails
+                    .OrderByDescending(
+                        t => t.Resolution.Area)
+                    .FirstOrDefault();
+
+            return result with
+            {
+                Title =
+                    video.Title,
+
+                ChannelName =
+                    video.Author.ChannelTitle,
+
+                Duration =
+                    video.Duration,
+
+                ThumbnailUrl =
+                    thumbnail?.Url ??
+                    result.ThumbnailUrl,
+
+                ViewCount =
+                    video.Engagement.ViewCount,
+
+                UploadDate =
+                    video.UploadDate,
+
+                ChannelId =
+                    video.Author.ChannelId.Value
+            };
+        }
+        catch
+        {
+            return result;
+        }
+    }
+
     // YoutubeExplode's own search (scrapes YouTube's search results) - no API key needed, same
     // dependency already used for playback resolution and metadata enrichment above.
     public async Task<List<VideoSearchEntry>> SearchAsync(string query, int maxResults, CancellationToken token)

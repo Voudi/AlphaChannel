@@ -34,6 +34,8 @@ internal sealed partial class MainWindow
     private List<VideoSearchEntry>? subscriptionVideoResults;
     private bool isLoadingSubscriptionVideos;
     private string lastSubscriptionSignature = string.Empty;
+    private DateTime subscriptionVideoCacheUpdatedUtc;
+    private bool subscriptionVideoRefreshRequested;
 
     private void DrawBrowseVideoTabs()
     {
@@ -233,6 +235,7 @@ internal sealed partial class MainWindow
         try
         {
             isLoadingFavouriteVideos = true;
+            favouriteVideosVisibleCount = FavouritePageSize;
 
             var ids =
                 Plugin.Cfg.FavouriteYouTubeVideoIds
@@ -310,6 +313,15 @@ internal sealed partial class MainWindow
             var loaded =
                 new List<VideoSearchEntry>();
 
+            var videosPerChannel =
+                channelIds.Count switch
+                {
+                    1 => 5,
+                    <= 5 => 4,
+                    <= 8 => 3,
+                    _ => 2
+                };
+
             // Start conservatively: five recent uploads per channel.
             // Sequential loading avoids hammering YouTube when somebody
             // eventually has a large subscription collection.
@@ -317,10 +329,10 @@ internal sealed partial class MainWindow
             {
                 var channelVideos =
                     await searchResolver
-                        .GetChannelUploadsAsync(
-                            channelId,
-                            5,
-                            CancellationToken.None)
+                    .GetChannelUploadsAsync(
+    channelId,
+    videosPerChannel,
+    CancellationToken.None)
                         .ConfigureAwait(false);
 
                 loaded.AddRange(
@@ -346,6 +358,8 @@ internal sealed partial class MainWindow
                     channelIds.OrderBy(
                         id => id,
                         StringComparer.OrdinalIgnoreCase));
+            subscriptionVideoCacheUpdatedUtc =
+    DateTime.UtcNow;
         }
         catch (Exception exception)
         {
@@ -359,6 +373,49 @@ internal sealed partial class MainWindow
         {
             isLoadingSubscriptionVideos = false;
         }
+    }
+
+    private void EnsureSubscriptionVideosLoaded()
+    {
+        if (isLoadingSubscriptionVideos)
+        {
+            return;
+        }
+
+        var subscribedIds =
+            Plugin.Cfg.SubscribedYouTubeChannelIds;
+
+        if (subscribedIds.Count == 0)
+        {
+            return;
+        }
+
+        var signature =
+            string.Join(
+                "|",
+                subscribedIds
+                    .OrderBy(
+                        id => id,
+                        StringComparer.OrdinalIgnoreCase));
+
+        var cacheExpired =
+            subscriptionVideoResults is null ||
+            DateTime.UtcNow - subscriptionVideoCacheUpdatedUtc >
+            TimeSpan.FromMinutes(15);
+
+        var subscriptionsChanged =
+            !string.Equals(
+                signature,
+                lastSubscriptionSignature,
+                StringComparison.Ordinal);
+
+        if (!cacheExpired &&
+            !subscriptionsChanged)
+        {
+            return;
+        }
+
+        _ = LoadSubscriptionVideosAsync();
     }
 
     private void DrawBrowseSubscriptionsSection()
@@ -376,15 +433,11 @@ internal sealed partial class MainWindow
 
         // Reload whenever the actual subscription IDs change.
         if (!isLoadingSubscriptionVideos &&
-            (
-                subscriptionVideoResults is null ||
-                !string.Equals(
-                    subscriptionSignature,
-                    lastSubscriptionSignature,
-                    StringComparison.Ordinal)
-            ))
+            subscriptionVideoResults is null)
         {
-            _ = LoadSubscriptionVideosAsync();
+            ImGui.TextColored(
+                MutedText,
+                "Loading subscriptions...");
         }
 
         // ---------------------------------------------------------
@@ -665,18 +718,19 @@ internal sealed partial class MainWindow
                     StringComparer.OrdinalIgnoreCase);
 
         var visibleResults =
-            results
-                .Where(
-                    result =>
-                    {
-                        var id =
-                            GetYouTubeVideoId(
-                                result.Url);
+    results
+        .Where(
+            result =>
+            {
+                var id =
+                    GetYouTubeVideoId(
+                        result.Url);
 
-                        return id is not null &&
-                               currentFavouriteIds.Contains(id);
-                    })
-                .ToList();
+                return id is not null &&
+                       currentFavouriteIds.Contains(id);
+            })
+        .Take(favouriteVideosVisibleCount)
+        .ToList();
 
         if (visibleResults.Count == 0)
         {
@@ -730,6 +784,19 @@ internal sealed partial class MainWindow
                 cardHeight);
 
             ImGui.PopID();
+        }
+        if (visibleResults.Count < favouriteVideoResults.Count)
+        {
+            ImGui.Dummy(
+                new Vector2(
+                    0f,
+                    12f));
+
+            if (ImGui.Button(
+                "Load more favourites"))
+            {
+                favouriteVideosVisibleCount += FavouritePageSize;
+            }
         }
     }
 

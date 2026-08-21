@@ -77,7 +77,7 @@ internal sealed partial class MainWindow
         // Stream status
         // ---------------------------------------------------------
 
-        if (liveStatus is not { } status)
+        if (liveStatus is null)
         {
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.ChildRounding,
@@ -101,69 +101,15 @@ internal sealed partial class MainWindow
                         MutedText,
                         liveStatusLoading
                             ? "Loading stream status..."
-                            : "Couldn't load your stream status.");
+                            : "Stream status unavailable.");
                 }
             }
-
-            return;
         }
-
-        using (ImRaii.PushStyle(
-            ImGuiStyleVar.ChildRounding,
-            8f))
-        using (ImRaii.PushColor(
-            ImGuiCol.ChildBg,
-            new Vector4(0.045f, 0.06f, 0.10f, 1f)))
-        using (var statusCard = ImRaii.Child(
-            "##goLiveStatus",
-            new Vector2(-1f, 94f),
-            false,
-            ImGuiWindowFlags.NoScrollbar |
-            ImGuiWindowFlags.NoScrollWithMouse))
+        else
         {
-            if (statusCard)
-            {
-                // Status line
-                ImGui.SetCursorPos(
-                    new Vector2(14f, 12f));
+            var status = liveStatus;
 
-                using (ImRaii.PushFont(UiBuilder.IconFont))
-                {
-                    ImGui.TextColored(
-                        status.IsLive ? Good : MutedText,
-                        FontAwesomeIcon.Circle.ToIconString());
-                }
-
-                ImGui.SameLine(0f, 8f);
-
-                ImGui.TextColored(
-                    status.IsLive ? Good : MutedText,
-                    status.IsLive
-                        ? "LIVE"
-                        : "OFFLINE");
-
-                // Main status
-                ImGui.SetCursorPos(
-                    new Vector2(14f, 39f));
-
-                ImGui.TextColored(
-                    Vector4.One,
-                    status.IsLive
-                        ? "You're broadcasting"
-                        : "Not streaming right now");
-
-                // Description
-                ImGui.SetCursorPos(
-                    new Vector2(14f, 65f));
-
-                ImGui.SetWindowFontScale(0.82f);
-
-                ImGui.TextColored(
-                    MutedText,
-                    "Stream from OBS and your friends can watch it here.");
-
-                ImGui.SetWindowFontScale(1f);
-            }
+            // KEEP YOUR EXISTING 94px status card HERE
         }
 
         ImGui.Dummy(new Vector2(0f, 18f));
@@ -297,7 +243,7 @@ internal sealed partial class MainWindow
 
             ImGui.TextColored(
                 MutedText,
-                status.HasKey
+                liveStatus?.HasKey ?? false
                     ? "A stream key exists on another install. Regenerate it to use it here."
                     : "No stream key yet. Generate one to connect OBS.");
 

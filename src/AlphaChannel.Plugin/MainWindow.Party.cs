@@ -1,4 +1,5 @@
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
 using Dalamud.Interface.Utility.Raii;
 
 namespace AlphaChannel.Plugin;
@@ -85,7 +86,7 @@ internal sealed partial class MainWindow
 
         ImGui.SetWindowFontScale(1f);
 
-        ImGui.Dummy(new Vector2(0f, 10f));
+        ImGui.Dummy(new Vector2(0f, 4f));
 
         switch (stream.Mode)
         {
@@ -459,11 +460,11 @@ internal sealed partial class MainWindow
         }
 
         // DrawReactions already provides its own heading.
-        DrawReactions();
-
-        ImGui.Dummy(new Vector2(0f, 20f));
-
         DrawPartyChat();
+
+        ImGui.Dummy(new Vector2(0f, 10f));
+
+        DrawReactions();
     }
 
     private void DrawPartyChat()
@@ -472,7 +473,9 @@ internal sealed partial class MainWindow
         // Heading
         // ---------------------------------------------------------
 
-        ImGui.TextUnformatted("Party chat");
+        DrawSectionTitle(
+     FontAwesomeIcon.Comments,
+     "Party Chat");
 
         ImGui.Dummy(new Vector2(0f, 2f));
 
@@ -480,21 +483,21 @@ internal sealed partial class MainWindow
 
         ImGui.TextColored(
             MutedText,
-            "Only people in this room can see these messages.");
+            "Messages from everyone watching together.");
 
         ImGui.SetWindowFontScale(1f);
 
-        ImGui.Dummy(new Vector2(0f, 10f));
+        ImGui.Dummy(new Vector2(0f, 4f));
 
         // ---------------------------------------------------------
         // Chat log
         // ---------------------------------------------------------
 
         var height = MathF.Min(
-            190f,
+            200f,
             MathF.Max(
                 120f,
-                ImGui.GetContentRegionAvail().Y * 0.38f));
+                ImGui.GetContentRegionAvail().Y * 0.24f));
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.ChildRounding,
@@ -549,7 +552,7 @@ internal sealed partial class MainWindow
             }
         }
 
-        ImGui.Dummy(new Vector2(0f, 8f));
+        ImGui.Dummy(new Vector2(0f, 4f));
 
         // ---------------------------------------------------------
         // Message input

@@ -11,9 +11,7 @@ internal sealed partial class MainWindow
     {
         Player,
         PlayVideo,
-        Queue,
-        WatchParty,
-        Chat
+        Queue
     }
 
     private void DrawPlayerDrawerTabs()
@@ -21,7 +19,7 @@ internal sealed partial class MainWindow
         var availableWidth = ImGui.GetContentRegionAvail().X;
 
         const float gap = 8f;
-        const int tabCount = 5;
+        const int tabCount = 3;
 
         var buttonWidth =
             (availableWidth - (gap * (tabCount - 1))) /
@@ -34,7 +32,7 @@ internal sealed partial class MainWindow
 
         DrawPlayerDrawerTab(
             FontAwesomeIcon.Tv,
-            "Player",
+            "Now Playing",
             PlayerDrawer.Player,
             buttonSize);
 
@@ -52,22 +50,6 @@ internal sealed partial class MainWindow
             FontAwesomeIcon.List,
             $"Queue ({queue.Entries.Count})",
             PlayerDrawer.Queue,
-            buttonSize);
-
-        ImGui.SameLine(0, gap);
-
-        DrawPlayerDrawerTab(
-            FontAwesomeIcon.Users,
-            "Watch Party",
-            PlayerDrawer.WatchParty,
-            buttonSize);
-
-        ImGui.SameLine(0, gap);
-
-        DrawPlayerDrawerTab(
-            FontAwesomeIcon.Comment,
-            "Chat",
-            PlayerDrawer.Chat,
             buttonSize);
     }
 
@@ -96,14 +78,6 @@ internal sealed partial class MainWindow
 
             case PlayerDrawer.Queue:
                 DrawQueueDrawer();
-                break;
-
-            case PlayerDrawer.WatchParty:
-                DrawWatchPartyDrawer();
-                break;
-
-            case PlayerDrawer.Chat:
-                DrawChatDrawer();
                 break;
         }
     }
@@ -217,7 +191,15 @@ internal sealed partial class MainWindow
 
         ImGui.TextColored(
             Vector4.One,
-            "Now Playing");
+            "Now Playing Preview");
+
+        ImGui.SetWindowFontScale(1f);
+
+        ImGui.SetWindowFontScale(0.72f);
+
+        ImGui.TextColored(
+            MutedText,
+            "Check what's displayed on your room's virtual screen");
 
         ImGui.SetWindowFontScale(1f);
 
@@ -717,16 +699,6 @@ internal sealed partial class MainWindow
     private void DrawQueueDrawer()
     {
         DrawQueue();
-    }
-
-    private void DrawWatchPartyDrawer()
-    {
-        DrawPartyPanel();
-    }
-
-    private void DrawChatDrawer()
-    {
-        DrawPartySocialPanel();
     }
 
     private void DrawPlayerSourceTabs()

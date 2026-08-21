@@ -34,6 +34,7 @@ internal sealed partial class MainWindow
     private volatile Dictionary<string, List<VideoSearchEntry>>? browseVideoResults;
     private DateTime browseVideoCacheTime;
     private bool browseVideoRequested;
+    private CancellationTokenSource? browseVideosCts;
 
     // Youtube Trending Topics
     private sealed record TrendingTopic(
@@ -1149,6 +1150,8 @@ internal sealed partial class MainWindow
     {
         try
         {
+            browseVideosCts?.Cancel();
+            browseVideosCts = new CancellationTokenSource();
             // Reuse Browse results for 20 minutes unless manually refreshed.
             if (!forceRefresh &&
                 browseVideoResults is { Count: > 0 } &&
@@ -1168,7 +1171,7 @@ internal sealed partial class MainWindow
             // Pick up to 8 topics for the full Browse page.
             var selectedTopics = topics
                 .OrderBy(_ => trendingRandom.Next())
-                .Take(8)
+                .Take(6)
                 .ToList();
 
             // Start with an empty dictionary so rows can appear
@@ -1197,17 +1200,29 @@ internal sealed partial class MainWindow
                                     topic.SearchQueries.Length)];
 
                         var results = await searchResolver
-                            .SearchWithMetadataAsync(
+                            .SearchAsync(
                                 query,
                                 15,
-                                CancellationToken.None)
+                                browseVideosCts.Token)
                             .ConfigureAwait(false);
 
+                        browseVideoResults[topic.Name] = results;
+
                         var ranked = results
-                            .GroupBy(x => x.Url)
-                            .Select(x => x.First())
+      .GroupBy(x => x.Url)
+      .Select(x => x.First())
+      .Take(10)
+      .ToList();
+
+                        var enriched = await Task.WhenAll(
+                            ranked.Select(
+                                video =>
+                                    searchResolver.EnrichSearchResultAsync(
+                                        video,
+                                        browseVideosCts.Token)));
+
+                        ranked = enriched
                             .OrderByDescending(GetTrendingScore)
-                            .Take(15)
                             .ToList();
 
                         return new

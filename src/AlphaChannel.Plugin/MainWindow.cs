@@ -512,6 +512,7 @@ internal sealed partial class MainWindow : Window, IDisposable
         Colors = ThemeCatalog.Get(Plugin.Cfg.UiTheme, Plugin.Cfg.UiBackground);
         EnsureCustomBackgroundLoaded();
         customBackgroundActive = Plugin.Cfg.UiBackground == UiBackground.Custom && customBackground is not null;
+        EnsureSubscriptionVideosLoaded();
         using var theme = new ThemeScope();
         CaptureCurrentPosition();
 
@@ -985,8 +986,10 @@ internal sealed partial class MainWindow : Window, IDisposable
                 DrawVideoGrid();
                 break;
             case HomePage.WatchAlong:
-                PageTitle("Watch Party", "Host or join a room and watch together.");
-                DrawPlayerPage();
+                PageTitle(
+                    "Watch Party",
+                    "Host or join a room and watch together.");
+                DrawWatchPartyPage();
                 break;
             case HomePage.Screen:
                 PageTitle("Screen", "Place the picture in the world.");
@@ -1119,36 +1122,77 @@ ImGui.GetColorU32(Vector4.One));
         ImGui.TextUnformatted(brandText);
         ImGui.SetWindowFontScale(1f);
 
-        ImGui.Dummy(new Vector2(0, 14));
+        ImGui.Dummy(new Vector2(0, 6));
 
         if (CurrentSession is { } sidebarSession && friendsDirty && !friendsLoading)
         {
             RefreshFriends(sidebarSession.Token);
         }
 
-        DrawNavItem(HomePage.Home, FontAwesomeIcon.Home, "Home");
+        DrawNavGroup("Discover");
+
+        DrawNavItem(
+            HomePage.Home,
+            FontAwesomeIcon.Home,
+            "Home");
+
         var playerLabel =
-    queue.Entries.Count > 0
-        ? $"Player ({queue.Entries.Count})"
-        : "Player";
+            queue.Entries.Count > 0
+                ? $"Player ({queue.Entries.Count})"
+                : "Player";
 
         DrawNavItem(
             HomePage.Player,
             FontAwesomeIcon.Play,
             playerLabel);
-        DrawNavItem(HomePage.VideoGrid, FontAwesomeIcon.ThLarge, "Browse Videos");
-        DrawNavItem(HomePage.WatchAlong, FontAwesomeIcon.Users, "Watch Party");
-        DrawNavItem(HomePage.Screen, FontAwesomeIcon.Desktop, "Screen");
-        DrawNavItem(HomePage.Friends, FontAwesomeIcon.UserFriends, "Friends", friendRequests.Incoming.Length);
-        var appsActive = currentPage is HomePage.Apps or HomePage.Messages or HomePage.PluginHub
-            or HomePage.Tweeter;
-        var appsBadge = conversations.Sum(c => c.UnreadCount) + unreadWhisperKeys.Count;
-        DrawNavItem(HomePage.Apps, FontAwesomeIcon.ThLarge, "Apps", appsBadge, forceActive: appsActive);
-        DrawNavItem(HomePage.Settings, FontAwesomeIcon.Cog, "Settings");
+
+        DrawNavItem(
+            HomePage.VideoGrid,
+            FontAwesomeIcon.ThLarge,
+            "Browse Videos");
+
+
+        DrawNavGroup("Social");
+
+        DrawNavItem(
+            HomePage.WatchAlong,
+            FontAwesomeIcon.Users,
+            "Watch Party");
+
+        DrawNavItem(
+            HomePage.Friends,
+            FontAwesomeIcon.UserFriends,
+            "Friends",
+            friendRequests.Incoming.Length);
+
+        DrawNavItem(
+            HomePage.Venues,
+            FontAwesomeIcon.MapMarker,
+            "Venues");
+
+
+        DrawNavGroup("Tools");
+
+        DrawNavItem(
+            HomePage.Screen,
+            FontAwesomeIcon.Desktop,
+            "Screen");
+
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+
+        DrawNavItem(
+            HomePage.Settings,
+            FontAwesomeIcon.Cog,
+            "Settings");
 
         if (CurrentSession is { } dmSidebarSession
-            && currentPage is HomePage.Messages or HomePage.Apps
-            && conversationsDirty && !conversationsLoading)
+            && currentPage == HomePage.Messages
+            && conversationsDirty
+            && !conversationsLoading)
         {
             RefreshConversations(dmSidebarSession.Token);
         }
@@ -1170,7 +1214,7 @@ ImGui.GetColorU32(Vector4.One));
         const float footerGap = 8f;
         const float bottomSlack = 10f;
         var versionH = ImGui.GetTextLineHeightWithSpacing();
-        var footerH = 300f;
+        var footerH = 205f;
 
         using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, Vector2.Zero))
         {
@@ -1201,11 +1245,11 @@ ImGui.GetColorU32(Vector4.One));
 
             DrawDonateLink("♥  Donate on Ko-fi", 32f);
 
-            ImGui.Dummy(new Vector2(0, 105));
+            ImGui.Dummy(new Vector2(0, 10));
 
             DrawSidebarProfile();
 
-            ImGui.Dummy(new Vector2(0, 35));
+            ImGui.Dummy(new Vector2(0, 4));
 
             DrawVersionFooter();
         }
@@ -1213,9 +1257,15 @@ ImGui.GetColorU32(Vector4.One));
 
     private static void DrawNavGroup(string label)
     {
-        ImGui.Spacing();
-        ImGui.TextColored(MutedText, label);
-        ImGui.Dummy(new Vector2(0, 2));
+        ImGui.Dummy(new Vector2(0, 4));
+
+        ImGui.SetWindowFontScale(0.85f);
+        ImGui.TextColored(
+            MutedText,
+            label);
+        ImGui.SetWindowFontScale(1f);
+
+        ImGui.Dummy(new Vector2(0, 1));
     }
 
     // forceActive keeps Apps highlighted while you're inside an app (Chat / Hub / Tweeter).
@@ -1261,10 +1311,6 @@ ImGui.GetColorU32(Vector4.One));
         if (clicked)
         {
             currentPage = page;
-            if (page == HomePage.Apps)
-            {
-                conversationsDirty = true;
-            }
         }
     }
 
@@ -1443,7 +1489,7 @@ ImGui.GetColorU32(Vector4.One));
             session?.AvatarImageUrl);
 
         ImGui.SetCursorScreenPos(
-            origin + new Vector2(55, 8));
+            origin + new Vector2(55, 5));
 
         if (!string.IsNullOrEmpty(CurrentCharacterName))
         {
@@ -1455,14 +1501,14 @@ ImGui.GetColorU32(Vector4.One));
         }
 
         ImGui.SetCursorScreenPos(
-            origin + new Vector2(55, 28));
+            origin + new Vector2(55, 23));
 
         ImGui.TextColored(
     Good,
     "● Online");
 
         ImGui.SetCursorScreenPos(
-            origin + new Vector2(55, 48));
+            origin + new Vector2(55, 41));
 
         var friendsOnline = friends.Count(f => f.Online);
 
@@ -1500,7 +1546,7 @@ ImGui.GetColorU32(Vector4.One));
         var textWidth = ImGui.CalcTextSize(text).X;
         var avail = ImGui.GetContentRegionAvail().X;
         ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0f, (avail - textWidth) * 0.5f));
-        ImGui.SetWindowFontScale(0.75f);
+        ImGui.SetWindowFontScale(0.70f);
         ImGui.TextColored(MutedText, text);
         ImGui.SetWindowFontScale(1f);
     }
@@ -1550,7 +1596,9 @@ ImGui.GetColorU32(Vector4.One));
     private static void SectionHeader(string text)
     {
         ImGui.TextColored(Accent, text);
-        ImGui.Dummy(new Vector2(0, 4));
+        ImGui.Dummy(new Vector2(0, 0));
+
+        DrawVersionFooter();
     }
 
     // Soft panel for content that needs grouping. Height must be >0 — Child size.y=0 means

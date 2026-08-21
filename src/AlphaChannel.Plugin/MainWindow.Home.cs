@@ -27,6 +27,9 @@ internal sealed partial class MainWindow
     private string? pendingPlayerSearch;
     private bool homeSearchPopupOpen;
 
+    private const int FavouritePageSize = 20;
+    private int favouriteVideosVisibleCount = FavouritePageSize;
+
 
     private readonly HashSet<string> temporaryYouTubeSubscriptions =
         new(StringComparer.OrdinalIgnoreCase);
@@ -700,7 +703,7 @@ internal sealed partial class MainWindow
         ImGui.Dummy(
             new Vector2(
                 0f,
-                10f));
+                2f));
 
         DrawWatchPartiesShelf();
 
@@ -1505,7 +1508,7 @@ internal sealed partial class MainWindow
         }
 
         // ---------------------------------------------------------
-        // TEMP: Plugin-managed YouTube subscription button
+        // Plugin-managed YouTube subscription button
         //
         // Channel name is being used as the temporary identity.
         // Eventually this should use the actual YouTube channel ID.
@@ -1517,7 +1520,7 @@ internal sealed partial class MainWindow
                 result.ChannelId,
                 StringComparer.OrdinalIgnoreCase);
 
-        const float subscribeButtonSize = 28f;
+        const float subscribeButtonSize = 24f;
 
         var subscribeMin =
             new Vector2(
@@ -1580,43 +1583,30 @@ internal sealed partial class MainWindow
             displayChannel);
 
         // ---------------------------------------------------------
-        // Subscribe button background
+        // Minimal subscribe button
         // ---------------------------------------------------------
 
-        drawList.AddRectFilled(
-            subscribeMin,
-            subscribeMax,
-            ImGui.GetColorU32(
-                isSubscribed
-                    ? new Vector4(
-                        Accent.X,
-                        Accent.Y,
-                        Accent.Z,
-                        0.22f)
-                    : subscribeHovered
-                        ? CardBgHover
+        if (subscribeHovered || isSubscribed)
+        {
+            drawList.AddCircleFilled(
+                subscribeMin +
+                new Vector2(
+                    subscribeButtonSize * 0.5f,
+                    subscribeButtonSize * 0.5f),
+                subscribeButtonSize * 0.5f,
+                ImGui.GetColorU32(
+                    isSubscribed
+                        ? new Vector4(
+                            Accent.X,
+                            Accent.Y,
+                            Accent.Z,
+                            0.22f)
                         : new Vector4(
-                            0.05f,
-                            0.06f,
-                            0.09f,
-                            0.88f)),
-            5f);
-
-        // Border
-        drawList.AddRect(
-            subscribeMin,
-            subscribeMax,
-            ImGui.GetColorU32(
-                isSubscribed || subscribeHovered
-                    ? AccentHover
-                    : new Vector4(
-                        MutedText.X,
-                        MutedText.Y,
-                        MutedText.Z,
-                        0.50f)),
-            5f,
-            ImDrawFlags.None,
-            1f);
+                            1f,
+                            1f,
+                            1f,
+                            0.08f)));
+        }
 
         // ---------------------------------------------------------
         // + / check icon
@@ -1651,6 +1641,8 @@ internal sealed partial class MainWindow
                             : MutedText),
                 subscribeGlyph);
         }
+
+ 
 
         // ---------------------------------------------------------
         // Subscribe interaction
@@ -2071,7 +2063,14 @@ internal sealed partial class MainWindow
                         }
                         else
                         {
-                            Plugin.Cfg.FavouriteYouTubeVideoIds.Add(
+                            Plugin.Cfg.FavouriteYouTubeVideoIds.RemoveAll(
+                                id => string.Equals(
+                                    id,
+                                    favouriteVideoId,
+                                    StringComparison.OrdinalIgnoreCase));
+
+                            Plugin.Cfg.FavouriteYouTubeVideoIds.Insert(
+                                0,
                                 favouriteVideoId);
                         }
 
@@ -2186,7 +2185,7 @@ internal sealed partial class MainWindow
 
     private void DrawMediaHubFeatured()
     {
-        const float height = 230f;
+        const float height = 260f;
         const float rounding = 14f;
 
         const double holdDuration = 5.5;
@@ -2590,32 +2589,32 @@ internal sealed partial class MainWindow
         // ---------------------------------------------------------
 
         drawList.AddRectFilledMultiColor(
-            origin,
-            origin + size,
-            ImGui.GetColorU32(
-                new Vector4(
-                    0.015f,
-                    0.025f,
-                    0.055f,
-                    0.96f)),
-            ImGui.GetColorU32(
-                new Vector4(
-                    0.015f,
-                    0.025f,
-                    0.055f,
-                    0.03f)),
-            ImGui.GetColorU32(
-                new Vector4(
-                    0.015f,
-                    0.025f,
-                    0.055f,
-                    0.03f)),
-            ImGui.GetColorU32(
-                new Vector4(
-                    0.015f,
-                    0.025f,
-                    0.055f,
-                    0.96f)));
+    origin,
+    origin + size,
+    ImGui.GetColorU32(
+        new Vector4(
+            0.015f,
+            0.025f,
+            0.055f,
+            1.0f)),
+    ImGui.GetColorU32(
+        new Vector4(
+            0.015f,
+            0.025f,
+            0.055f,
+            0.25f)),
+    ImGui.GetColorU32(
+        new Vector4(
+            0.015f,
+            0.025f,
+            0.055f,
+            0.25f)),
+    ImGui.GetColorU32(
+        new Vector4(
+            0.015f,
+            0.025f,
+            0.055f,
+            0.65f)));
 
         // ---------------------------------------------------------
         // Small secondary content motion
@@ -2644,7 +2643,14 @@ internal sealed partial class MainWindow
                         0f,
                         1f)));
         }
-
+        drawList.AddText(
+    new Vector2(
+        textX,
+        origin.Y + 35f),
+    WithAlpha(
+        AccentHover,
+        contentAlpha),
+    "FEATURED");
         // ---------------------------------------------------------
         // Eyebrow
         // ---------------------------------------------------------
@@ -2652,7 +2658,7 @@ internal sealed partial class MainWindow
         drawList.AddText(
             new Vector2(
                 textX,
-                origin.Y + 20f),
+               origin.Y + 55f),
             WithAlpha(
                 AccentHover,
                 contentAlpha),
@@ -2665,12 +2671,12 @@ internal sealed partial class MainWindow
         var savedCursor =
             ImGui.GetCursorScreenPos();
 
-        ImGui.SetWindowFontScale(1.35f);
+        ImGui.SetWindowFontScale(1.55f);
 
         ImGui.SetCursorScreenPos(
             new Vector2(
                 textX,
-                origin.Y + 46f));
+               origin.Y + 95f));
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.Alpha,
@@ -2694,7 +2700,7 @@ internal sealed partial class MainWindow
         ImGui.SetCursorScreenPos(
             new Vector2(
                 textX,
-                origin.Y + 112f));
+                origin.Y + 165f));
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.Alpha,
@@ -2726,7 +2732,7 @@ internal sealed partial class MainWindow
         var buttonY =
             origin.Y +
             height -
-            48f;
+            58f;
 
         var watchMin =
             new Vector2(
@@ -3440,10 +3446,10 @@ internal sealed partial class MainWindow
                 badgeMax,
                 ImGui.GetColorU32(
                     new Vector4(
-                        Accent.X,
-                        Accent.Y,
-                        Accent.Z,
-                        0.92f)),
+    CardBgHover.X,
+    CardBgHover.Y,
+    CardBgHover.Z,
+    0.75f)),
                 5f);
 
             drawList.AddText(
@@ -3582,7 +3588,7 @@ internal sealed partial class MainWindow
     private void DrawWatchPartiesShelf()
     {
         const float gap = 10f;
-        const float cardHeight = 175f;
+        const float cardHeight = 238f;
         const int cardCount = 4;
 
         var width =
@@ -3599,9 +3605,12 @@ internal sealed partial class MainWindow
 
         DrawWatchPartyCard(
             "Limsa Lounge",
-            "AetherPlayer",
-            "12 watching",
-            null,
+            "LOTR Movie Marathon!",
+            "WarriorOfMight",
+            "Plot 5 Ward 6 — The Goblet",
+            "7 watching",
+                    null,
+            FontAwesomeIcon.Play,
             true,
             false,
             cardWidth,
@@ -3611,9 +3620,12 @@ internal sealed partial class MainWindow
 
         DrawWatchPartyCard(
             "Dragon Room",
+            "Watching: Endwalker Trailer",
             "Y'shtola",
+            "Shirogane — Empyreum Apartments",
             "2 watching",
-            "roombg1.png",
+                    "roombg1.png",
+            FontAwesomeIcon.Video,
             false,
             false,
             cardWidth,
@@ -3623,9 +3635,12 @@ internal sealed partial class MainWindow
 
         DrawWatchPartyCard(
             "Chocobo Club",
+            "anime nightt booooiis",
             "Alphinaud",
-            "0 watching",
-            "roombg2.png",
+            "Central Shroud",
+            "1 watching",
+                    "roombg2.png",
+            FontAwesomeIcon.Film,
             false,
             true,
             cardWidth,
@@ -3638,12 +3653,15 @@ internal sealed partial class MainWindow
             cardHeight);
     }
 
-    const float thumbHeight = 86f;
+    const float thumbHeight = 92f;
     private void DrawWatchPartyCard(
      string title,
+     string contentText,
      string hostName,
+     string locationText,
      string watcherText,
      string? imageName,
+     FontAwesomeIcon categoryIcon,
      bool featured,
      bool locked,
      float width,
@@ -3721,12 +3739,16 @@ internal sealed partial class MainWindow
                 ImDrawFlags.RoundCornersTop);
 
             drawList.AddRectFilledMultiColor(
-     origin + new Vector2(0f, thumbHeight - 90f),
-     origin + new Vector2(width, thumbHeight),
-     ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0f)),
-     ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0f)),
-     ImGui.GetColorU32(new Vector4(CardBg.X, CardBg.Y, CardBg.Z, 1.0f)),
-     ImGui.GetColorU32(new Vector4(CardBg.X, CardBg.Y, CardBg.Z, 1.0f)));
+     origin,
+     origin + size,
+     ImGui.GetColorU32(
+         new Vector4(0.01f, 0.01f, 0.02f, 0.95f)),
+     ImGui.GetColorU32(
+         new Vector4(0.01f, 0.01f, 0.02f, 0.05f)),
+     ImGui.GetColorU32(
+         new Vector4(0.01f, 0.01f, 0.02f, 0.05f)),
+     ImGui.GetColorU32(
+         new Vector4(0.01f, 0.01f, 0.02f, 0.70f)));
 
             drawList.AddRectFilled(
                 origin,
@@ -3760,6 +3782,44 @@ internal sealed partial class MainWindow
                 10f,
                 ImDrawFlags.RoundCornersTop);
         }
+
+        // ---------------------------------------------------------
+        // Watcher badge on thumbnail
+        // ---------------------------------------------------------
+
+        var watcherSize =
+            ImGui.CalcTextSize(watcherText);
+
+        var watcherMin =
+            origin +
+            new Vector2(
+                8f,
+                8f);
+
+        var watcherMax =
+            watcherMin +
+            new Vector2(
+                watcherSize.X + 12f,
+                watcherSize.Y + 6f);
+
+        drawList.AddRectFilled(
+            watcherMin,
+            watcherMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    0f,
+                    0f,
+                    0f,
+                    0.65f)),
+            5f);
+
+        drawList.AddText(
+            watcherMin +
+            new Vector2(
+                6f,
+                3f),
+            ImGui.GetColorU32(Vector4.One),
+            watcherText);
 
         // ---------------------------------------------------------
         // Featured badge
@@ -3803,20 +3863,36 @@ internal sealed partial class MainWindow
         // ---------------------------------------------------------
 
         var avatarY =
-    origin.Y + 12f;
+            origin.Y + thumbHeight - 28f;
 
-        var avatarX =
-            origin.X + 12f;
+ 
 
-        const float avatarSize = 26f;
-        const float avatarOverlap = 17f;
+        const int maxVisibleAvatars = 4;
 
         var participantCount =
             locked
                 ? 1
                 : featured
-                    ? 5
+                    ? 7
                     : 2;
+
+        var visibleAvatars =
+            Math.Min(participantCount, maxVisibleAvatars);
+
+        var extraAvatars =
+            participantCount - visibleAvatars;
+
+        const float avatarSize = 22f;
+        const float avatarOverlap = 16f;
+
+        var stackWidth =
+            avatarSize +
+            (visibleAvatars - 1) * avatarOverlap +
+            (extraAvatars > 0 ? avatarSize : 0f);
+
+        var avatarX =
+            origin.X + width - stackWidth - 10f;
+
 
         // For these placeholder rooms, reuse the current user's actual
         // profile avatar. Real room participants can replace these later.
@@ -3832,7 +3908,7 @@ internal sealed partial class MainWindow
 
 
 
-        for (var i = 0; i < participantCount; i++)
+        for (var i = 0; i < visibleAvatars; i++)
         {
             var avatarPos =
                 new Vector2(
@@ -3863,19 +3939,117 @@ internal sealed partial class MainWindow
             ImGui.PopID();
         }
 
+        if (extraAvatars > 0)
+        {
+            var plusX =
+                avatarX +
+                visibleAvatars * avatarOverlap;
+
+            var plusPos =
+                new Vector2(
+                    plusX,
+                    avatarY);
+
+            drawList.AddCircleFilled(
+                plusPos +
+                new Vector2(
+                    avatarSize * 0.5f,
+                    avatarSize * 0.5f),
+                avatarSize * 0.5f,
+                ImGui.GetColorU32(CardBgHover));
+
+            var plusText =
+                $"+{extraAvatars}";
+
+            var textSize =
+                ImGui.CalcTextSize(plusText);
+
+            drawList.AddText(
+                plusPos +
+                new Vector2(
+                    (avatarSize - textSize.X) * 0.5f,
+                    (avatarSize - textSize.Y) * 0.5f),
+                ImGui.GetColorU32(Vector4.One),
+                plusText);
+        }
+
 
 
         // ---------------------------------------------------------
-        // Room title
+        // Room title + category icon
         // ---------------------------------------------------------
+
+        var titleY =
+            origin.Y +
+            thumbHeight +
+            8f;
+
+        float categoryWidth;
+
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        {
+            categoryWidth =
+                ImGui.CalcTextSize(
+                    categoryIcon.ToIconString()).X;
+
+            drawList.AddText(
+                new Vector2(
+                    origin.X + 10f,
+                    titleY),
+                ImGui.GetColorU32(Accent),
+                categoryIcon.ToIconString());
+        }
 
         drawList.AddText(
-            origin +
             new Vector2(
-                10f,
-                thumbHeight - 12f),
-                            ImGui.GetColorU32(Vector4.One),
+                origin.X + 10f + categoryWidth + 6f,
+                titleY),
+            ImGui.GetColorU32(Vector4.One),
             title);
+
+        // ---------------------------------------------------------
+        // Current content pill
+        // ---------------------------------------------------------
+
+        const float contentPillHeight = 20f;
+
+        var contentTextSize =
+            ImGui.CalcTextSize(contentText);
+
+        var contentPillMin =
+            new Vector2(
+                origin.X + 10f,
+                titleY + 22f);
+
+        var contentPillMax =
+            contentPillMin +
+            new Vector2(
+                MathF.Min(contentTextSize.X + 16f, width - 20f),
+                contentPillHeight);
+
+        drawList.AddRectFilled(
+            contentPillMin,
+            contentPillMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.12f)),
+            6f);
+
+        drawList.AddText(
+            contentPillMin +
+            new Vector2(
+                8f,
+                3f),
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.82f,
+                    0.78f,
+                    0.95f,
+                    1f)),
+            contentText);
 
         // ---------------------------------------------------------
         // Host + watcher metadata
@@ -3884,7 +4058,7 @@ internal sealed partial class MainWindow
         var hostY =
             origin.Y +
             thumbHeight +
-            8f;
+            62f;
 
         using (ImRaii.PushFont(UiBuilder.IconFont))
         {
@@ -3892,13 +4066,13 @@ internal sealed partial class MainWindow
                 new Vector2(
                     origin.X + 10f,
                     hostY),
-                ImGui.GetColorU32(MutedText),
+                ImGui.GetColorU32(new Vector4(1f, 0.78f, 0.25f, 1f)),
                 FontAwesomeIcon.Crown.ToIconString());
         }
 
         drawList.AddText(
             new Vector2(
-                origin.X + 28f,
+                origin.X + 29f,
                 hostY),
             ImGui.GetColorU32(MutedText),
             "Hosted by ");
@@ -3907,7 +4081,7 @@ internal sealed partial class MainWindow
 
         drawList.AddText(
             new Vector2(
-                origin.X + 28f + hostedByWidth,
+                origin.X + 29f + hostedByWidth,
                 hostY),
             ImGui.GetColorU32(new Vector4(0.55f, 0.35f, 1.0f, 1.0f)),
             hostName);
@@ -3915,64 +4089,64 @@ internal sealed partial class MainWindow
         var metaY =
             origin.Y +
             thumbHeight +
-            28f;
+            102f;
 
-        // Watch count always on the left
+        // Location row
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        {
+            drawList.AddText(
+                new Vector2(
+                    origin.X + 10f,
+                    metaY - 20f),
+                ImGui.GetColorU32(Accent),
+                FontAwesomeIcon.MapMarkerAlt.ToIconString());
+        }
+
         drawList.AddText(
             new Vector2(
-                origin.X + 10f,
-                metaY),
-            ImGui.GetColorU32(MutedText),
-            watcherText);
+                origin.X + 29f,
+                metaY - 14f),
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.72f,
+                    0.68f,
+                    0.95f,
+                    0.85f)),
+            locationText);
 
-        // Lock only appears on locked rooms, on the right
-        if (locked)
-        {
-            using (ImRaii.PushFont(UiBuilder.IconFont))
-            {
-                var lockGlyph =
-                    FontAwesomeIcon.Lock.ToIconString();
 
-                var lockSize =
-                    ImGui.CalcTextSize(lockGlyph);
+       
 
-                drawList.AddText(
-                    new Vector2(
-                        origin.X + width - lockSize.X - 10f,
-                        metaY + 1f),
-                    ImGui.GetColorU32(MutedText),
-                    lockGlyph);
-            }
-        }
+  
 
         // ---------------------------------------------------------
         // Join button
         // ---------------------------------------------------------
 
-        const float buttonHeight = 28f;
-        const float menuWidth = 32f;
+        const float buttonHeight = 24f;
+        const float statusWidth = 32f;
         const float buttonGap = 6f;
 
         var joinMin =
             new Vector2(
                 origin.X + 8f,
-                origin.Y + height - buttonHeight - 5f);
+                origin.Y + height - buttonHeight - 8f);
 
         var joinMax =
             new Vector2(
                 origin.X +
                 width -
-                menuWidth -
+                statusWidth -
                 buttonGap -
                 8f,
                 joinMin.Y + buttonHeight);
 
-        var menuMin =
+        var statusMin =
             new Vector2(
                 joinMax.X + buttonGap,
                 joinMin.Y);
 
-        var menuMax =
+        var statusMax =
             new Vector2(
                 origin.X + width - 8f,
                 joinMin.Y + buttonHeight);
@@ -3987,11 +4161,11 @@ internal sealed partial class MainWindow
             mouse.Y >= joinMin.Y &&
             mouse.Y <= joinMax.Y;
 
-        var menuHovered =
-            mouse.X >= menuMin.X &&
-            mouse.X <= menuMax.X &&
-            mouse.Y >= menuMin.Y &&
-            mouse.Y <= menuMax.Y;
+        var statusHovered =
+            mouse.X >= statusMin.X &&
+            mouse.X <= statusMax.X &&
+            mouse.Y >= statusMin.Y &&
+            mouse.Y <= statusMax.Y;
 
         drawList.AddRectFilled(
             joinMin,
@@ -4012,7 +4186,7 @@ internal sealed partial class MainWindow
                                 CardBgHover.Y,
                                 CardBgHover.Z,
                                 0.92f)),
-            6f);
+            5f);
 
         if (!featured && !locked)
         {
@@ -4025,7 +4199,7 @@ internal sealed partial class MainWindow
                         Accent.Y,
                         Accent.Z,
                         0.24f)),
-                6f);
+                5f);
         }
 
         const string joinText =
@@ -4054,37 +4228,36 @@ ImGui.GetColorU32(
             joinText);
 
         // ---------------------------------------------------------
-        // More button
+        // Room visibility status
         // ---------------------------------------------------------
-
-        drawList.AddRectFilled(
-            menuMin,
-            menuMax,
-            ImGui.GetColorU32(
-                menuHovered
-                    ? CardBgHover
-                    : new Vector4(
-                        CardBgHover.X,
-                        CardBgHover.Y,
-                        CardBgHover.Z,
-                        0.70f)),
-            6f);
 
         using (ImRaii.PushFont(UiBuilder.IconFont))
         {
+            var statusIcon =
+                locked
+                    ? FontAwesomeIcon.Lock
+                    : FontAwesomeIcon.LockOpen;
+
             var glyph =
-                FontAwesomeIcon.EllipsisV.ToIconString();
+                statusIcon.ToIconString();
 
             var glyphSize =
                 ImGui.CalcTextSize(glyph);
 
             drawList.AddText(
                 new Vector2(
-                    menuMin.X +
-                    (menuWidth - glyphSize.X) * 0.5f + 2f,
-                    menuMin.Y +
+                    statusMin.X +
+                    (statusWidth - glyphSize.X) * 0.5f,
+                    statusMin.Y +
                     (buttonHeight - glyphSize.Y) * 0.5f),
-                ImGui.GetColorU32(MutedText),
+                ImGui.GetColorU32(
+                    locked
+                        ? MutedText
+                        : new Vector4(
+                            0.65f,
+                            0.75f,
+                            0.90f,
+                            1f)),
                 glyph);
         }
 
