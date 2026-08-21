@@ -1314,8 +1314,7 @@ childPos + new Vector2(width, 2),
         if (!seekDragging)
         {
             seekPreview = position;
-
-
+        }
             const float playSize = 32f;
             const float skipSize = 20f;
             const float gap = 14f;
@@ -1492,7 +1491,7 @@ childPos + new Vector2(width, 2),
              
             }
         }
-    }
+    
 
     private void DrawBottomVolume(float iconSize, float sliderW, float rowH)
     {

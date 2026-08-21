@@ -78,6 +78,20 @@ internal sealed class Configuration : IPluginConfiguration
     public Dictionary<ulong, string> CharacterDisplayNames { get; set; } = new();
 
     public List<VideoQueueRecord> VideoQueue { get; set; } = new();
+
+    // YouTube videos favourited by the player.
+    // Store stable YouTube video IDs rather than full URLs.
+    public List<string> FavouriteYouTubeVideoIds { get; set; } = new();
+
+    // YouTube channels subscribed to inside AlphaChannel.
+    // Store stable channel IDs rather than display names.
+    public List<string> SubscribedYouTubeChannelIds { get; set; } = new();
+
+    // Display-name cache for locally-managed YouTube subscriptions.
+    // The channel ID remains the real identity.
+    public Dictionary<string, string> SubscribedYouTubeChannelNames { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public List<ScreenPositionPreset> ScreenPresets { get; set; } = new();
 
     // Plugin window chrome palette - see UiTheme.cs / ThemeCatalog. Defaults to Purple (mockup).

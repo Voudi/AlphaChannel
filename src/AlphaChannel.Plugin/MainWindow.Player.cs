@@ -9,6 +9,7 @@ internal sealed partial class MainWindow
 {
     private enum PlayerDrawer
     {
+        Player,
         PlayVideo,
         Queue,
         WatchParty,
@@ -19,13 +20,29 @@ internal sealed partial class MainWindow
     {
         var availableWidth = ImGui.GetContentRegionAvail().X;
 
-        var gap = 8f;
-        var buttonWidth = (availableWidth - (gap * 3f)) / 4f;
-        var buttonSize = new Vector2(buttonWidth, 46f);
+        const float gap = 8f;
+        const int tabCount = 5;
+
+        var buttonWidth =
+            (availableWidth - (gap * (tabCount - 1))) /
+            tabCount;
+
+        var buttonSize =
+            new Vector2(
+                buttonWidth,
+                46f);
 
         DrawPlayerDrawerTab(
-            FontAwesomeIcon.Play,
-            "Play Video",
+            FontAwesomeIcon.Tv,
+            "Player",
+            PlayerDrawer.Player,
+            buttonSize);
+
+        ImGui.SameLine(0, gap);
+
+        DrawPlayerDrawerTab(
+            FontAwesomeIcon.Plus,
+            "Add Media",
             PlayerDrawer.PlayVideo,
             buttonSize);
 
@@ -53,8 +70,9 @@ internal sealed partial class MainWindow
             PlayerDrawer.Chat,
             buttonSize);
     }
+
     private double queueAddedFeedbackUntil;
-    private PlayerDrawer activePlayerDrawer = PlayerDrawer.PlayVideo;
+    private PlayerDrawer activePlayerDrawer = PlayerDrawer.Player;
     private void DrawPlayerPage()
     {
         DrawPlayerDrawerTabs();
@@ -68,6 +86,10 @@ internal sealed partial class MainWindow
 
         switch (activePlayerDrawer)
         {
+            case PlayerDrawer.Player:
+                DrawPlayerPreviewDrawer();
+                break;
+
             case PlayerDrawer.PlayVideo:
                 DrawPlayVideoDrawer();
                 break;
@@ -182,6 +204,419 @@ internal sealed partial class MainWindow
             ImGui.GetColorU32(textColor),
             label);
     }
+
+    private void DrawPlayerPreviewDrawer()
+    {
+        var current = queue.Current;
+
+        // ---------------------------------------------------------
+        // Now playing
+        // ---------------------------------------------------------
+
+        ImGui.SetWindowFontScale(1.15f);
+
+        ImGui.TextColored(
+            Vector4.One,
+            "Now Playing");
+
+        ImGui.SetWindowFontScale(1f);
+
+        ImGui.Dummy(
+            new Vector2(0f, 4f));
+
+        DrawPlayerPreviewSurface(current);
+
+        ImGui.Dummy(
+            new Vector2(0f, 6f));
+
+        // ---------------------------------------------------------
+        // Up next
+        // ---------------------------------------------------------
+
+        ImGui.SetWindowFontScale(0.82f);
+
+        ImGui.TextColored(
+            MutedText,
+            "UP NEXT");
+
+        ImGui.SetWindowFontScale(1f);
+
+        ImGui.Dummy(
+            new Vector2(0f, 4f));
+
+        DrawPlayerUpNext();
+    }
+
+    private void DrawPlayerPreviewSurface(
+        Video.VideoQueueEntry? current)
+    {
+        var availableWidth =
+            ImGui.GetContentRegionAvail().X;
+
+        // Keep the preview relatively cinematic without consuming
+        // the entire page vertically.
+        var previewWidth =
+     MathF.Min(
+         availableWidth,
+         680f);
+
+        var previewHeight =
+            previewWidth * 9f / 16f;
+
+        var remaining =
+            availableWidth - previewWidth;
+
+        if (remaining > 0f)
+        {
+            ImGui.SetCursorPosX(
+                ImGui.GetCursorPosX() +
+                remaining * 0.5f);
+        }
+
+        var origin =
+            ImGui.GetCursorScreenPos();
+
+        var size =
+            new Vector2(
+                previewWidth,
+                previewHeight);
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        drawList.AddRectFilled(
+            origin,
+            origin + size,
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.025f,
+                    0.032f,
+                    0.055f,
+                    1f)),
+            10f);
+
+        drawList.AddRect(
+            origin,
+            origin + size,
+            ImGui.GetColorU32(
+                new Vector4(
+                    MutedText.X,
+                    MutedText.Y,
+                    MutedText.Z,
+                    0.14f)),
+            10f,
+            ImDrawFlags.None,
+            1f);
+
+        if (current is null)
+        {
+            DrawPlayerEmptyPreview(
+                origin,
+                size);
+        }
+        else
+        {
+            // Live video texture goes here in the next step.
+            DrawPlayerWaitingPreview(
+                origin,
+                size);
+        }
+
+        ImGui.Dummy(size);
+
+        if (current is null)
+        {
+            return;
+        }
+
+        ImGui.Dummy(
+            new Vector2(0f, 10f));
+
+        ImGui.SetWindowFontScale(1.08f);
+
+        ImGui.TextColored(
+            Vector4.One,
+            current.Title);
+
+        ImGui.SetWindowFontScale(1f);
+
+        if (!string.IsNullOrWhiteSpace(
+                current.Source))
+        {
+            ImGui.Dummy(
+                new Vector2(0f, 2f));
+
+            ImGui.SetWindowFontScale(0.88f);
+
+            ImGui.TextColored(
+                MutedText,
+                current.Source);
+
+            ImGui.SetWindowFontScale(1f);
+        }
+    }
+
+    private void DrawPlayerEmptyPreview(
+        Vector2 origin,
+        Vector2 size)
+    {
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        var icon =
+            FontAwesomeIcon.PlayCircle
+                .ToIconString();
+
+        Vector2 iconSize;
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            iconSize =
+                ImGui.CalcTextSize(icon);
+
+            drawList.AddText(
+                origin +
+                new Vector2(
+                    (size.X - iconSize.X) * 0.5f,
+                    size.Y * 0.5f - 34f),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        0.75f)),
+                icon);
+        }
+
+        const string message =
+            "Choose a video to begin playing";
+
+        var messageSize =
+            ImGui.CalcTextSize(message);
+
+        drawList.AddText(
+            origin +
+            new Vector2(
+                (size.X - messageSize.X) * 0.5f,
+                size.Y * 0.5f + 5f),
+            ImGui.GetColorU32(
+                MutedText),
+            message);
+    }
+
+    private void DrawPlayerWaitingPreview(
+    Vector2 origin,
+    Vector2 size)
+    {
+        var engine =
+            screenController.Engine;
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        if (engine.IsActive &&
+            engine.PreviewTextureHandle != nint.Zero)
+        {
+            drawList.AddImageRounded(
+     new ImTextureID(
+         unchecked((ulong)engine.PreviewTextureHandle)),
+     origin,
+     origin + size,
+     Vector2.Zero,
+     Vector2.One,
+     uint.MaxValue,
+     10f);
+
+            return;
+        }
+
+        const string message =
+            "Preparing video preview...";
+
+        var messageSize =
+            ImGui.CalcTextSize(message);
+
+        drawList.AddText(
+            origin +
+            new Vector2(
+                (size.X - messageSize.X) * 0.5f,
+                (size.Y - messageSize.Y) * 0.5f),
+            ImGui.GetColorU32(
+                MutedText),
+            message);
+    }
+
+    private void DrawPlayerUpNext()
+    {
+        if (queue.Entries.Count == 0)
+        {
+            const float emptyHeight = 92f;
+
+            var origin =
+                ImGui.GetCursorScreenPos();
+
+            var width =
+                ImGui.GetContentRegionAvail().X;
+
+            var size =
+                new Vector2(
+                    width,
+                    emptyHeight);
+
+            var drawList =
+                ImGui.GetWindowDrawList();
+
+            drawList.AddRectFilled(
+                origin,
+                origin + size,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        0.035f,
+                        0.045f,
+                        0.075f,
+                        1f)),
+                8f);
+
+            drawList.AddRect(
+                origin,
+                origin + size,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        MutedText.X,
+                        MutedText.Y,
+                        MutedText.Z,
+                        0.12f)),
+                8f);
+
+            const string message =
+                "There's no video in the queue.";
+
+            var textSize =
+                ImGui.CalcTextSize(message);
+
+            drawList.AddText(
+                origin +
+                new Vector2(
+                    (size.X - textSize.X) * 0.5f,
+                    (size.Y - textSize.Y) * 0.5f),
+                ImGui.GetColorU32(
+                    MutedText),
+                message);
+
+            ImGui.Dummy(size);
+        }
+        else
+        {
+            var next =
+                queue.Entries[0];
+
+            const float rowHeight = 92f;
+            const float thumbWidth = 156f;
+
+            var origin =
+                ImGui.GetCursorScreenPos();
+
+            var width =
+                ImGui.GetContentRegionAvail().X;
+
+            var size =
+                new Vector2(
+                    width,
+                    rowHeight);
+
+            var drawList =
+                ImGui.GetWindowDrawList();
+
+            drawList.AddRectFilled(
+                origin,
+                origin + size,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        0.045f,
+                        0.06f,
+                        0.10f,
+                        1f)),
+                8f);
+
+            var thumbnail =
+                thumbnails.Get(
+                    next.ThumbnailUrl);
+
+            if (thumbnail is not null)
+            {
+                drawList.AddImageRounded(
+                    thumbnail.Handle,
+                    origin,
+                    origin +
+                    new Vector2(
+                        thumbWidth,
+                        rowHeight),
+                    Vector2.Zero,
+                    Vector2.One,
+                    uint.MaxValue,
+                    8f);
+            }
+            else
+            {
+                drawList.AddRectFilled(
+                    origin,
+                    origin +
+                    new Vector2(
+                        thumbWidth,
+                        rowHeight),
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            0.025f,
+                            0.032f,
+                            0.055f,
+                            1f)),
+                    8f);
+            }
+
+            var contentX =
+                origin.X +
+                thumbWidth +
+                14f;
+
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    contentX,
+                    origin.Y + 17f));
+
+            ImGui.TextColored(
+                Vector4.One,
+                next.Title);
+
+            if (!string.IsNullOrWhiteSpace(
+                    next.Source))
+            {
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        contentX,
+                        origin.Y + 48f));
+
+                ImGui.SetWindowFontScale(0.86f);
+
+                ImGui.TextColored(
+                    MutedText,
+                    next.Source);
+
+                ImGui.SetWindowFontScale(1f);
+            }
+
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    origin.X,
+                    origin.Y + rowHeight));
+
+            ImGui.Dummy(
+                new Vector2(
+                    width,
+                    1f));
+        }
+    }
+
     private void DrawPlayVideoDrawer()
     {
         if (pendingPlayerSearch != null)

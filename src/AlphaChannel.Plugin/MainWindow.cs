@@ -98,7 +98,7 @@ internal sealed partial class MainWindow : Window, IDisposable
     // saves, same split as requestRename above (MainWindow owns the UI, Plugin.cs owns persistence).
     private readonly Action<CharacterSession?> onSessionChanged;
     // Wide media-hub layout: left navigation + spacious content + social rail + compact player bar.
-    private static readonly Vector2 WindowSize = new(1150, 840);
+    private static readonly Vector2 WindowSize = new(1220, 840);
     private static readonly Vector2 MiniModeSize = new(260, 840);
     // Compact capsule chrome while tucked away - wide enough for brand + expand + close.
     private static readonly Vector2 MinimizedSize = new(276, 40);
@@ -1127,7 +1127,15 @@ ImGui.GetColorU32(Vector4.One));
         }
 
         DrawNavItem(HomePage.Home, FontAwesomeIcon.Home, "Home");
-        DrawNavItem(HomePage.Player, FontAwesomeIcon.Search, "Browse");
+        var playerLabel =
+    queue.Entries.Count > 0
+        ? $"Player ({queue.Entries.Count})"
+        : "Player";
+
+        DrawNavItem(
+            HomePage.Player,
+            FontAwesomeIcon.Play,
+            playerLabel);
         DrawNavItem(HomePage.VideoGrid, FontAwesomeIcon.ThLarge, "Browse Videos");
         DrawNavItem(HomePage.WatchAlong, FontAwesomeIcon.Users, "Watch Party");
         DrawNavItem(HomePage.Screen, FontAwesomeIcon.Desktop, "Screen");

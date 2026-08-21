@@ -14,6 +14,18 @@ internal sealed partial class MainWindow
     private string serverUrlInput = string.Empty;
     private bool serverUrlSynced;
 
+    // ---------------------------------------------------------
+    // YouTube subscription management
+    // ---------------------------------------------------------
+
+    private string subscriptionChannelInput = string.Empty;
+    private bool isAddingManualSubscription;
+    private string? subscriptionMessage;
+    private bool subscriptionMessageIsError;
+
+    private readonly HashSet<string> subscriptionNamesLoading =
+    new(StringComparer.OrdinalIgnoreCase);
+
     private enum SettingsTab
     {
         Account,
@@ -127,6 +139,142 @@ internal sealed partial class MainWindow
             case SettingsTab.Other:
                 DrawOtherSettings();
                 break;
+        }
+    }
+
+    private async Task LoadSubscriptionChannelNameAsync(
+    string channelId)
+    {
+        try
+        {
+            var channelName =
+                await searchResolver
+                    .GetChannelNameAsync(
+                        channelId,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+
+            if (string.IsNullOrWhiteSpace(
+                    channelName))
+            {
+                return;
+            }
+
+            Plugin.Cfg
+                .SubscribedYouTubeChannelNames[
+                    channelId] =
+                channelName;
+
+            Plugin.Cfg.Save();
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning(
+                $"[Subscriptions] Failed to cache channel name " +
+                $"{channelId}: {exception.Message}");
+        }
+        finally
+        {
+            subscriptionNamesLoading.Remove(
+                channelId);
+        }
+    }
+
+    private async Task AddManualYouTubeSubscriptionAsync(
+    string requestedChannelName)
+    {
+        try
+        {
+            var results =
+                await searchResolver
+                    .SearchWithMetadataAsync(
+                        requestedChannelName,
+                        12,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+
+            var matchingVideo =
+                results.FirstOrDefault(
+                    result =>
+                        !string.IsNullOrWhiteSpace(
+                            result.ChannelId)
+                        &&
+                        string.Equals(
+                            result.ChannelName.Trim(),
+                            requestedChannelName.Trim(),
+                            StringComparison.OrdinalIgnoreCase));
+
+            if (matchingVideo is null ||
+                string.IsNullOrWhiteSpace(
+                    matchingVideo.ChannelId))
+            {
+                subscriptionMessageIsError =
+                    true;
+
+                subscriptionMessage =
+                    $"Couldn't find an exact channel named \"{requestedChannelName}\".";
+
+                return;
+            }
+
+            var channelId =
+                matchingVideo.ChannelId;
+
+            if (Plugin.Cfg
+                .SubscribedYouTubeChannelIds
+                .Contains(
+                    channelId,
+                    StringComparer.OrdinalIgnoreCase))
+            {
+                subscriptionMessageIsError =
+                    false;
+
+                subscriptionMessage =
+                    $"Already subscribed to {matchingVideo.ChannelName}.";
+
+                subscriptionChannelInput =
+                    string.Empty;
+
+                return;
+            }
+
+            Plugin.Cfg
+                .SubscribedYouTubeChannelIds
+                .Add(
+                    channelId);
+
+            Plugin.Cfg
+                .SubscribedYouTubeChannelNames[
+                    channelId] =
+                matchingVideo.ChannelName;
+
+            Plugin.Cfg.Save();
+
+            subscriptionChannelInput =
+                string.Empty;
+
+            subscriptionMessageIsError =
+                false;
+
+            subscriptionMessage =
+                $"Subscribed to {matchingVideo.ChannelName}.";
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning(
+                $"[Subscriptions] Manual subscription lookup failed: " +
+                $"{exception.Message}");
+
+            subscriptionMessageIsError =
+                true;
+
+            subscriptionMessage =
+                "Couldn't search for that YouTube channel.";
+        }
+        finally
+        {
+            isAddingManualSubscription =
+                false;
         }
     }
 
@@ -417,16 +565,20 @@ internal sealed partial class MainWindow
         SettingsHairline();
 
         SettingsSection(
-            "Video playback",
-            "Playback options for YouTube and online video sources.");
+      "Video playback",
+      "Playback options for YouTube and online video sources.");
 
         DrawCookiesSettings();
 
         SettingsHairline();
 
+        DrawYouTubeSubscriptionSettings();
+
+        SettingsHairline();
+
         SettingsSection(
             "Home sections",
-            "Restore hidden sections on the Home page.");
+                    "Restore hidden sections on the Home page.");
 
         if (!Plugin.Cfg.ShowFfxivYouTubeSection)
         {
@@ -463,6 +615,333 @@ internal sealed partial class MainWindow
 
             DrawServerSettings();
         }
+    }
+
+    private void DrawYouTubeSubscriptionSettings()
+    {
+        // ---------------------------------------------------------
+        // Add channel manually
+        // ---------------------------------------------------------
+
+        ImGui.TextColored(
+            Vector4.One,
+            "Subscribe to a channel");
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                4f));
+
+        ImGui.TextColored(
+            MutedText,
+            "Enter the exact YouTube channel name.");
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                8f));
+
+        const float buttonWidth = 110f;
+        const float gap = 10f;
+
+        ImGui.SetNextItemWidth(
+            ImGui.GetContentRegionAvail().X -
+            buttonWidth -
+            gap);
+
+        bool submitted;
+
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.FrameRounding,
+            8f)
+            .Push(
+                ImGuiStyleVar.FramePadding,
+                new Vector2(
+                    12f,
+                    9f)))
+        {
+            submitted =
+                ImGui.InputTextWithHint(
+                    "##manualYouTubeSubscription",
+                    "Channel name...",
+                    ref subscriptionChannelInput,
+                    128,
+                    ImGuiInputTextFlags.EnterReturnsTrue);
+        }
+
+        ImGui.SameLine(
+            0f,
+            gap);
+
+        bool clicked;
+
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.FrameRounding,
+            8f))
+        using (ImRaii.PushColor(
+            ImGuiCol.Button,
+            Accent)
+            .Push(
+                ImGuiCol.ButtonHovered,
+                AccentHover)
+            .Push(
+                ImGuiCol.ButtonActive,
+                AccentActive))
+        using (ImRaii.Disabled(
+            isAddingManualSubscription ||
+            string.IsNullOrWhiteSpace(
+                subscriptionChannelInput)))
+        {
+            clicked =
+                ImGui.Button(
+                    "Subscribe##manualYouTubeSubscription",
+                    new Vector2(
+                        buttonWidth,
+                        36f));
+        }
+
+        if ((submitted || clicked) &&
+            !isAddingManualSubscription &&
+            !string.IsNullOrWhiteSpace(
+                subscriptionChannelInput))
+        {
+            var channelName =
+                subscriptionChannelInput.Trim();
+
+            subscriptionMessage = null;
+            isAddingManualSubscription = true;
+
+            _ = AddManualYouTubeSubscriptionAsync(
+                channelName);
+        }
+
+        if (isAddingManualSubscription)
+        {
+            ImGui.Dummy(
+                new Vector2(
+                    0f,
+                    6f));
+
+            ImGui.TextColored(
+                MutedText,
+                "Finding channel...");
+        }
+        else if (subscriptionMessage is not null)
+        {
+            ImGui.Dummy(
+                new Vector2(
+                    0f,
+                    6f));
+
+            ImGui.TextColored(
+                subscriptionMessageIsError
+                    ? Danger
+                    : Good,
+                subscriptionMessage);
+        }
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                18f));
+
+        // ---------------------------------------------------------
+        // Current subscriptions
+        // ---------------------------------------------------------
+
+        ImGui.TextColored(
+            Vector4.One,
+            "Subscribed channels");
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                7f));
+
+        if (Plugin.Cfg.SubscribedYouTubeChannelIds.Count == 0)
+        {
+            ImGui.TextColored(
+                MutedText,
+                "You aren't subscribed to any channels yet.");
+
+            return;
+        }
+
+        // Copy the IDs because clicking Remove modifies the
+        // underlying config collection while we're drawing.
+        var subscriptions =
+            Plugin.Cfg.SubscribedYouTubeChannelIds
+                .Distinct(
+                    StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        foreach (var channelId in subscriptions)
+        {
+            ImGui.PushID(
+                $"subscriptionSettings_{channelId}");
+
+            DrawYouTubeSubscriptionSettingsRow(
+                channelId);
+
+            ImGui.PopID();
+
+            ImGui.Dummy(
+                new Vector2(
+                    0f,
+                    6f));
+        }
+    }
+
+    private void DrawYouTubeSubscriptionSettingsRow(
+    string channelId)
+    {
+        const float rowHeight = 42f;
+        const float removeWidth = 88f;
+
+        var origin =
+            ImGui.GetCursorScreenPos();
+
+        var width =
+            ImGui.GetContentRegionAvail().X;
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        drawList.AddRectFilled(
+            origin,
+            origin +
+            new Vector2(
+                width,
+                rowHeight),
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.045f,
+                    0.06f,
+                    0.10f,
+                    1f)),
+            8f);
+
+        drawList.AddRect(
+            origin,
+            origin +
+            new Vector2(
+                width,
+                rowHeight),
+            ImGui.GetColorU32(
+                BorderSubtle),
+            8f);
+
+        var hasSavedName =
+     Plugin.Cfg.SubscribedYouTubeChannelNames
+         .TryGetValue(
+             channelId,
+             out var savedName)
+     &&
+     !string.IsNullOrWhiteSpace(
+         savedName);
+
+        var channelName =
+            hasSavedName
+                ? savedName!
+                : "Loading channel...";
+
+        if (!hasSavedName &&
+            subscriptionNamesLoading.Add(
+                channelId))
+        {
+            _ = LoadSubscriptionChannelNameAsync(
+                channelId);
+        }
+
+        // Channel icon
+        using (ImRaii.PushFont(
+            UiBuilder.IconFont))
+        {
+            drawList.AddText(
+                origin +
+                new Vector2(
+                    12f,
+                    13f),
+                ImGui.GetColorU32(
+                    AccentHover),
+                FontAwesomeIcon.User.ToIconString());
+        }
+
+        drawList.AddText(
+            origin +
+            new Vector2(
+                34f,
+                12f),
+            ImGui.GetColorU32(
+                Vector4.One),
+            channelName);
+
+        // Remove button
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                origin.X +
+                width -
+                removeWidth -
+                7f,
+                origin.Y + 6f));
+
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.FrameRounding,
+            7f))
+        using (ImRaii.PushColor(
+            ImGuiCol.Button,
+            new Vector4(
+                0.09f,
+                0.05f,
+                0.07f,
+                1f))
+            .Push(
+                ImGuiCol.ButtonHovered,
+                new Vector4(
+                    0.18f,
+                    0.07f,
+                    0.09f,
+                    1f))
+            .Push(
+                ImGuiCol.ButtonActive,
+                new Vector4(
+                    0.22f,
+                    0.08f,
+                    0.10f,
+                    1f)))
+        {
+            if (ImGui.Button(
+                "Remove",
+                new Vector2(
+                    removeWidth,
+                    30f)))
+            {
+                Plugin.Cfg
+                    .SubscribedYouTubeChannelIds
+                    .RemoveAll(
+                        id => string.Equals(
+                            id,
+                            channelId,
+                            StringComparison.OrdinalIgnoreCase));
+
+                Plugin.Cfg
+                    .SubscribedYouTubeChannelNames
+                    .Remove(
+                        channelId);
+
+                Plugin.Cfg.Save();
+            }
+        }
+
+        // Invisible spacer so ImGui advances past our
+        // manually-drawn row.
+        ImGui.SetCursorScreenPos(
+            origin);
+
+        ImGui.Dummy(
+            new Vector2(
+                width,
+                rowHeight));
     }
 
     private static void SettingsHairline()

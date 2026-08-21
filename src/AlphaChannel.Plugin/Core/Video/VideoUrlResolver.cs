@@ -1,6 +1,7 @@
 using YoutubeExplode;
 using YoutubeExplode.Videos;
 using YoutubeExplode.Videos.Streams;
+using YoutubeExplode.Channels;
 
 namespace AlphaChannel.Plugin.Video;
 
@@ -13,7 +14,8 @@ internal sealed record VideoSearchEntry(
     TimeSpan? Duration,
     string? ThumbnailUrl,
     long? ViewCount = null,
-    DateTimeOffset? UploadDate = null);
+    DateTimeOffset? UploadDate = null,
+    string? ChannelId = null);
 
 internal sealed record ResolvedStream(string VideoUrl, string? AudioUrl, string QualityLabel);
 
@@ -89,77 +91,139 @@ internal sealed class VideoUrlResolver
         }
     }
 
-    public async Task<List<VideoSearchEntry>> SearchWithMetadataAsync(
-    string query,
-    int maxResults,
-    CancellationToken token)
+    // ---------------------------------------------------------
+    // Channel uploads
+    //
+    // Used by AlphaChannel's plugin-managed subscriptions.
+    // Takes a stable YouTube channel ID and returns recent
+    // uploads enriched with full video metadata.
+    // ---------------------------------------------------------
+
+    public async Task<List<VideoSearchEntry>> GetChannelUploadsAsync(
+        string channelId,
+        int maxResults,
+        CancellationToken token)
     {
         var results =
-            await SearchAsync(
-                    query,
-                    maxResults,
-                    token)
-                .ConfigureAwait(false);
+            new List<VideoSearchEntry>();
 
-        if (results.Count == 0)
+        try
         {
-            return results;
+            var parsedChannelId =
+                ChannelId.TryParse(
+                    channelId);
+
+            if (parsedChannelId is null)
+            {
+                return results;
+            }
+
+            await foreach (
+                var upload in youtube.Channels
+                    .GetUploadsAsync(
+                        parsedChannelId.Value,
+                        token)
+                    .ConfigureAwait(false))
+            {
+                if (results.Count >= maxResults)
+                {
+                    break;
+                }
+
+                try
+                {
+                    // GetUploadsAsync gives PlaylistVideo objects.
+                    // Fetch the complete video so we get views/date/etc.
+                    var video =
+                        await youtube.Videos
+                            .GetAsync(
+                                upload.Url,
+                                token)
+                            .ConfigureAwait(false);
+
+                    var thumbnail =
+                        video.Thumbnails
+                            .OrderByDescending(
+                                t => t.Resolution.Area)
+                            .FirstOrDefault();
+
+                    results.Add(
+                        new VideoSearchEntry(
+                            video.Title,
+                            video.Url,
+                            video.Author.ChannelTitle,
+                            video.Duration,
+                            thumbnail?.Url,
+                            video.Engagement.ViewCount,
+                            video.UploadDate,
+                            video.Author.ChannelId.Value));
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    AepLog.Warning(
+                        $"[Subscriptions] Failed to enrich upload " +
+                        $"{upload.Url}: {exception.Message}");
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal cancellation.
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning(
+                $"[Subscriptions] Failed to load channel " +
+                $"{channelId}: {exception.Message}");
         }
 
-        using var gate =
-            new SemaphoreSlim(5);
-
-        var tasks =
-            results.Select(
-                async result =>
-                {
-                    await gate
-                        .WaitAsync(token)
-                        .ConfigureAwait(false);
-
-                    try
-                    {
-                        var video =
-                            await youtube.Videos
-                                .GetAsync(
-                                    result.Url,
-                                    token)
-                                .ConfigureAwait(false);
-
-                        return result with
-                        {
-                            ViewCount =
-                                video.Engagement.ViewCount,
-
-                            UploadDate =
-                                video.UploadDate
-                        };
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        return result;
-                    }
-                    catch (Exception exception)
-                    {
-                        AepLog.Warning(
-                            $"[Home] Failed to enrich YouTube metadata for " +
-                            $"{result.Url}: {exception.Message}");
-
-                        return result;
-                    }
-                    finally
-                    {
-                        gate.Release();
-                    }
-                })
-            .ToArray();
-
-        var enriched =
-            await Task.WhenAll(tasks)
-                .ConfigureAwait(false);
-
-        return enriched.ToList();
+        return results;
     }
+
+    public async Task<string?> GetChannelNameAsync(
+    string channelId,
+    CancellationToken token)
+    {
+        try
+        {
+            var parsedChannelId =
+                ChannelId.TryParse(
+                    channelId);
+
+            if (parsedChannelId is null)
+            {
+                return null;
+            }
+
+            var channel =
+                await youtube.Channels
+                    .GetAsync(
+                        parsedChannelId.Value,
+                        token)
+                    .ConfigureAwait(false);
+
+            return channel.Title;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning(
+                $"[Subscriptions] Failed to resolve channel name " +
+                $"{channelId}: {exception.Message}");
+
+            return null;
+        }
+    }
+
+
+
 
     public async Task<List<VideoSearchEntry>> SearchLatestAggregatedAsync(
     IReadOnlyList<string> queries,
@@ -274,7 +338,10 @@ internal sealed class VideoUrlResolver
                                 video.Engagement.ViewCount,
 
                             UploadDate =
-                                video.UploadDate
+                                video.UploadDate,
+
+                            ChannelId =
+                                video.Author.ChannelId.Value
                         };
                     }
                     catch (OperationCanceledException)
@@ -312,6 +379,7 @@ internal sealed class VideoUrlResolver
             .Take(maxResults)
             .ToList();
     }
+
 
     public async Task<VideoMetadata?> ResolveMetadataAsync(string url, CancellationToken token)
     {
@@ -358,7 +426,8 @@ internal sealed class VideoUrlResolver
                 video.Duration,
                 thumbnail?.Url,
                 video.Engagement.ViewCount,
-                video.UploadDate);
+                video.UploadDate,
+                video.Author.ChannelId.Value);
         }
         catch (OperationCanceledException)
         {
@@ -372,6 +441,109 @@ internal sealed class VideoUrlResolver
 
             return null;
         }
+    }
+
+    // ---------------------------------------------------------
+    // YouTube search with full metadata.
+    //
+    // Home Trending and Browse Videos need ViewCount,
+    // UploadDate and ChannelId, which the lightweight search
+    // result alone does not fully provide.
+    // ---------------------------------------------------------
+
+    public async Task<List<VideoSearchEntry>> SearchWithMetadataAsync(
+        string query,
+        int maxResults,
+        CancellationToken token)
+    {
+        var basicResults =
+            await SearchAsync(
+                    query,
+                    maxResults,
+                    token)
+                .ConfigureAwait(false);
+
+        if (basicResults.Count == 0)
+        {
+            return [];
+        }
+
+        // Don't hit YouTube with every metadata request at once.
+        using var gate =
+            new SemaphoreSlim(5);
+
+        var metadataTasks =
+            basicResults.Select(
+                async result =>
+                {
+                    await gate
+                        .WaitAsync(token)
+                        .ConfigureAwait(false);
+
+                    try
+                    {
+                        var video =
+                            await youtube.Videos
+                                .GetAsync(
+                                    result.Url,
+                                    token)
+                                .ConfigureAwait(false);
+
+                        var thumbnail =
+                            video.Thumbnails
+                                .OrderByDescending(
+                                    t => t.Resolution.Area)
+                                .FirstOrDefault();
+
+                        return result with
+                        {
+                            Title =
+                                video.Title,
+
+                            ChannelName =
+                                video.Author.ChannelTitle,
+
+                            Duration =
+                                video.Duration,
+
+                            ThumbnailUrl =
+                                thumbnail?.Url ??
+                                result.ThumbnailUrl,
+
+                            ViewCount =
+                                video.Engagement.ViewCount,
+
+                            UploadDate =
+                                video.UploadDate,
+
+                            ChannelId =
+                                video.Author.ChannelId.Value
+                        };
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return result;
+                    }
+                    catch (Exception exception)
+                    {
+                        AepLog.Warning(
+                            $"[Video] Failed to enrich YouTube search result " +
+                            $"{result.Url}: {exception.Message}");
+
+                        return result;
+                    }
+                    finally
+                    {
+                        gate.Release();
+                    }
+                })
+            .ToArray();
+
+        var enriched =
+            await Task.WhenAll(metadataTasks)
+                .ConfigureAwait(false);
+
+        return enriched.ToList();
     }
 
     // YoutubeExplode's own search (scrapes YouTube's search results) - no API key needed, same
@@ -389,8 +561,14 @@ internal sealed class VideoUrlResolver
                 }
 
                 var thumbnail = video.Thumbnails.OrderByDescending(t => t.Resolution.Area).FirstOrDefault();
-                results.Add(new VideoSearchEntry(video.Title, video.Url, video.Author.ChannelTitle, video.Duration,
-                    thumbnail?.Url));
+                results.Add(
+                    new VideoSearchEntry(
+                        video.Title,
+                        video.Url,
+                        video.Author.ChannelTitle,
+                        video.Duration,
+                        thumbnail?.Url,
+                        ChannelId: video.Author.ChannelId.Value));
             }
         }
         catch (OperationCanceledException)

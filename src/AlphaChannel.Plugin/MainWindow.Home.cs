@@ -5,6 +5,7 @@ using Dalamud.Interface;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility.Raii;
+using YoutubeExplode.Videos;
 
 namespace AlphaChannel.Plugin;
 
@@ -26,9 +27,9 @@ internal sealed partial class MainWindow
     private string? pendingPlayerSearch;
     private bool homeSearchPopupOpen;
 
-    // Temporary favourite state.
-    // UI-only for now — not persisted to backend.
-    private readonly HashSet<string> temporaryFavouriteVideos = new();
+
+    private readonly HashSet<string> temporaryYouTubeSubscriptions =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private Vector2 homeSearchInputPos;
     private ISharedImmediateTexture? addFriendImage;
@@ -231,6 +232,7 @@ internal sealed partial class MainWindow
 
             _ = LoadFeaturedSlidesAsync();
         }
+
 
         if (Plugin.Cfg.ShowFfxivYouTubeSection &&
             !ffxivYouTubeRequested)
@@ -695,7 +697,10 @@ internal sealed partial class MainWindow
 
         DrawHomeYouTubeShelf();
 
-        ImGui.Dummy(new Vector2(0f, 10f));
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                10f));
 
         DrawWatchPartiesShelf();
 
@@ -802,13 +807,13 @@ internal sealed partial class MainWindow
             {
                 DrawMediaHubLoadingCards(
                     5,
-                    174f);
+                    224f);
             }
             else
             {
                 DrawMediaHubShelfCards(
                     5,
-                    174f);
+                    224f);
             }
 
             return;
@@ -819,8 +824,8 @@ internal sealed partial class MainWindow
         // ---------------------------------------------------------
 
         const int cardCount = 5;
-        const float gap = 10f;
-        const float cardHeight = 204f;
+        const float gap = 12f;
+        const float cardHeight = 224f;
 
         var visibleCount =
             Math.Min(cardCount, results.Count);
@@ -1064,7 +1069,7 @@ internal sealed partial class MainWindow
             "##loadingCard",
             size);
 
-        const float thumbnailHeight = 96f;
+        const float thumbnailHeight = 116f;
 
         // Thumbnail skeleton.
         drawList.AddRectFilled(
@@ -1163,7 +1168,16 @@ internal sealed partial class MainWindow
             2f);
     }
 
-        private void DrawHomeYouTubeCard(
+    private static string? GetYouTubeVideoId(
+    string url)
+    {
+        var videoId =
+            VideoId.TryParse(url);
+
+        return videoId?.Value;
+    }
+
+    private void DrawHomeYouTubeCard(
         VideoSearchEntry result,
         float width,
         float height)
@@ -1188,7 +1202,7 @@ internal sealed partial class MainWindow
                 result.Url,
                 StringComparison.OrdinalIgnoreCase);
 
-        const float thumbnailHeight = 96f;
+        const float thumbnailHeight = 116f;
 
         // ---------------------------------------------------------
         // Thumbnail
@@ -1371,8 +1385,10 @@ internal sealed partial class MainWindow
                 4f);
 
             drawList.AddText(
-                badgeMin +
-                new Vector2(3f, 1f),
+                new Vector2(
+                    badgeMin.X + 3f,
+                    badgeMin.Y +
+                    ((badgeMax.Y - badgeMin.Y) - durationSize.Y) * 0.5f),
                 ImGui.GetColorU32(Vector4.One),
                 durationText);
         }
@@ -1440,11 +1456,15 @@ internal sealed partial class MainWindow
         var textWidth = MathF.Max(width - 4f, 40f);
         var lineHeight = ImGui.GetTextLineHeight();
 
-        var titleBottom = DrawWrappedLines(
+        var titleY =
+     origin.Y + thumbnailHeight + 10f;
+
+
+        DrawWrappedLines(
             drawList,
             new Vector2(
                 textX,
-                origin.Y + thumbnailHeight + 7f),
+                titleY),
             textWidth,
             lineHeight,
             2,
@@ -1452,12 +1472,14 @@ internal sealed partial class MainWindow
             result.Title);
 
         var channel =
-     TruncateHomeMediaText(
-         result.ChannelName,
-         24);
+    TruncateHomeMediaText(
+        result.ChannelName,
+        17);
 
         var channelY =
-            titleBottom + 2f;
+     titleY +
+     (lineHeight * 2f) +
+     5f;
 
         var userIcon =
             FontAwesomeIcon.User.ToIconString();
@@ -1482,6 +1504,69 @@ internal sealed partial class MainWindow
                 userIcon);
         }
 
+        // ---------------------------------------------------------
+        // TEMP: Plugin-managed YouTube subscription button
+        //
+        // Channel name is being used as the temporary identity.
+        // Eventually this should use the actual YouTube channel ID.
+        // ---------------------------------------------------------
+
+        var isSubscribed =
+            !string.IsNullOrWhiteSpace(result.ChannelId) &&
+            Plugin.Cfg.SubscribedYouTubeChannelIds.Contains(
+                result.ChannelId,
+                StringComparer.OrdinalIgnoreCase);
+
+        const float subscribeButtonSize = 28f;
+
+        var subscribeMin =
+            new Vector2(
+                origin.X + width - subscribeButtonSize - 2f,
+                channelY - 2f);
+
+        var subscribeMax =
+            subscribeMin +
+            new Vector2(
+                subscribeButtonSize,
+                subscribeButtonSize);
+
+        var subscribeMouse =
+            ImGui.GetMousePos();
+
+        var subscribeHovered =
+            subscribeMouse.X >= subscribeMin.X &&
+            subscribeMouse.X <= subscribeMax.X &&
+            subscribeMouse.Y >= subscribeMin.Y &&
+            subscribeMouse.Y <= subscribeMax.Y;
+
+        // Leave enough room so a long channel name doesn't run
+        // underneath the subscribe button.
+        var channelTextMaxWidth =
+            MathF.Max(
+                subscribeMin.X -
+                (textX + iconWidth + 5f) -
+                7f,
+                20f);
+
+        var displayChannel = channel;
+
+        while (displayChannel.Length > 1 &&
+               ImGui.CalcTextSize(displayChannel).X >
+               channelTextMaxWidth)
+        {
+            displayChannel =
+                displayChannel[..^1];
+        }
+
+        if (!string.Equals(
+                displayChannel,
+                channel,
+                StringComparison.Ordinal))
+        {
+            displayChannel =
+                displayChannel.TrimEnd() + "…";
+        }
+
         drawList.AddText(
             new Vector2(
                 textX + iconWidth + 5f,
@@ -1492,23 +1577,142 @@ internal sealed partial class MainWindow
                     MutedText.Y,
                     MutedText.Z,
                     0.82f)),
-            channel);
+            displayChannel);
+
+        // ---------------------------------------------------------
+        // Subscribe button background
+        // ---------------------------------------------------------
+
+        drawList.AddRectFilled(
+            subscribeMin,
+            subscribeMax,
+            ImGui.GetColorU32(
+                isSubscribed
+                    ? new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        0.22f)
+                    : subscribeHovered
+                        ? CardBgHover
+                        : new Vector4(
+                            0.05f,
+                            0.06f,
+                            0.09f,
+                            0.88f)),
+            5f);
+
+        // Border
+        drawList.AddRect(
+            subscribeMin,
+            subscribeMax,
+            ImGui.GetColorU32(
+                isSubscribed || subscribeHovered
+                    ? AccentHover
+                    : new Vector4(
+                        MutedText.X,
+                        MutedText.Y,
+                        MutedText.Z,
+                        0.50f)),
+            5f,
+            ImDrawFlags.None,
+            1f);
+
+        // ---------------------------------------------------------
+        // + / check icon
+        // ---------------------------------------------------------
+
+        var subscribeIcon =
+            isSubscribed
+                ? FontAwesomeIcon.Check
+                : FontAwesomeIcon.Plus;
+
+        var subscribeGlyph =
+            subscribeIcon.ToIconString();
+
+        Vector2 subscribeGlyphSize;
+
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        {
+            subscribeGlyphSize =
+                ImGui.CalcTextSize(
+                    subscribeGlyph);
+
+            drawList.AddText(
+                subscribeMin +
+                new Vector2(
+                    (subscribeButtonSize - subscribeGlyphSize.X) * 0.5f,
+                    (subscribeButtonSize - subscribeGlyphSize.Y) * 0.5f),
+                ImGui.GetColorU32(
+                    isSubscribed
+                        ? AccentHover
+                        : subscribeHovered
+                            ? Vector4.One
+                            : MutedText),
+                subscribeGlyph);
+        }
+
+        // ---------------------------------------------------------
+        // Subscribe interaction
+        // ---------------------------------------------------------
+
+        if (subscribeHovered)
+        {
+            ImGui.SetMouseCursor(
+                ImGuiMouseCursor.Hand);
+
+            ImGui.SetTooltip(
+                isSubscribed
+                    ? $"Unsubscribe from {result.ChannelName}"
+                    : $"Subscribe to {result.ChannelName}");
+
+            if (ImGui.IsMouseClicked(
+                    ImGuiMouseButton.Left))
+            {
+                if (!string.IsNullOrWhiteSpace(
+         result.ChannelId))
+                {
+                    if (isSubscribed)
+                    {
+                        Plugin.Cfg.SubscribedYouTubeChannelIds.RemoveAll(
+                            id => string.Equals(
+                                id,
+                                result.ChannelId,
+                                StringComparison.OrdinalIgnoreCase));
+
+                        Plugin.Cfg.SubscribedYouTubeChannelNames.Remove(
+                            result.ChannelId);
+                    }
+                    else
+                    {
+                        Plugin.Cfg.SubscribedYouTubeChannelIds.Add(
+                            result.ChannelId);
+
+                        Plugin.Cfg.SubscribedYouTubeChannelNames[
+                            result.ChannelId] =
+                            result.ChannelName;
+                    }
+
+                    Plugin.Cfg.Save();
+                }
+            }
+        }
 
         if (result.ViewCount is { } views)
         {
             drawList.AddText(
-               new Vector2(
-                   textX,
-                   titleBottom +
-                   ImGui.GetTextLineHeight() +
-                   4f),
-               ImGui.GetColorU32(
-                   new Vector4(
-                       MutedText.X,
-                       MutedText.Y,
-                       MutedText.Z,
-                       0.58f)),
-               FormatViewCount(views));
+                new Vector2(
+                    textX,
+                    channelY +
+                    lineHeight +
+                    3f),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        MutedText.X,
+                        MutedText.Y,
+                        MutedText.Z,
+                        0.58f)),
+                FormatViewCount(views));
         }
 
         // ---------------------------------------------------------
@@ -1517,8 +1721,14 @@ internal sealed partial class MainWindow
 
         var actionClicked = false;
 
+        var favouriteVideoId =
+            GetYouTubeVideoId(result.Url);
+
         var isFavourite =
-            temporaryFavouriteVideos.Contains(result.Url);
+            favouriteVideoId is not null &&
+            Plugin.Cfg.FavouriteYouTubeVideoIds.Contains(
+                favouriteVideoId,
+                StringComparer.OrdinalIgnoreCase);
 
         if (hovered)
         {
@@ -1849,15 +2059,23 @@ internal sealed partial class MainWindow
                 {
                     actionClicked = true;
 
-                    if (isFavourite)
+                    if (favouriteVideoId is not null)
                     {
-                        temporaryFavouriteVideos.Remove(
-                            result.Url);
-                    }
-                    else
-                    {
-                        temporaryFavouriteVideos.Add(
-                            result.Url);
+                        if (isFavourite)
+                        {
+                            Plugin.Cfg.FavouriteYouTubeVideoIds.RemoveAll(
+                                id => string.Equals(
+                                    id,
+                                    favouriteVideoId,
+                                    StringComparison.OrdinalIgnoreCase));
+                        }
+                        else
+                        {
+                            Plugin.Cfg.FavouriteYouTubeVideoIds.Add(
+                                favouriteVideoId);
+                        }
+
+                        Plugin.Cfg.Save();
                     }
                 }
 
@@ -1899,6 +2117,7 @@ internal sealed partial class MainWindow
         // ---------------------------------------------------------
 
         if (!actionClicked &&
+            !subscribeHovered &&
             hovered &&
             ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {

@@ -51,6 +51,7 @@ internal sealed class VideoEngine : IDisposable
 
     private MpvRenderer? _mpvRenderer;
     private readonly Texture2D _screenTexture;
+    private readonly ShaderResourceView _previewShaderResourceView;
     private static readonly Texture2DDescription ScreenTextureDescription = new()
     {
         Width = ScreenWidth,
@@ -101,13 +102,26 @@ internal sealed class VideoEngine : IDisposable
         MpvRenderer.Setup(Resources);
         DxHandler.Initialise(Plugin.PluginInterface);
 
-        _screenTexture = new Texture2D(DxHandler.Device, ScreenTextureDescription);
-        _screenPainter = new ScreenPainter();
+        _screenTexture =
+            new Texture2D(
+                DxHandler.Device,
+                ScreenTextureDescription);
+
+        _previewShaderResourceView =
+            new ShaderResourceView(
+                DxHandler.Device,
+                _screenTexture);
+
+        _screenPainter =
+            new ScreenPainter();
 
         _screenPresets.AddRange(Plugin.Cfg.ScreenPresets);
     }
 
     internal bool IsActive => _isActive;
+
+    internal nint PreviewTextureHandle =>
+    _previewShaderResourceView.NativePointer;
 
     // Set only from PlayVideo's background task on a genuine init/decode failure (e.g. mpv/yt-dlp
     // never downloaded, so mpv_create() throws DllNotFoundException) - VideoPlayer polls this from
@@ -557,6 +571,8 @@ internal sealed class VideoEngine : IDisposable
     {
         _mpvRenderer?.Dispose();
         _screenPainter.Dispose();
+        _previewShaderResourceView.Dispose();
+        _screenTexture.Dispose();
         Resources.Dispose();
     }
 }
