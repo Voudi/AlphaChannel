@@ -27,15 +27,30 @@ internal sealed partial class MainWindow
         "#FF922B", "#F783AC", "#A0A0A0", "#00C2A8",
     ];
 
-    private static Vector4 ParseAvatarColor(string hex)
+    private static Vector4 ParseAvatarColor(string? hex)
     {
-        var trimmed = hex.TrimStart('#');
-        if (trimmed.Length != 6 || !uint.TryParse(trimmed, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var value))
+        if (string.IsNullOrWhiteSpace(hex))
         {
             return new Vector4(0.6f, 0.4f, 1f, 1f);
         }
 
-        return new Vector4(((value >> 16) & 0xFF) / 255f, ((value >> 8) & 0xFF) / 255f, (value & 0xFF) / 255f, 1f);
+        var trimmed = hex.TrimStart('#');
+
+        if (trimmed.Length != 6 ||
+            !uint.TryParse(
+                trimmed,
+                NumberStyles.HexNumber,
+                CultureInfo.InvariantCulture,
+                out var value))
+        {
+            return new Vector4(0.6f, 0.4f, 1f, 1f);
+        }
+
+        return new Vector4(
+            ((value >> 16) & 0xFF) / 255f,
+            ((value >> 8) & 0xFF) / 255f,
+            (value & 0xFF) / 255f,
+            1f);
     }
 
     private string? ResolveAvatarUrl(string? relativeOrAbsolute)
@@ -59,7 +74,7 @@ internal sealed partial class MainWindow
 
     // Draws a filled circle (+ optional custom image) at the current cursor, then reserves layout
     // space with Dummy. Custom pictures load through ThumbnailCache (same as video thumbs).
-    private void DrawAvatarChip(string? iconName, string colorHex, float diameter, string? imageUrl = null)
+    private void DrawAvatarChip(string? iconName, string? colorHex, float diameter, string? imageUrl = null)
     {
         var topLeft = ImGui.GetCursorScreenPos();
         var drawList = ImGui.GetWindowDrawList();

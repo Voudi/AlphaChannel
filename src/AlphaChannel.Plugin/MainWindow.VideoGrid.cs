@@ -18,6 +18,7 @@ internal sealed partial class MainWindow
     // ---------------------------------------------------------
 
     private int browseVideoSectionTab;
+    private int previousBrowseVideoSectionTab;
 
     // ---------------------------------------------------------
     // Favourite Videos tab
@@ -802,12 +803,22 @@ internal sealed partial class MainWindow
 
     private void DrawVideoGrid()
     {
-        DrawBrowseVideoTabs();
+        if (viewedChannelId is null)
+        {
+            DrawBrowseVideoTabs();
 
-        ImGui.Dummy(
-            new Vector2(
-                0f,
-                18f));
+            ImGui.Dummy(
+                new Vector2(
+                    0f,
+                    18f));
+        }
+        else
+        {
+            ImGui.Dummy(
+                new Vector2(
+                    0f,
+                    8f));
+        }
 
 
         // Only the Topics tab needs the existing Browse Videos
@@ -824,6 +835,12 @@ internal sealed partial class MainWindow
         // ---------------------------------------------------------
         // Browse Videos section routing
         // ---------------------------------------------------------
+
+        if (viewedChannelId is not null)
+        {
+            DrawYouTubeChannelPage();
+            return;
+        }
 
         switch (browseVideoSectionTab)
         {
@@ -871,9 +888,24 @@ internal sealed partial class MainWindow
         // Loaded topic filters
         if (browseVideoResults is { Count: > 0 })
         {
-            foreach (var topicName in browseVideoResults.Keys)
+            var topicNames = browseVideoResults.Keys.ToList();
+            var wrapTopics = topicNames.Count > 10;
+            var filterTopicIndex = 1; // All button already occupies slot 0
+
+            foreach (var topicName in topicNames)
             {
-                ImGui.SameLine(0f, 8f);
+                // Only wrap if we actually have more than 10 topics
+                if (filterTopicIndex > 0)
+                {
+                    if (wrapTopics && filterTopicIndex % 10 == 0)
+                    {
+                        ImGui.Dummy(new Vector2(0f, 6f));
+                    }
+                    else
+                    {
+                        ImGui.SameLine(0f, 8f);
+                    }
+                }
 
                 var selected =
                     string.Equals(
@@ -897,6 +929,8 @@ internal sealed partial class MainWindow
                         browseVideoTopicFilter = topicName;
                     }
                 }
+
+                filterTopicIndex++;
             }
         }
 

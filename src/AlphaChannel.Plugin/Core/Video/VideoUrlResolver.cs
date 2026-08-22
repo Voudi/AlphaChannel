@@ -44,6 +44,124 @@ internal sealed class VideoUrlResolver
 
     private readonly YoutubeClient youtube = new();
 
+    // Global limit for YouTube metadata/discovery work.
+    // All resolver operations should eventually pass through this gate.
+    private readonly SemaphoreSlim youtubeRequestGate = new(3, 3);
+
+    // Keep the most recently encountered YouTube video metadata.
+    // Old entries are pushed out once the cache reaches 100 videos.
+    private const int YouTubeMetadataCacheLimit = 1000;
+
+    private readonly object youtubeMetadataCacheLock = new();
+
+    private bool TryGetCachedVideo(
+    string url,
+    out VideoSearchEntry? entry)
+    {
+        lock (youtubeMetadataCacheLock)
+        {
+            if (!youtubeMetadataCache.TryGetValue(
+                    url,
+                    out var cached))
+            {
+                entry = null;
+                return false;
+            }
+
+            // Refresh its LRU position.
+            youtubeMetadataCacheOrder.Remove(url);
+            youtubeMetadataCacheOrder.AddLast(url);
+
+            entry = cached;
+            return true;
+        }
+    }
+
+    private void CacheVideo(
+        VideoSearchEntry entry)
+    {
+        lock (youtubeMetadataCacheLock)
+        {
+            var key = entry.Url;
+
+            // Refresh an existing entry instead of duplicating it.
+            if (youtubeMetadataCache.ContainsKey(key))
+            {
+                youtubeMetadataCache[key] = entry;
+
+                youtubeMetadataCacheOrder.Remove(key);
+                youtubeMetadataCacheOrder.AddLast(key);
+
+                return;
+            }
+
+            youtubeMetadataCache[key] = entry;
+            youtubeMetadataCacheOrder.AddLast(key);
+
+            while (youtubeMetadataCache.Count >
+                   YouTubeMetadataCacheLimit)
+            {
+                var oldest =
+                    youtubeMetadataCacheOrder.First;
+
+                if (oldest is null)
+                {
+                    break;
+                }
+
+                youtubeMetadataCacheOrder.RemoveFirst();
+                youtubeMetadataCache.Remove(oldest.Value);
+            }
+        }
+    }
+
+    private async Task<VideoSearchEntry?> GetOrCreateMetadataRequestAsync(
+    string url,
+    Func<Task<VideoSearchEntry?>> factory)
+    {
+        Task<VideoSearchEntry?> request;
+
+        lock (youtubeMetadataCacheLock)
+        {
+            if (!youtubeMetadataRequests.TryGetValue(
+                    url,
+                    out request!))
+            {
+                request = factory();
+
+                youtubeMetadataRequests[url] = request;
+            }
+        }
+
+        try
+        {
+            var result =
+                await request.ConfigureAwait(false);
+
+            if (result is not null)
+            {
+                CacheVideo(result);
+            }
+
+            return result;
+        }
+        finally
+        {
+            lock (youtubeMetadataCacheLock)
+            {
+                youtubeMetadataRequests.Remove(url);
+            }
+        }
+    }
+
+    private readonly Dictionary<string, VideoSearchEntry> youtubeMetadataCache =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly LinkedList<string> youtubeMetadataCacheOrder = new();
+
+    private readonly Dictionary<string, Task<VideoSearchEntry?>> youtubeMetadataRequests =
+    new(StringComparer.OrdinalIgnoreCase);
+
     public static bool IsYouTubeUrl(string url) => VideoId.TryParse(url) is not null;
 
     public async Task<(ResolvedStream? Stream, string? Error)> ResolveAsync(string url, int maxHeight,
@@ -100,12 +218,14 @@ internal sealed class VideoUrlResolver
     // ---------------------------------------------------------
 
     public async Task<List<VideoSearchEntry>> GetChannelUploadsAsync(
-        string channelId,
-        int maxResults,
-        CancellationToken token)
+    string channelId,
+    int maxResults,
+    CancellationToken token)
     {
         var results =
             new List<VideoSearchEntry>();
+
+        var gateAcquired = false;
 
         try
         {
@@ -117,6 +237,14 @@ internal sealed class VideoUrlResolver
             {
                 return results;
             }
+
+            // Channel enumeration is a YouTube request, so it shares
+            // the global two-request limit with the other resolver work.
+            await youtubeRequestGate
+                .WaitAsync(token)
+                .ConfigureAwait(false);
+
+            gateAcquired = true;
 
             await foreach (
                 var upload in youtube.Channels
@@ -132,31 +260,20 @@ internal sealed class VideoUrlResolver
 
                 try
                 {
-                    // GetUploadsAsync gives PlaylistVideo objects.
-                    // Fetch the complete video so we get views/date/etc.
-                    var video =
-                        await youtube.Videos
-                            .GetAsync(
-                                upload.Url,
-                                token)
-                            .ConfigureAwait(false);
-
                     var thumbnail =
-                        video.Thumbnails
+                        upload.Thumbnails
                             .OrderByDescending(
                                 t => t.Resolution.Area)
                             .FirstOrDefault();
 
                     results.Add(
                         new VideoSearchEntry(
-                            video.Title,
-                            video.Url,
-                            video.Author.ChannelTitle,
-                            video.Duration,
+                            upload.Title,
+                            upload.Url,
+                            upload.Author.ChannelTitle,
+                            upload.Duration,
                             thumbnail?.Url,
-                            video.Engagement.ViewCount,
-                            video.UploadDate,
-                            video.Author.ChannelId.Value));
+                            ChannelId: upload.Author.ChannelId.Value));
                 }
                 catch (OperationCanceledException)
                 {
@@ -165,7 +282,7 @@ internal sealed class VideoUrlResolver
                 catch (Exception exception)
                 {
                     AepLog.Warning(
-                        $"[Subscriptions] Failed to enrich upload " +
+                        $"[Subscriptions] Failed to process upload " +
                         $"{upload.Url}: {exception.Message}");
                 }
             }
@@ -180,6 +297,13 @@ internal sealed class VideoUrlResolver
                 $"[Subscriptions] Failed to load channel " +
                 $"{channelId}: {exception.Message}");
         }
+        finally
+        {
+            if (gateAcquired)
+            {
+                youtubeRequestGate.Release();
+            }
+        }
 
         return results;
     }
@@ -188,6 +312,8 @@ internal sealed class VideoUrlResolver
     string channelId,
     CancellationToken token)
     {
+        var gateAcquired = false;
+
         try
         {
             var parsedChannelId =
@@ -198,6 +324,12 @@ internal sealed class VideoUrlResolver
             {
                 return null;
             }
+
+            await youtubeRequestGate
+                .WaitAsync(token)
+                .ConfigureAwait(false);
+
+            gateAcquired = true;
 
             var channel =
                 await youtube.Channels
@@ -219,6 +351,13 @@ internal sealed class VideoUrlResolver
                 $"{channelId}: {exception.Message}");
 
             return null;
+        }
+        finally
+        {
+            if (gateAcquired)
+            {
+                youtubeRequestGate.Release();
+            }
         }
     }
 
@@ -289,79 +428,18 @@ internal sealed class VideoUrlResolver
         }
 
         // ---------------------------------------------------------
-        // Fetch detailed metadata concurrently, but don't hammer
-        // YouTube with every candidate simultaneously.
+        // Fetch detailed metadata through the shared cache-aware
+        // enrichment pipeline.
         // ---------------------------------------------------------
 
-        using var gate =
-            new SemaphoreSlim(5);
-
         var metadataTasks =
-            candidates.Values.Select(
-                async result =>
-                {
-                    await gate
-                        .WaitAsync(token)
-                        .ConfigureAwait(false);
-
-                    try
-                    {
-                        var video =
-                            await youtube.Videos
-                                .GetAsync(
-                                    result.Url,
-                                    token)
-                                .ConfigureAwait(false);
-
-                        var thumbnail =
-                            video.Thumbnails
-                                .OrderByDescending(
-                                    t => t.Resolution.Area)
-                                .FirstOrDefault();
-
-                        return result with
-                        {
-                            Title =
-                                video.Title,
-
-                            ChannelName =
-                                video.Author.ChannelTitle,
-
-                            Duration =
-                                video.Duration,
-
-                            ThumbnailUrl =
-                                thumbnail?.Url ??
-                                result.ThumbnailUrl,
-
-                            ViewCount =
-                                video.Engagement.ViewCount,
-
-                            UploadDate =
-                                video.UploadDate,
-
-                            ChannelId =
-                                video.Author.ChannelId.Value
-                        };
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        return result;
-                    }
-                    catch (Exception exception)
-                    {
-                        AepLog.Warning(
-                            $"[Video] Failed to enrich FFXIV result " +
-                            $"{result.Url}: {exception.Message}");
-
-                        return result;
-                    }
-                    finally
-                    {
-                        gate.Release();
-                    }
-                })
-            .ToArray();
+            candidates.Values
+                .Select(
+                    result =>
+                        EnrichSearchResultAsync(
+                            result,
+                            token))
+                .ToArray();
 
         var enriched =
             await Task.WhenAll(metadataTasks)
@@ -381,31 +459,20 @@ internal sealed class VideoUrlResolver
     }
 
 
-    public async Task<VideoMetadata?> ResolveMetadataAsync(string url, CancellationToken token)
-    {
-        try
-        {
-            var video = await youtube.Videos.GetAsync(url, token).ConfigureAwait(false);
-            var thumbnail = video.Thumbnails.OrderByDescending(t => t.Resolution.Area).FirstOrDefault();
-            return new VideoMetadata(video.Title, video.Author.ChannelTitle, video.Duration, thumbnail?.Url);
-        }
-        catch (OperationCanceledException)
-        {
-            return null;
-        }
-        catch (Exception exception)
-        {
-            AepLog.Warning($"[Video] Failed to fetch metadata for {url}: {exception.Message}");
-            return null;
-        }
-    }
-
-    public async Task<VideoSearchEntry?> GetVideoEntryAsync(
+    public async Task<VideoMetadata?> ResolveMetadataAsync(
     string url,
     CancellationToken token)
     {
+        var gateAcquired = false;
+
         try
         {
+            await youtubeRequestGate
+                .WaitAsync(token)
+                .ConfigureAwait(false);
+
+            gateAcquired = true;
+
             var video =
                 await youtube.Videos
                     .GetAsync(
@@ -419,15 +486,11 @@ internal sealed class VideoUrlResolver
                         t => t.Resolution.Area)
                     .FirstOrDefault();
 
-            return new VideoSearchEntry(
+            return new VideoMetadata(
                 video.Title,
-                url,
                 video.Author.ChannelTitle,
                 video.Duration,
-                thumbnail?.Url,
-                video.Engagement.ViewCount,
-                video.UploadDate,
-                video.Author.ChannelId.Value);
+                thumbnail?.Url);
         }
         catch (OperationCanceledException)
         {
@@ -436,11 +499,99 @@ internal sealed class VideoUrlResolver
         catch (Exception exception)
         {
             AepLog.Warning(
-                $"[Video] Failed to fetch featured video metadata " +
-                $"for {url}: {exception.Message}");
+                $"[Video] Failed to fetch metadata for {url}: " +
+                $"{exception.Message}");
 
             return null;
         }
+        finally
+        {
+            if (gateAcquired)
+            {
+                youtubeRequestGate.Release();
+            }
+        }
+    }
+
+    public async Task<VideoSearchEntry?> GetVideoEntryAsync(
+    string url,
+    CancellationToken token)
+    {
+        if (TryGetCachedVideo(
+                url,
+                out var cached) &&
+            cached is not null)
+        {
+            return cached;
+        }
+
+        return await GetOrCreateMetadataRequestAsync(
+                url,
+                async () =>
+                {
+                    var gateAcquired = false;
+
+                    try
+                    {
+                        await youtubeRequestGate
+                            .WaitAsync(token)
+                            .ConfigureAwait(false);
+
+                        gateAcquired = true;
+
+                        // Check again after waiting.
+                        if (TryGetCachedVideo(
+                                url,
+                                out var existing) &&
+                            existing is not null)
+                        {
+                            return existing;
+                        }
+
+                        var video =
+                            await youtube.Videos
+                                .GetAsync(
+                                    url,
+                                    token)
+                                .ConfigureAwait(false);
+
+                        var thumbnail =
+                            video.Thumbnails
+                                .OrderByDescending(
+                                    t => t.Resolution.Area)
+                                .FirstOrDefault();
+
+                        return new VideoSearchEntry(
+                            video.Title,
+                            url,
+                            video.Author.ChannelTitle,
+                            video.Duration,
+                            thumbnail?.Url,
+                            video.Engagement.ViewCount,
+                            video.UploadDate,
+                            video.Author.ChannelId.Value);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return null;
+                    }
+                    catch (Exception exception)
+                    {
+                        AepLog.Warning(
+                            $"[Video] Failed to fetch featured video metadata " +
+                            $"for {url}: {exception.Message}");
+
+                        return null;
+                    }
+                    finally
+                    {
+                        if (gateAcquired)
+                        {
+                            youtubeRequestGate.Release();
+                        }
+                    }
+                })
+            .ConfigureAwait(false);
     }
 
     // ---------------------------------------------------------
@@ -452,9 +603,9 @@ internal sealed class VideoUrlResolver
     // ---------------------------------------------------------
 
     public async Task<List<VideoSearchEntry>> SearchWithMetadataAsync(
-        string query,
-        int maxResults,
-        CancellationToken token)
+     string query,
+     int maxResults,
+     CancellationToken token)
     {
         var basicResults =
             await SearchAsync(
@@ -468,20 +619,58 @@ internal sealed class VideoUrlResolver
             return [];
         }
 
-        // Don't hit YouTube with every metadata request at once.
-        using var gate =
-            new SemaphoreSlim(5);
-
         var metadataTasks =
-            basicResults.Select(
-                async result =>
+            basicResults
+                .Select(
+                    result =>
+                        EnrichSearchResultAsync(
+                            result,
+                            token))
+                .ToArray();
+
+        var enriched =
+            await Task.WhenAll(metadataTasks)
+                .ConfigureAwait(false);
+
+        return enriched.ToList();
+    }
+
+    public async Task<VideoSearchEntry> EnrichSearchResultAsync(
+    VideoSearchEntry result,
+    CancellationToken token)
+    {
+        if (TryGetCachedVideo(
+                result.Url,
+                out var cached) &&
+            cached is not null)
+        {
+            return cached;
+        }
+
+        var enriched =
+            await GetOrCreateMetadataRequestAsync(
+                result.Url,
+                async () =>
                 {
-                    await gate
-                        .WaitAsync(token)
-                        .ConfigureAwait(false);
+                    var gateAcquired = false;
 
                     try
                     {
+                        await youtubeRequestGate
+                            .WaitAsync(token)
+                            .ConfigureAwait(false);
+
+                        gateAcquired = true;
+
+                        // Check cache again after entering the request.
+                        if (TryGetCachedVideo(
+                                result.Url,
+                                out var existing) &&
+                            existing is not null)
+                        {
+                            return existing;
+                        }
+
                         var video =
                             await youtube.Videos
                                 .GetAsync(
@@ -527,90 +716,62 @@ internal sealed class VideoUrlResolver
                     catch (Exception exception)
                     {
                         AepLog.Warning(
-                            $"[Video] Failed to enrich YouTube search result " +
+                            $"[Video] Failed to enrich search result " +
                             $"{result.Url}: {exception.Message}");
 
                         return result;
                     }
                     finally
                     {
-                        gate.Release();
+                        if (gateAcquired)
+                        {
+                            youtubeRequestGate.Release();
+                        }
                     }
                 })
-            .ToArray();
+            .ConfigureAwait(false);
 
-        var enriched =
-            await Task.WhenAll(metadataTasks)
-                .ConfigureAwait(false);
-
-        return enriched.ToList();
-    }
-
-    public async Task<VideoSearchEntry> EnrichSearchResultAsync(
-    VideoSearchEntry result,
-    CancellationToken token)
-    {
-        try
-        {
-            var video =
-                await youtube.Videos
-                    .GetAsync(
-                        result.Url,
-                        token)
-                    .ConfigureAwait(false);
-
-            var thumbnail =
-                video.Thumbnails
-                    .OrderByDescending(
-                        t => t.Resolution.Area)
-                    .FirstOrDefault();
-
-            return result with
-            {
-                Title =
-                    video.Title,
-
-                ChannelName =
-                    video.Author.ChannelTitle,
-
-                Duration =
-                    video.Duration,
-
-                ThumbnailUrl =
-                    thumbnail?.Url ??
-                    result.ThumbnailUrl,
-
-                ViewCount =
-                    video.Engagement.ViewCount,
-
-                UploadDate =
-                    video.UploadDate,
-
-                ChannelId =
-                    video.Author.ChannelId.Value
-            };
-        }
-        catch
-        {
-            return result;
-        }
+        return enriched ?? result;
     }
 
     // YoutubeExplode's own search (scrapes YouTube's search results) - no API key needed, same
     // dependency already used for playback resolution and metadata enrichment above.
-    public async Task<List<VideoSearchEntry>> SearchAsync(string query, int maxResults, CancellationToken token)
+    public async Task<List<VideoSearchEntry>> SearchAsync(
+    string query,
+    int maxResults,
+    CancellationToken token)
     {
-        var results = new List<VideoSearchEntry>();
+        var results =
+            new List<VideoSearchEntry>();
+
+        var gateAcquired = false;
+
         try
         {
-            await foreach (var video in youtube.Search.GetVideosAsync(query, token).ConfigureAwait(false))
+            await youtubeRequestGate
+                .WaitAsync(token)
+                .ConfigureAwait(false);
+
+            gateAcquired = true;
+
+            await foreach (
+                var video in youtube.Search
+                    .GetVideosAsync(
+                        query,
+                        token)
+                    .ConfigureAwait(false))
             {
                 if (results.Count >= maxResults)
                 {
                     break;
                 }
 
-                var thumbnail = video.Thumbnails.OrderByDescending(t => t.Resolution.Area).FirstOrDefault();
+                var thumbnail =
+                    video.Thumbnails
+                        .OrderByDescending(
+                            t => t.Resolution.Area)
+                        .FirstOrDefault();
+
                 results.Add(
                     new VideoSearchEntry(
                         video.Title,
@@ -623,10 +784,20 @@ internal sealed class VideoUrlResolver
         }
         catch (OperationCanceledException)
         {
+            // Normal cancellation.
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Video] YouTube search failed for '{query}': {exception.Message}");
+            AepLog.Warning(
+                $"[Video] YouTube search failed for '{query}': " +
+                $"{exception.Message}");
+        }
+        finally
+        {
+            if (gateAcquired)
+            {
+                youtubeRequestGate.Release();
+            }
         }
 
         return results;

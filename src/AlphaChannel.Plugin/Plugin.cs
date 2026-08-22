@@ -1,5 +1,6 @@
 using AlphaChannel.Plugin.Auth;
 using AlphaChannel.Plugin.Video;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.Command;
@@ -61,6 +62,8 @@ public sealed class Plugin : IDalamudPlugin
     // True only when WE paused playback because of combat/a cutscene, not when the host paused it
     // manually - otherwise leaving combat would un-pause a video the host deliberately stopped.
     private bool autoPaused;
+
+    private double lastRecentlyWatchedSave;
 
     // How far a viewer's local position can drift from the host's reported position before it's
     // worth a corrective seek. Below this, natural playback + network jitter accounts for the gap.
@@ -303,7 +306,11 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ApplyAutoPause();
+
+        UpdateRecentlyWatched();
+
         UpdateReactions();
+
         nearbyAutoWatch.OnFrameworkUpdate();
 
         // Hosting: push the local queue's current state out to the relay every tick it changes
@@ -321,6 +328,30 @@ public sealed class Plugin : IDalamudPlugin
                 screenController.Engine.ScreenYaw, screenController.Engine.ScreenScale);
             video.SetOverlayTitle(current.Title, current.Source);
         }
+    }
+
+    internal void UpdateRecentlyWatched()
+    {
+        if (queue.Current is not { } current)
+        {
+            return;
+        }
+
+        var now = ImGui.GetTime();
+
+        if (now - lastRecentlyWatchedSave < 15)
+        {
+            return;
+        }
+
+        lastRecentlyWatchedSave = now;
+
+        var (position, duration, _) = video.GetProgress();
+
+        mainWindow.UpdateRecentlyWatched(
+            current,
+            position,
+            duration);
     }
 
     // Only touches playback while actually hosting - a viewer's playback is driven entirely by the

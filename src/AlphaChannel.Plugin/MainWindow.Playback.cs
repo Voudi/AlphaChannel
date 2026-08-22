@@ -16,6 +16,7 @@ internal sealed partial class MainWindow
     // input, snapping back to "now" instead of following the mouse.
     private float seekPreview;
     private bool seekDragging;
+    private double recentlyWatchedLastSave;
 
     // Playback failure toast
     private string? playbackErrorToast;
@@ -35,6 +36,7 @@ internal sealed partial class MainWindow
         }
 
         var (position, duration, isPaused) = video.GetProgress();
+
 
         DrawStage("##nowPlaying", () =>
         {
@@ -319,4 +321,54 @@ internal sealed partial class MainWindow
         var span = TimeSpan.FromSeconds(totalSeconds);
         return span.Hours > 0 ? span.ToString(@"h\:mm\:ss") : span.ToString(@"m\:ss");
     }
+
+    internal void UpdateRecentlyWatched(
+    VideoQueueEntry entry,
+    double positionSeconds,
+    double durationSeconds)
+    {
+        AepLog.Warning(
+    $"[Recently Watched] Saving {entry.Title} at {positionSeconds:F0}s");
+        var existing =
+            Plugin.Cfg.RecentlyWatchedVideos
+                .FirstOrDefault(
+                    x =>
+                        string.Equals(
+                            x.Url,
+                            entry.Url,
+                            StringComparison.OrdinalIgnoreCase));
+
+
+        if (existing is null)
+        {
+            existing = new RecentlyWatchedVideoRecord
+            {
+                Url = entry.Url
+            };
+
+            Plugin.Cfg.RecentlyWatchedVideos.Insert(
+                0,
+                existing);
+        }
+
+
+        existing.Title = entry.Title;
+        existing.ThumbnailUrl = entry.ThumbnailUrl;
+        existing.ChannelName = entry.Source;
+        existing.WatchedSeconds = positionSeconds;
+        existing.DurationSeconds = durationSeconds;
+        existing.LastWatchedUtc = DateTime.UtcNow;
+
+
+        Plugin.Cfg.RecentlyWatchedVideos =
+            Plugin.Cfg.RecentlyWatchedVideos
+                .OrderByDescending(
+                    x => x.LastWatchedUtc)
+                .Take(5)
+                .ToList();
+
+
+        Plugin.Cfg.Save();
+    }
+
 }

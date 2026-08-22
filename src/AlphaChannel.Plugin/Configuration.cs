@@ -29,9 +29,30 @@ internal sealed class VideoQueueRecord
 }
 
 [Serializable]
+internal sealed class RecentlyWatchedVideoRecord
+{
+    public string Url { get; set; } = "";
+
+    public string Title { get; set; } = "";
+
+    public string? ThumbnailUrl { get; set; }
+
+    public string ChannelName { get; set; } = "";
+
+    public double WatchedSeconds { get; set; }
+
+    public double DurationSeconds { get; set; }
+
+    public DateTime LastWatchedUtc { get; set; }
+}
+
+[Serializable]
 internal sealed class Configuration : IPluginConfiguration
 {
     public int Version { get; set; } = 1;
+
+    // First-run experience has been completed.
+    public bool HasCompletedFirstLaunch { get; set; }
 
     public string RelayServerUrl { get; set; } = "https://alphachannel.duckdns.org";
 
@@ -82,6 +103,8 @@ internal sealed class Configuration : IPluginConfiguration
     // YouTube videos favourited by the player.
     // Store stable YouTube video IDs rather than full URLs.
     public List<string> FavouriteYouTubeVideoIds { get; set; } = new();
+
+    public List<RecentlyWatchedVideoRecord> RecentlyWatchedVideos { get; set; } = new ();
 
     // YouTube channels subscribed to inside AlphaChannel.
     // Store stable channel IDs rather than display names.

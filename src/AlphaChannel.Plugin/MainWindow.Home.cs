@@ -80,6 +80,10 @@ internal sealed partial class MainWindow
     new VideoSearchEntry?[FeaturedSlides.Length];
     private bool featuredSlidesRequested;
 
+    private int featuredRetryCount;
+    private double featuredNextRetryAt;
+    private bool featuredRetryRunning;
+
 
     private int featuredSlideIndex;
     private int featuredNextSlideIndex = 1;
@@ -206,6 +210,64 @@ internal sealed partial class MainWindow
         }
     }
 
+    private void TryRetryFeaturedSlides()
+    {
+        if (!featuredSlidesRequested ||
+            featuredRetryRunning)
+        {
+            return;
+        }
+
+        if (featuredRetryCount >= 2)
+        {
+            return;
+        }
+
+        if (ImGui.GetTime() < featuredNextRetryAt)
+        {
+            return;
+        }
+
+        var missing =
+            featuredSlideResults.Any(
+                slide => slide is null);
+
+        if (!missing)
+        {
+            return;
+        }
+
+        featuredRetryRunning = true;
+        featuredRetryCount++;
+
+        _ = RetryFeaturedSlidesAsync();
+    }
+
+    private async Task RetryFeaturedSlidesAsync()
+    {
+        try
+        {
+            await LoadFeaturedSlidesAsync();
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning(
+                $"[Featured Retry] {exception.Message}");
+        }
+        finally
+        {
+            featuredRetryRunning = false;
+
+            if (featuredRetryCount < 2 &&
+                featuredSlideResults.Any(
+                    slide => slide is null))
+            {
+                featuredNextRetryAt =
+                    ImGui.GetTime() + 30.0;
+            }
+        }
+    }
+
     private void DrawHome()
     {
         const float contentPaddingLeft = 24f;
@@ -233,9 +295,13 @@ internal sealed partial class MainWindow
         {
             featuredSlidesRequested = true;
 
-            _ = LoadFeaturedSlidesAsync();
-        }
+            featuredRetryCount = 0;
+            featuredNextRetryAt = ImGui.GetTime() + 10.0;
 
+            _ = LoadFeaturedSlidesAsync();
+
+        }
+        TryRetryFeaturedSlides();
 
         if (Plugin.Cfg.ShowFfxivYouTubeSection &&
             !ffxivYouTubeRequested)
@@ -720,6 +786,7 @@ internal sealed partial class MainWindow
     }
 
 
+
     private void DrawHomeYouTubeShelf()
     {
         var width =
@@ -1018,6 +1085,7 @@ internal sealed partial class MainWindow
         }
     }
 
+
     private void DrawMediaHubLoadingCards(
         int itemCount,
         float cardHeight)
@@ -1093,10 +1161,24 @@ internal sealed partial class MainWindow
                 width * 0.5f,
                 thumbnailHeight * 0.5f);
 
-        const float radius = 11f;
+        const float radius = 14f;
 
         var rotation =
             (float)ImGui.GetTime() * 4.5f;
+
+
+        // Soft purple glow behind spinner.
+        drawList.AddCircle(
+            center,
+            radius,
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.12f)),
+            48,
+            5f);
 
         // Dim full ring behind the active arc.
         drawList.AddCircle(
@@ -1120,9 +1202,14 @@ internal sealed partial class MainWindow
             24);
 
         drawList.PathStroke(
-            ImGui.GetColorU32(Accent),
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.95f)),
             ImDrawFlags.None,
-            2.5f);
+            3.2f);
 
         // Skeleton title lines beneath the thumbnail.
         drawList.AddRectFilled(
@@ -1581,6 +1668,46 @@ internal sealed partial class MainWindow
                     MutedText.Z,
                     0.82f)),
             displayChannel);
+
+        var channelTextMin =
+    new Vector2(
+        textX + iconWidth + 5f,
+        channelY);
+
+        var channelTextSize =
+            ImGui.CalcTextSize(
+                displayChannel);
+
+        var channelTextMax =
+            channelTextMin +
+            channelTextSize;
+
+        var channelHovered =
+            ImGui.GetMousePos().X >= channelTextMin.X &&
+            ImGui.GetMousePos().X <= channelTextMax.X &&
+            ImGui.GetMousePos().Y >= channelTextMin.Y &&
+            ImGui.GetMousePos().Y <= channelTextMax.Y;
+
+        if (channelHovered)
+        {
+            ImGui.SetMouseCursor(
+                ImGuiMouseCursor.Hand);
+
+            ImGui.SetTooltip(
+                $"View {result.ChannelName}");
+
+            if (ImGui.IsMouseClicked(
+                    ImGuiMouseButton.Left))
+            {
+                if (!string.IsNullOrWhiteSpace(
+                        result.ChannelId))
+                {
+                    OpenYouTubeChannel(
+                        result.ChannelId,
+                        result.ChannelName);
+                }
+            }
+        }
 
         // ---------------------------------------------------------
         // Minimal subscribe button
@@ -2117,6 +2244,7 @@ internal sealed partial class MainWindow
 
         if (!actionClicked &&
             !subscribeHovered &&
+            !channelHovered &&
             hovered &&
             ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
@@ -3235,69 +3363,257 @@ internal sealed partial class MainWindow
 
     private void DrawRecentlyWatchedShelf()
     {
-        const float gap = 10f;
+        DrawHomeShelfHeading(
+            FontAwesomeIcon.History,
+            "Recently Watched",
+            Accent,
+            false);
+
+        var drawList =
+      ImGui.GetWindowDrawList();
+
+        var trashGlyph =
+            FontAwesomeIcon.Trash.ToIconString();
+
+        Vector2 trashSize;
+
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        {
+            trashSize =
+                ImGui.CalcTextSize(trashGlyph);
+        }
+
+        var trashX =
+            ImGui.GetWindowPos().X +
+            ImGui.GetWindowContentRegionMax().X -
+            HomeContentRightInset -
+            trashSize.X;
+
+        var trashY =
+            ImGui.GetCursorScreenPos().Y -
+            ImGui.GetTextLineHeight() -
+            18f;
+
+        var trashMin =
+            new Vector2(
+                trashX,
+                trashY);
+
+        var trashMax =
+            trashMin +
+            trashSize;
+
+        var trashHovered =
+            ImGui.IsMouseHoveringRect(
+                trashMin,
+                trashMax);
+
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        {
+            drawList.AddText(
+                trashMin,
+                ImGui.GetColorU32(
+                    trashHovered
+                        ? AccentHover
+                        : MutedText),
+                trashGlyph);
+        }
+
+        if (trashHovered)
+        {
+            ImGui.SetMouseCursor(
+                ImGuiMouseCursor.Hand);
+
+            ImGui.SetTooltip(
+                "Clear recently watched videos");
+
+            if (ImGui.IsMouseClicked(
+                    ImGuiMouseButton.Left))
+            {
+                Plugin.Cfg.RecentlyWatchedVideos.Clear();
+                Plugin.Cfg.Save();
+            }
+        }
+
+ 
+
+        var videos =
+            Plugin.Cfg.RecentlyWatchedVideos;
+
+        if (videos is not { Count: > 0 })
+        {
+            DrawMediaHubShelfCards(
+                5,
+                224f);
+
+            return;
+        }
+
+
         const int cardCount = 5;
-        const float cardHeight = 126f;
+        const float gap = 12f;
+        const float cardHeight = 190f;
+
 
         var width =
             ImGui.GetContentRegionAvail().X;
 
-        DrawHomeShelfHeading(
-            FontAwesomeIcon.History,
-            "Recently Watched",
-            AccentHover);
-
         var cardWidth =
-                (width - gap * (cardCount - 1)) /
+            (width - gap * (cardCount - 1)) /
             cardCount;
 
-        DrawRecentlyWatchedCard(
-    "Endwalker Story Recap",
-    "roombg1.png",
-    true,
-    0.72f,
-    cardWidth,
-    cardHeight);
 
-        ImGui.SameLine(0f, gap);
+        var visibleCount =
+            Math.Min(
+                cardCount,
+                videos.Count);
 
-        DrawRecentlyWatchedCard(
-            "Exploring Ishgard",
-            "roombg2.png",
-            false,
-            0.34f,
-            cardWidth,
-            cardHeight);
 
-        ImGui.SameLine(0f, gap);
+        for (var index = 0;
+             index < visibleCount;
+             index++)
+        {
+            if (index > 0)
+            {
+                ImGui.SameLine(
+                    0f,
+                    gap);
+            }
 
-        DrawRecentlyWatchedCard(
-            "A Night in Limsa",
-            "roombg1.png",
-            false,
-            0.91f,
-            cardWidth,
-            cardHeight);
 
-        ImGui.SameLine(0f, gap);
+            var watched =
+                videos[index];
 
-        DrawRecentlyWatchedCard(
-            "Chocobo Adventures",
-            "roombg2.png",
-            false,
-            0.18f,
-            cardWidth,
-            cardHeight);
 
-        ImGui.SameLine(0f, gap);
+            ImGui.PushID(
+                $"recentlyWatched_{index}");
 
-        DrawRecentlyWatchedCard(
-            "Eorzea After Dark",
-            "roombg1.png",
-            false,
-            1.00f,
-            cardWidth,
-            cardHeight);
+
+            var origin =
+                ImGui.GetCursorScreenPos();
+
+            var size =
+                new Vector2(
+                    cardWidth,
+                    cardHeight);
+
+
+            ImGui.InvisibleButton(
+                "##recentCard",
+                size);
+
+
+            var headingDrawList =
+                ImGui.GetWindowDrawList();
+
+
+            var thumbnail =
+                thumbnails.Get(
+                    watched.ThumbnailUrl);
+
+
+            const float thumbnailHeight = 116f;
+
+
+            if (thumbnail is not null)
+            {
+                drawList.AddImageRounded(
+                    thumbnail.Handle,
+                    origin,
+                    origin +
+                    new Vector2(
+                        cardWidth,
+                        thumbnailHeight),
+                    Vector2.Zero,
+                    Vector2.One,
+                    uint.MaxValue,
+                    9f);
+            }
+            else
+            {
+                drawList.AddRectFilled(
+                    origin,
+                    origin +
+                    new Vector2(
+                        cardWidth,
+                        thumbnailHeight),
+                    ImGui.GetColorU32(CardBg),
+                    9f);
+            }
+
+
+            // Progress bar
+            if (watched.DurationSeconds > 0)
+            {
+                var progress =
+                    Math.Clamp(
+                        watched.WatchedSeconds /
+                        watched.DurationSeconds,
+                        0,
+                        1);
+
+
+                const float progressHeight = 3f;
+
+
+                drawList.AddRectFilled(
+                    new Vector2(
+                        origin.X,
+                        origin.Y +
+                        thumbnailHeight -
+                        progressHeight),
+                    new Vector2(
+                        origin.X +
+                        cardWidth * (float)progress,
+                        origin.Y +
+                        thumbnailHeight),
+                    ImGui.GetColorU32(
+                        Accent));
+            }
+
+
+            DrawWrappedLines(
+                drawList,
+                origin +
+                new Vector2(
+                    2f,
+                    thumbnailHeight + 10f),
+                cardWidth - 4f,
+                ImGui.GetTextLineHeight(),
+                2,
+                ImGui.GetColorU32(
+                    Vector4.One),
+                watched.Title);
+
+
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetMouseCursor(
+                    ImGuiMouseCursor.Hand);
+
+
+                if (ImGui.IsMouseClicked(
+                        ImGuiMouseButton.Left))
+                {
+                    queue.PlayNow(
+                        new VideoQueueEntry(
+                            watched.Url,
+                            watched.Title,
+                            watched.ChannelName,
+                            TimeSpan.FromSeconds(
+                                watched.DurationSeconds),
+                            watched.ThumbnailUrl));
+
+
+                    // Resume from previous position.
+                    video.Seek(
+                        (float)watched.WatchedSeconds);
+                }
+            }
+
+
+            ImGui.PopID();
+        }
     }
 
     private void DrawRecentlyWatchedCard(
@@ -3596,7 +3912,7 @@ internal sealed partial class MainWindow
 
         DrawHomeShelfHeading(
             FontAwesomeIcon.Users,
-            "Watch Parties",
+            "Watch Parties [IGNORE SECTION - UNDER CONSTRUCTION]",
             AccentHover);
 
         var cardWidth =
@@ -3619,7 +3935,7 @@ internal sealed partial class MainWindow
         ImGui.SameLine(0f, gap);
 
         DrawWatchPartyCard(
-            "Dragon Room",
+            "Lala Theatre",
             "Watching: Endwalker Trailer",
             "Y'shtola",
             "Shirogane — Empyreum Apartments",

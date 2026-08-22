@@ -46,8 +46,39 @@ internal sealed partial class MainWindow : Window, IDisposable
     // Set each frame in Draw() when a custom background texture is actually showing.
     private static bool customBackgroundActive;
 
+
     private static Vector4 FadeForCustomBg(Vector4 color, float alpha) =>
         customBackgroundActive ? new Vector4(color.X, color.Y, color.Z, alpha) : color;
+
+    // First launch experience
+    private bool showingFirstLaunch;
+    private float firstLaunchFadeAlpha = 1f;
+    private bool firstLaunchFadingOut;
+    private bool firstLaunchStarted;
+
+    private bool firstLaunchLoadingComplete;
+
+    private double firstLaunchStartedAt;
+
+    private int firstLaunchPhase;
+
+    private float firstLaunchTextProgress;
+
+    private double firstLaunchLastMessageChange;
+
+    private int firstLaunchMessageIndex;
+
+    private static readonly string[] FirstLaunchMessages =
+    [
+        "Building Video Cache...",
+    "Fetching video data...",
+    "Polishing the screen...",
+    "Gets distracted and starts doomscrolling...",
+    "Watching cat videos..."
+    ];
+
+    private string firstLaunchStatus =
+        "Starting AlphaChannel...";
 
     private static Vector4 Hex(int rgb) => new(
         ((rgb >> 16) & 0xFF) / 255f,
@@ -119,6 +150,7 @@ internal sealed partial class MainWindow : Window, IDisposable
 
     private HomePage currentPage = HomePage.Home;
 
+
     // Transition Animation
     private HomePage lastAnimatedPage = HomePage.Home;
     private double pageTransitionStartedAt = -1d;
@@ -149,6 +181,29 @@ internal sealed partial class MainWindow : Window, IDisposable
 
     //Scrollbar inactivity timer
     private double lastScrollInteractionTime;
+
+    // Welcome splash particle emit
+    private sealed class LoadingCardParticle
+    {
+        public Vector2 Position;
+
+        public float Width;
+        public float Height;
+
+        public float Speed;
+
+        public float Alpha;
+
+        public float Drift;
+
+        public double SpawnTime;
+
+        public float ShimmerOffset;
+    }
+
+    private double lastLoadingCardSpawn;
+
+    private readonly List<LoadingCardParticle> loadingCards = [];
 
     internal bool IsNamePromptActive => namePromptActive;
 
@@ -235,6 +290,11 @@ internal sealed partial class MainWindow : Window, IDisposable
 
         maximizedPosition = Plugin.Cfg.MaximizedPosition;
         minimizedPosition = Plugin.Cfg.MinimizedPosition;
+
+        if (true)
+        {
+            _ = BeginFirstLaunchAsync();
+        }
     }
 
     // /achannel and Dalamud's OpenMainUi both land here so a second activation always closes,
@@ -270,6 +330,27 @@ internal sealed partial class MainWindow : Window, IDisposable
         RequestPosition(minimizedPosition);
         IsOpen = true;
         DoJoin(hostDisplayName);
+    }
+
+    // Typing animation for loading screen
+    private static string GetTypewriterText(
+        string text,
+        double elapsed,
+        double startDelay = 0.5,
+        double charactersPerSecond = 12)
+    {
+        if (elapsed < startDelay)
+        {
+            return string.Empty;
+        }
+
+        var visibleCharacters =
+            (int)((elapsed - startDelay) * charactersPerSecond);
+
+        return text[..Math.Clamp(
+            visibleCharacters,
+            0,
+            text.Length)];
     }
 
     // Silent proximity probe — join without opening chrome until ShowProximityViewer (URL confirmed).
@@ -399,6 +480,597 @@ internal sealed partial class MainWindow : Window, IDisposable
         namePromptPending = true;
         IsOpen = true;
     }
+
+    // First launch process
+    private async Task BeginFirstLaunchAsync()
+    {
+        showingFirstLaunch = true;
+
+        while (!IsOpen)
+        {
+            await Task.Delay(50);
+        }
+
+        firstLaunchStartedAt =
+            ImGui.GetTime();
+
+        firstLaunchPhase = 0;
+
+        firstLaunchTextProgress = 0f;
+
+        firstLaunchLastMessageChange =
+            ImGui.GetTime();
+
+        firstLaunchMessageIndex = 0;
+
+        try
+        {
+            // Keep the splash alive long enough for the full intro.
+            // Real loading checks will be connected later.
+
+            await Task.Delay(
+                TimeSpan.FromSeconds(22));
+        }
+        finally
+        {
+            firstLaunchLoadingComplete = true;
+
+            Plugin.Cfg.HasCompletedFirstLaunch = true;
+            Plugin.Cfg.Save();
+
+            firstLaunchFadingOut = true;
+        }
+    }
+
+    // Loading screen text transitions
+    private static float FadeBetween(
+    double elapsed,
+    double start,
+    double duration)
+    {
+        var progress =
+            (float)Math.Clamp(
+                (elapsed - start) / duration,
+                0,
+                1);
+
+        // Smooth easing
+        return progress * progress * (3f - 2f * progress);
+    }
+
+    private void UpdateLoadingCards(Vector2 areaMin, Vector2 areaMax)
+    {
+        var now = ImGui.GetTime();
+
+        if (now - lastLoadingCardSpawn > 1.1)
+        {
+            var sideLeft =
+    Random.Shared.Next(0, 100) < 50;
+
+            loadingCards.Add(
+                new LoadingCardParticle
+                {
+                    Position =
+    new Vector2(
+sideLeft
+    ? areaMin.X + Random.Shared.Next(20, 180)
+    : areaMax.X - Random.Shared.Next(20, 180),
+        areaMax.Y + 120),
+
+                    Width =
+    Random.Shared.Next(80, 150),
+
+                    Height =
+    Random.Shared.Next(50, 90),
+
+                    Speed =
+                        Random.Shared.Next(35, 80),
+
+                    Drift =
+                        Random.Shared.NextSingle() * 20f - 10f,
+
+                    Alpha = 0f,
+
+                    SpawnTime = now,
+
+                    ShimmerOffset =
+    Random.Shared.NextSingle(),
+                });
+
+            lastLoadingCardSpawn = now;
+        }
+
+
+        foreach (var card in loadingCards)
+        {
+            card.Position.Y -=
+                card.Speed *
+                ImGui.GetIO().DeltaTime;
+
+            card.Position.X +=
+                MathF.Sin(
+                    (float)(now + card.SpawnTime) * 0.8f)
+                * 8f *
+                ImGui.GetIO().DeltaTime;
+
+
+            var age =
+                now - card.SpawnTime;
+
+
+            // fade in
+            if (age < 1.5)
+            {
+                card.Alpha =
+                    (float)(age / 1.5);
+            }
+            else
+            {
+                // fade out near top
+                var heightProgress =
+                    1f -
+                    ((card.Position.Y - areaMin.Y) /
+                    (areaMax.Y - areaMin.Y));
+
+                card.Alpha =
+                    Math.Clamp(
+                        1f - heightProgress,
+                        0,
+                        0.35f);
+            }
+        }
+
+
+        loadingCards.RemoveAll(
+            card =>
+                card.Position.Y <
+                areaMin.Y - 200);
+    }
+
+    // First time launch welcome splash screen
+    private void DrawFirstLaunchOverlay()
+    {
+        if (firstLaunchFadingOut)
+        {
+            firstLaunchFadeAlpha -=
+                ImGui.GetIO().DeltaTime /
+                1.5f;
+
+            if (firstLaunchFadeAlpha <= 0f)
+            {
+                firstLaunchFadeAlpha = 0f;
+                showingFirstLaunch = false;
+            }
+        }
+        var drawList =
+            ImGui.GetForegroundDrawList();
+
+        var windowPos =
+            ImGui.GetWindowPos();
+
+        var windowSize =
+            ImGui.GetWindowSize();
+
+        var min =
+            windowPos;
+
+        var max =
+            new Vector2(
+                windowPos.X + windowSize.X,
+                windowPos.Y + windowSize.Y);
+
+        // Full window themed overlay
+        drawList.AddRectFilled(
+            min,
+            max,
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.03f,
+                    0.02f,
+                    0.08f,
+                    0.96f *
+                    firstLaunchFadeAlpha)));
+
+        var cardAreaMin = new Vector2(
+            windowPos.X + 20,
+            windowPos.Y + 40);
+
+        var cardAreaMax = new Vector2(
+            windowPos.X + windowSize.X - 20,
+            windowPos.Y + windowSize.Y - 40);
+
+        UpdateLoadingCards(cardAreaMin, cardAreaMax);
+
+        drawList.PushClipRect(
+            cardAreaMin,
+            cardAreaMax,
+            true);
+
+        foreach (var card in loadingCards)
+        {
+            var cardMin = card.Position;
+            var cardMax = card.Position +
+                          new Vector2(
+                              card.Width,
+                              card.Height);
+
+            // Rising fade trail behind card
+            for (int i = 1; i <= 3; i++)
+            {
+                var trailOffset = i * 24f;
+
+                drawList.AddRectFilled(
+                    cardMin +
+                        new Vector2(0, trailOffset),
+                    cardMax +
+                        new Vector2(0, trailOffset + 20),
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            Accent.X,
+                            Accent.Y,
+                            Accent.Z,
+                            card.Alpha *
+                            (0.04f / i))),
+                    8f);
+            }
+
+            // Outer card
+            drawList.AddRectFilled(
+                cardMin,
+                cardMax,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        card.Alpha *
+                        firstLaunchFadeAlpha *
+                        0.25f)),
+                8f);
+
+
+            // Thumbnail placeholder
+            drawList.AddRectFilled(
+                cardMin + new Vector2(10, 10),
+                new Vector2(
+                    cardMax.X - 10,
+                    cardMin.Y + card.Height * 0.55f),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        Accent.X * 0.65f,
+                        Accent.Y * 0.65f,
+                        Accent.Z * 0.65f,
+                        card.Alpha *
+                        firstLaunchFadeAlpha *
+                        0.45f)),
+                6f);
+
+            // Moving shimmer highlight
+            var shimmer =
+                (float)(
+                    (Math.Sin(
+                        ImGui.GetTime() * 3 +
+                        card.ShimmerOffset * 10)
+                    * 0.5f)
+                    + 0.5f);
+
+            var shimmerX =
+                cardMin.X +
+                (card.Width * shimmer);
+
+            drawList.AddRectFilled(
+                new Vector2(
+                    shimmerX - 18,
+                    cardMin.Y),
+                new Vector2(
+                    shimmerX + 18,
+                    cardMax.Y),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        1f,
+                        1f,
+                        1f,
+                        card.Alpha *
+firstLaunchFadeAlpha *
+0.06f)),
+                8f);
+
+
+            // Title skeleton line 1
+            drawList.AddRectFilled(
+                cardMin + new Vector2(10, card.Height - 28),
+                new Vector2(
+                    cardMin.X + card.Width * 0.75f,
+                    card.Height + cardMin.Y - 20),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        0.7f,
+                        0.7f,
+                        0.8f,
+                        card.Alpha *
+                        firstLaunchFadeAlpha *
+                        0.55f)),
+                4f);
+
+
+            // Title skeleton line 2
+            drawList.AddRectFilled(
+                cardMin + new Vector2(10, card.Height - 14),
+                new Vector2(
+                    cardMin.X + card.Width * 0.5f,
+                    card.Height + cardMin.Y - 7),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        0.55f,
+                        0.55f,
+                        0.65f,
+                        card.Alpha *
+                        firstLaunchFadeAlpha *
+                        0.3f)),
+                4f);
+        }
+
+
+        drawList.PopClipRect();
+
+        var center =
+            new Vector2(
+                windowPos.X + windowSize.X / 2,
+                windowPos.Y + windowSize.Y / 2);
+
+
+        // ---------------------------------------------
+        // AlphaChannel branding
+        // ---------------------------------------------
+
+        var logoTop =
+            windowPos.Y + 70;
+
+        if (alphaIconImage is not null)
+        {
+            const float logoSize = 110f;
+
+            drawList.AddImage(
+                alphaIconImage.GetWrapOrEmpty()
+                    .Handle,
+                new Vector2(
+                    center.X - logoSize / 2,
+                    logoTop),
+                new Vector2(
+                    center.X + logoSize / 2,
+                    logoTop + logoSize));
+        }
+
+        var brandText =
+            "ALPHA CHANNEL";
+
+        ImGui.SetWindowFontScale(1.8f);
+
+        var brandSize =
+            ImGui.CalcTextSize(brandText);
+
+        drawList.AddText(
+            new Vector2(
+                center.X - brandSize.X / 2,
+                logoTop + 130),
+            ImGui.GetColorU32(
+                Vector4.One),
+            brandText);
+
+        ImGui.SetWindowFontScale(1f);
+
+        var tagline =
+    "Your gateway to shared viewing in Eorzea.";
+
+        var taglineSize =
+            ImGui.CalcTextSize(tagline);
+
+        drawList.AddText(
+            new Vector2(
+                center.X - taglineSize.X / 2,
+                logoTop + 190),
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.65f,
+                    0.62f,
+                    0.75f,
+                    0.85f *
+firstLaunchFadeAlpha)),
+tagline);
+
+        // Branding glow divider
+        var lineY =
+            logoTop + 220;
+
+        drawList.AddLine(
+            new Vector2(
+                center.X - 55,
+                lineY),
+            new Vector2(
+                center.X + 55,
+                lineY),
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.8f)),
+            3f);
+
+        // ---------------------------------------------
+        // Phase timing
+        // ---------------------------------------------
+
+        var elapsed =
+            ImGui.GetTime() -
+            firstLaunchStartedAt;
+
+
+        string introText = string.Empty;
+
+        if (elapsed < 6)
+        {
+            firstLaunchPhase = 0;
+
+            introText =
+                GetTypewriterText(
+                    "Welcome to Alpha Channel",
+                    elapsed,
+                    1.5,
+                    12);
+        }
+        else
+        {
+            firstLaunchPhase = 1;
+
+            introText =
+                GetTypewriterText(
+                    "We're just getting things ready for you...",
+                    elapsed - 6,
+                    0.5,
+                    10);
+        }
+
+        var statusText =
+            FirstLaunchMessages[
+                firstLaunchMessageIndex];
+
+        if (elapsed > 12 &&
+            ImGui.GetTime() -
+            firstLaunchLastMessageChange > 3)
+        {
+            firstLaunchMessageIndex++;
+
+            if (firstLaunchMessageIndex >= FirstLaunchMessages.Length)
+            {
+                firstLaunchMessageIndex = 0;
+            }
+
+            firstLaunchLastMessageChange =
+                ImGui.GetTime();
+        }
+
+        // ---------------------------------------------
+        // Draw intro text
+        // ---------------------------------------------
+
+        if (!string.IsNullOrEmpty(introText))
+        {
+            ImGui.SetWindowFontScale(1.35f);
+
+            var introSize =
+                ImGui.CalcTextSize(introText);
+
+            drawList.AddText(
+                new Vector2(
+                    center.X - introSize.X / 2,
+                    center.Y - 70),
+ImGui.GetColorU32(
+    new Vector4(
+        1f,
+        1f,
+        1f,
+        firstLaunchFadeAlpha)),
+introText);
+
+            ImGui.SetWindowFontScale(1f);
+        }
+
+
+        // ---------------------------------------------
+        // Draw loading status
+        // ---------------------------------------------
+
+        if (elapsed >= 12)
+        {
+            var statusSize =
+                ImGui.CalcTextSize(statusText);
+
+            drawList.AddText(
+                new Vector2(
+                    center.X - statusSize.X / 2,
+                    center.Y + 305),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        MutedText.X,
+                        MutedText.Y,
+                        MutedText.Z,
+                        firstLaunchFadeAlpha)),
+                statusText);
+        }
+
+        // ---------------------------------------------
+        // TV-style spinner
+        // ---------------------------------------------
+        var spinnerCenter =
+            new Vector2(
+                center.X,
+                center.Y + 190);
+
+        var radius = 90f;
+        var thickness = 8f;
+
+        var time = (float)ImGui.GetTime();
+
+        var startAngle = time * 3f;
+
+        // segmented arc like the TV shader
+        const int segments = 80;
+
+        for (int i = 0; i < segments; i++)
+        {
+            float progress = i / (float)segments;
+
+            float angle =
+                startAngle +
+                progress * MathF.PI * 2f;
+
+            // fading tail
+            float alpha =
+                MathF.Pow(progress, 2.4f)
+                *
+                firstLaunchFadeAlpha;
+
+            var point =
+                spinnerCenter +
+                new Vector2(
+                    MathF.Cos(angle),
+                    MathF.Sin(angle))
+                * radius;
+
+            drawList.AddCircleFilled(
+                point,
+                thickness,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        alpha)));
+        }
+
+
+        // bright moving head
+        var headAngle = startAngle;
+
+        var head =
+            spinnerCenter +
+            new Vector2(
+                MathF.Cos(headAngle),
+                MathF.Sin(headAngle))
+            * radius;
+
+        drawList.AddCircleFilled(
+            head,
+            14f,
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    firstLaunchFadeAlpha)));
+    }
+
 
     // Window.Size is only read once Begin() runs, which happens before Draw() - setting it from
     // inside Draw() would lag a frame behind a minimize/restore click, so it's set here instead
@@ -760,6 +1432,17 @@ internal sealed partial class MainWindow : Window, IDisposable
         DrawWindowControlsStrip();
 
         DrawPlaybackErrorToast();
+
+        if (showingFirstLaunch)
+        {
+            if (!firstLaunchStarted)
+            {
+                firstLaunchStarted = true;
+                _ = BeginFirstLaunchAsync();
+            }
+
+            DrawFirstLaunchOverlay();
+        }
     }
 
     // No title bar means no native minimize/close chrome - these two replace it. Minimize collapses

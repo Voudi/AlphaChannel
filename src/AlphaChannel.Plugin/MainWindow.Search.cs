@@ -36,7 +36,8 @@ internal sealed partial class MainWindow
     private bool browseVideoRequested;
     private CancellationTokenSource? browseVideosCts;
 
-    // Youtube Trending Topics
+    // Youtube Trending
+    // s
     private sealed record TrendingTopic(
         string Name,
         string[] SearchQueries);
@@ -1171,7 +1172,6 @@ internal sealed partial class MainWindow
             // Pick up to 8 topics for the full Browse page.
             var selectedTopics = topics
                 .OrderBy(_ => trendingRandom.Next())
-                .Take(6)
                 .ToList();
 
             // Start with an empty dictionary so rows can appear

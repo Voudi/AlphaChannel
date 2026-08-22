@@ -1378,7 +1378,22 @@ childPos + new Vector2(width, 2),
                     ImDrawFlags.None,
                     1f);
 
-                // TODO: replace this when video thumbnails exist
+            var thumbnail = thumbnails.Get(current.ThumbnailUrl);
+
+            if (thumbnail is not null)
+            {
+                drawList.AddImageRounded(
+                    thumbnail.Handle,
+                    thumbMin,
+                    thumbMax,
+                    Vector2.Zero,
+                    Vector2.One,
+                    uint.MaxValue,
+                    6f);
+            }
+            else
+            {
+                // Keep current placeholder when no thumbnail exists
                 using (ImRaii.PushFont(UiBuilder.IconFont))
                 {
                     var icon = FontAwesomeIcon.Play.ToIconString();
@@ -1391,9 +1406,10 @@ childPos + new Vector2(width, 2),
                         ImGui.GetColorU32(Accent),
                         icon);
                 }
+            }
 
-                // Reset cursor after thumbnail drawing
-                ImGui.SetCursorPos(new Vector2(0f, topY));
+            // Reset cursor after thumbnail drawing
+            ImGui.SetCursorPos(new Vector2(0f, topY));
 
 
 
