@@ -1,10 +1,10 @@
 [
   {
-    "Author": "K.I.R.O",
-    "Name": "AlphaChannel",
+    "Author": "Voudi",
+    "Name": "Alpha Channel",
     "InternalName": "AlphaChannel.Plugin",
-    "AssemblyVersion": "1.0.9.0",
-    "Description": "Renders an in-world video screen and syncs playback with other players running AlphaChannel over a self-hosted relay.",
+    "AssemblyVersion": "2.0",
+    "Description": "Your shared video space in FFXIV - Watch tv together anywhere in Eorzea.",
     "ApplicableVersion": "any",
     "Tags": [
       "video",
@@ -17,8 +17,8 @@
     "IsHide": false,
     "DownloadCount": 0,
     "LastUpdate": 1786073514,
-"RepoUrl": "https://github.com/Kodie0/AlphaChannelKodie",
-"DownloadLinkInstall": "https://github.com/Kodie0/AlphaChannelKodie/releases/download/v2-kodie/latest.zip",
-"DownloadLinkUpdate": "https://github.com/Kodie0/AlphaChannelKodie/releases/download/v2-kodie/latest.zip"
+"RepoUrl": "https://github.com/Voudi/AlphaChannel",
+"DownloadLinkInstall": "https://github.com/Voudi/AlphaChannel/releases/download/v2.0/latest.zip",
+"DownloadLinkUpdate": "https://github.com/Voudi/AlphaChannel/releases/download/v2.0/latest.zip"
   }
 ]
