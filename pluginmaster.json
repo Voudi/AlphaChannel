@@ -2,7 +2,7 @@
   {
     "Author": "Voudi",
     "Name": "Alpha Channel",
-    "InternalName": "AlphaChannel.new",
+    "InternalName": "AlphaChannel.plugin",
     "AssemblyVersion": "1.0.9.0",
     "Description": "Your shared video space in FFXIV - Watch tv together anywhere in Eorzea.",
     "ApplicableVersion": "any",
