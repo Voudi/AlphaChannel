@@ -95,7 +95,7 @@ internal sealed class ConnectionHandler(
                         // empty room for someone who isn't hosting (NearbyAutoWatch walks the floor
                         // trying character names; GetOrCreateRoom here would spam ghost rooms).
                         var target = rooms.FindRoomHostedBy(resolvedHostId);
-                        if (target is null || target.LastState is null)
+                        if (target is null)
                         {
                             await SendAsync(socket, new StreamControl
                             {
@@ -112,6 +112,14 @@ internal sealed class ConnectionHandler(
                         if (target.LastState is { } cached)
                         {
                             await SendAsync(socket, cached, token).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            await SendAsync(socket, new StreamControl
+                            {
+                                Type = SignalType.StreamState,
+                                HostId = target.HostUserId,
+                            }, token).ConfigureAwait(false);
                         }
 
                         await BroadcastRosterAsync(target, token).ConfigureAwait(false);

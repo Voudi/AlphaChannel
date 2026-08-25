@@ -57,6 +57,11 @@ internal sealed class VideoPlayer : IDisposable
         set => engine.UseFirefoxCookies = value;
     }
 
+    public void ShowWaitingScreen()
+    {
+        engine.ShowWaitingScreen();
+    }
+
     public void SetVolume(int volumePercent) => engine.SetVolume(volumePercent);
 
     public void SetOverlayTitle(string title, string source) => engine.SetOverlayTitle(title, source);

@@ -26,6 +26,7 @@ internal sealed partial class MainWindow
     private string homeSearch = string.Empty;
     private string? pendingPlayerSearch;
     private bool homeSearchPopupOpen;
+    private int homeVideoColumnCount = 5;
 
     private const int FavouritePageSize = 20;
     private int favouriteVideosVisibleCount = FavouritePageSize;
@@ -40,6 +41,8 @@ internal sealed partial class MainWindow
 
     // Constant spacing on right side
     private const float HomeContentRightInset = 18f;
+
+
 
     private const string FeaturedVideoUrl =
     "https://www.youtube.com/watch?v=zTTtd6bnhFs";
@@ -570,38 +573,43 @@ internal sealed partial class MainWindow
         var startX = ImGui.GetCursorPosX();
         var headerY = ImGui.GetCursorPosY();
 
+        var showWelcome = contentWidth >= 900f;
+        var showWatchers = contentWidth >= 800f;
+
 
         // ---------------------------------------------------------
         // Left: Welcome text
         // ---------------------------------------------------------
-
-        ImGui.SetCursorPos(
+        if (showWelcome)
+        {
+            ImGui.SetCursorPos(
             new Vector2(
                 startX + 25f,
                 headerY + 6f));
 
-        using (ImRaii.PushFont(UiBuilder.IconFont))
-        {
+            using (ImRaii.PushFont(UiBuilder.IconFont))
+            {
+                ImGui.TextColored(
+                    Accent,
+                    FontAwesomeIcon.Users.ToIconString());
+            }
+
+            ImGui.SameLine(0, 8);
+
+            ImGui.SetWindowFontScale(1.08f);
+
+            ImGui.TextColored(
+                MutedText,
+                "Welcome to ");
+
+            ImGui.SameLine(0, 0);
+
             ImGui.TextColored(
                 Accent,
-                FontAwesomeIcon.Users.ToIconString());
+                "Alpha Channel");
+
+            ImGui.SetWindowFontScale(1f);
         }
-
-        ImGui.SameLine(0, 8);
-
-        ImGui.SetWindowFontScale(1.08f);
-
-        ImGui.TextColored(
-            MutedText,
-            "Welcome to ");
-
-        ImGui.SameLine(0, 0);
-
-        ImGui.TextColored(
-            Accent,
-            "Alpha Channel");
-
-        ImGui.SetWindowFontScale(1f);
 
 
         // ---------------------------------------------------------
@@ -693,22 +701,23 @@ internal sealed partial class MainWindow
         // ---------------------------------------------------------
         // Right: watchers
         // ---------------------------------------------------------
-
-        var watcherText =
+        if (showWatchers)
+        {
+            var watcherText =
             $"● {usersOnlineCount} Watchers Online";
 
-        var watcherWidth =
-            ImGui.CalcTextSize(watcherText).X;
+            var watcherWidth =
+                ImGui.CalcTextSize(watcherText).X;
 
-        ImGui.SetCursorPos(
-            new Vector2(
-                startX + contentWidth - watcherWidth - 55f,
-                headerY + 6f));
+            ImGui.SetCursorPos(
+                new Vector2(
+                    startX + contentWidth - watcherWidth - 55f,
+                    headerY + 6f));
 
-        ImGui.TextColored(
-            Good,
-            watcherText);
-
+            ImGui.TextColored(
+                Good,
+                watcherText);
+        }
 
         ImGui.SetWindowFontScale(1f);
         ImGui.Dummy(new Vector2(0f, 2f));
@@ -785,7 +794,30 @@ internal sealed partial class MainWindow
         ImGui.PopStyleVar();
     }
 
+    private int GetHomeVideoColumnCount(float windowWidth)
+    {
+        switch (homeVideoColumnCount)
+        {
+            case 5:
+                if (windowWidth < 780f)
+                    homeVideoColumnCount = 4;
+                break;
 
+            case 4:
+                if (windowWidth >= 900f)
+                    homeVideoColumnCount = 5;
+                else if (windowWidth < 560f)
+                    homeVideoColumnCount = 3;
+                break;
+
+            case 3:
+                if (windowWidth >= 720f)
+                    homeVideoColumnCount = 4;
+                break;
+        }
+
+        return homeVideoColumnCount;
+    }
 
     private void DrawHomeYouTubeShelf()
     {
@@ -876,13 +908,11 @@ internal sealed partial class MainWindow
             if (isLoadingHomeYouTube)
             {
                 DrawMediaHubLoadingCards(
-                    5,
                     224f);
             }
             else
             {
                 DrawMediaHubShelfCards(
-                    5,
                     224f);
             }
 
@@ -893,7 +923,11 @@ internal sealed partial class MainWindow
         // Real results
         // ---------------------------------------------------------
 
-        const int cardCount = 5;
+        var windowWidth = ImGui.GetWindowSize().X;
+
+        var cardCount =
+      GetHomeVideoColumnCount(windowWidth);
+
         const float gap = 12f;
         const float cardHeight = 224f;
 
@@ -1055,10 +1089,12 @@ internal sealed partial class MainWindow
 
 
     private void DrawMediaHubShelfCards(
-    int itemCount,
-    float cardHeight)
+      float cardHeight)
     {
         var width = ImGui.GetContentRegionAvail().X;
+
+        var itemCount =
+            GetHomeVideoColumnCount(ImGui.GetWindowSize().X);
 
         const float gap = 10f;
 
@@ -1087,11 +1123,13 @@ internal sealed partial class MainWindow
 
 
     private void DrawMediaHubLoadingCards(
-        int itemCount,
         float cardHeight)
     {
         var width =
             ImGui.GetContentRegionAvail().X;
+
+        var itemCount =
+            GetHomeVideoColumnCount(ImGui.GetWindowSize().X);
 
         const float gap = 10f;
 
@@ -3170,7 +3208,10 @@ internal sealed partial class MainWindow
     {
         const string title = "FFXIV on YouTube";
 
-        const int columns = 5;
+        var columns =
+            GetHomeVideoColumnCount(
+                ImGui.GetWindowSize().X);
+
         const float gap = 10f;
         const float rowGap = 14f;
         const float cardHeight = 174f;
@@ -3443,14 +3484,16 @@ internal sealed partial class MainWindow
         if (videos is not { Count: > 0 })
         {
             DrawMediaHubShelfCards(
-                5,
                 224f);
 
             return;
         }
 
 
-        const int cardCount = 5;
+        var cardCount =
+            GetHomeVideoColumnCount(
+                ImGui.GetWindowSize().X);
+
         const float gap = 12f;
         const float cardHeight = 190f;
 

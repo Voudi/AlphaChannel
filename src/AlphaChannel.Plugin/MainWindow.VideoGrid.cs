@@ -550,7 +550,15 @@ internal sealed partial class MainWindow
         // Grid
         // ---------------------------------------------------------
 
-        const int columns = 5;
+        var windowWidth = ImGui.GetWindowSize().X;
+
+        var columns =
+            windowWidth >= 827f
+                ? 5
+                : windowWidth >= 600f
+                    ? 4
+                    : 3;
+
         const float gap = 12f;
         const float rowGap = 16f;
         const float cardHeight = 224f;
@@ -742,8 +750,16 @@ internal sealed partial class MainWindow
         // Grid
         // ---------------------------------------------------------
 
-        const int columns = 5;
-        const float gap = 10f;
+        var windowWidth = ImGui.GetWindowSize().X;
+
+        var columns =
+            windowWidth >= 827f
+                ? 5
+                : windowWidth >= 600f
+                    ? 4
+                    : 3;
+
+        const float gap = 12f;
         const float rowGap = 16f;
         const float cardHeight = 224f;
 
@@ -1093,7 +1109,15 @@ internal sealed partial class MainWindow
                     10f));
         }
 
-        const int columns = 5;
+        var windowWidth = ImGui.GetWindowSize().X;
+
+        var columns =
+            windowWidth >= 827f
+                ? 5
+                : windowWidth >= 600f
+                    ? 4
+                    : 3;
+
         const float gap = 12f;
         const float rowGap = 16f;
         const float cardHeight = 224f;
@@ -1108,17 +1132,17 @@ internal sealed partial class MainWindow
         var topicIndex = 0;
 
         var visibleTopics =
-            browseVideoTopicFilter is null
-                ? browseVideoResults
-                : browseVideoResults
-                    .Where(x =>
-                        string.Equals(
-                            x.Key,
-                            browseVideoTopicFilter,
-                            StringComparison.Ordinal))
-                    .ToDictionary(
-                        x => x.Key,
-                        x => x.Value);
+     browseVideoTopicFilter is null
+         ? new Dictionary<string, List<VideoSearchEntry>>(browseVideoResults)
+         : browseVideoResults
+             .Where(x =>
+                 string.Equals(
+                     x.Key,
+                     browseVideoTopicFilter,
+                     StringComparison.Ordinal))
+             .ToDictionary(
+                 x => x.Key,
+                 x => x.Value);
 
         foreach (var topic in visibleTopics)
         {
@@ -1217,7 +1241,7 @@ internal sealed partial class MainWindow
                 {
                     if (index % columns == 0)
                     {
-                        // Start a new row after every 5 cards.
+                        // Start a new row after every card column count
                         ImGui.Dummy(
                             new Vector2(
                                 0f,

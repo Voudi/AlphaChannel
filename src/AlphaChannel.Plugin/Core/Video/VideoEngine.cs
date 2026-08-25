@@ -209,6 +209,30 @@ internal sealed class VideoEngine : IDisposable
             new CancellationTokenSource();
     }
 
+    internal void ShowWaitingScreen()
+    {
+        if (_isActive)
+        {
+            return;
+        }
+
+        if (Plugin.ObjectTable.LocalPlayer is null)
+        {
+            return;
+        }
+
+        AssignScreenForSession(_screenTexture);
+
+        _screenPainter.SetLoading(true);
+
+        _isActive = true;
+
+        _screenPainter.SetTransform(
+            ScreenPosition,
+            ScreenYaw,
+            ScreenScale);
+    }
+
     internal void PlayVideo(string url, int playbackPosition = 0, bool isPlaying = true)
     {
         // Never reuse an MPV instance that has already suffered a playback failure.

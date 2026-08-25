@@ -194,6 +194,7 @@ internal sealed class StreamClient : IDisposable
         switch (message.Type)
         {
             case SignalType.StreamState:
+
                 OnState?.Invoke(message);
                 break;
             case SignalType.StreamJoined:
@@ -283,7 +284,7 @@ internal sealed class StreamClient : IDisposable
 
     internal bool IsPrivate { get; set; }
 
-    internal Task PublishStateAsync(string url, double positionSeconds, bool paused, Vector3? screenPosition,
+    internal Task PublishStateAsync(string? url, double positionSeconds, bool paused, Vector3? screenPosition,
         float? screenYaw, float? screenScale)
     {
         Mode = StreamMode.Hosting;

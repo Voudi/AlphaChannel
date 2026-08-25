@@ -42,6 +42,9 @@ internal sealed partial class MainWindow : Window, IDisposable
     private static Vector4 MutedText => Colors.MutedText;
     private static readonly Vector4 BorderSubtle = new(1f, 1f, 1f, 0.085f);
     private ISharedImmediateTexture? alphaIconImage;
+    private ISharedImmediateTexture? reactPreviewImage;
+    private ISharedImmediateTexture? watchPartyHeaderImage;
+
 
     // Set each frame in Draw() when a custom background texture is actually showing.
     private static bool customBackgroundActive;
@@ -130,14 +133,15 @@ internal sealed partial class MainWindow : Window, IDisposable
     private readonly Action<CharacterSession?> onSessionChanged;
     // Wide media-hub layout: left navigation + spacious content + social rail + compact player bar.
     private static readonly Vector2 WindowSize = new(1220, 840);
-    private static readonly Vector2 MiniModeSize = new(260, 840);
     // Compact capsule chrome while tucked away - wide enough for brand + expand + close.
     private static readonly Vector2 MinimizedSize = new(276, 40);
     // Wider capsule when "Watching First Last" is showing (viewer-only join).
     private static readonly Vector2 MinimizedViewerSize = new(340, 40);
     private const int PositionPinFrames = 3;
     private bool windowMinimized;
-    private bool miniMode;
+    private bool userResized;
+    private Vector2 userWindowSize = WindowSize;
+    private bool wasResizing;
     // True after /achannel watch or context-menu Join Stream: stay minimized; screen still
     // draws via ScreenPainter + /rt sync. Requires AlphaChannel on both sides — not Lightless.
     private bool viewerMode;
@@ -159,7 +163,6 @@ internal sealed partial class MainWindow : Window, IDisposable
     private string? joinError;
 
     private const float SidebarWidth = 185f;
-    private const float RightRailWidth = 300f;
     private const float BottomBarHeight = 96f;
 
     // Borderless Child windows ignore WindowPadding in this ImGui build unless AlwaysUseWindowPadding
@@ -261,13 +264,13 @@ internal sealed partial class MainWindow : Window, IDisposable
         // than a floating dev-tool window. Actual size is set every frame in PreDraw (below), since
         // it toggles between WindowSize and MinimizedSize - SizeConstraints just has to be loose
         // enough to allow both (NoResize already blocks the player from dragging it anywhere else).
-        Flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse
+        Flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse
                 | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
         SizeCondition = ImGuiCond.Always;
         SizeConstraints = new WindowSizeConstraints
         {
             MinimumSize = MinimizedSize,
-            MaximumSize = WindowSize,
+            MaximumSize = new Vector2(2000, 1200),
         };
 
         stream.OnJoined += () => joinError = null;
@@ -1078,38 +1081,19 @@ introText);
     // capsule can draw its own chrome (NoBackground) without NoMove blocking drag.
     public override void PreDraw()
     {
-        Size = windowMinimized
-            ? (viewerMode ? MinimizedViewerSize : MinimizedSize)
-            : miniMode
-                ? MiniModeSize
-                : WindowSize;
         if (windowMinimized)
         {
-            Flags = ImGuiWindowFlags.NoTitleBar
-                    | ImGuiWindowFlags.NoResize
-                    | ImGuiWindowFlags.NoCollapse
-                    | ImGuiWindowFlags.NoScrollbar
-                    | ImGuiWindowFlags.NoScrollWithMouse
-                    | ImGuiWindowFlags.NoBackground;
+            Size = viewerMode
+                ? MinimizedViewerSize
+                : MinimizedSize;
+        }
+        else if (userResized)
+        {
+            Size = userWindowSize;
         }
         else
         {
-            // Outer window never scrolls — Settings scrolls inside ##content instead.
-            Flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse
-                    | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
-        }
-
-        // Pin for a few frames after minimize/restore/reopen so the size swap doesn't leave the
-        // window at the wrong corner; then clear Position so the player can drag freely again.
-        if (pendingFrames > 0 && pendingPosition is { } target)
-        {
-            Position = target;
-            PositionCondition = ImGuiCond.Always;
-            pendingFrames--;
-        }
-        else
-        {
-            Position = null;
+            Size = WindowSize;
         }
     }
 
@@ -1137,6 +1121,45 @@ introText);
         if (File.Exists(path))
         {
             alphaIconImage = Plugin.TextureProvider.GetFromFile(path);
+        }
+    }
+
+    private void EnsureReactPreviewLoaded()
+    {
+        if (reactPreviewImage is not null)
+        {
+            return;
+        }
+
+        var path = Path.Combine(
+            Plugin.PluginInterface.AssemblyLocation.DirectoryName!,
+            "Assets",
+            "reactpreview.png");
+
+
+        if (File.Exists(path))
+        {
+            reactPreviewImage =
+                Plugin.TextureProvider.GetFromFile(path);
+        }
+    }
+
+    private void EnsureWatchPartyHeaderLoaded()
+    {
+        if (watchPartyHeaderImage is not null)
+        {
+            return;
+        }
+
+        var path = Path.Combine(
+            Plugin.PluginInterface.AssemblyLocation.DirectoryName!,
+            "Assets",
+            "watchpartyheader.png");
+
+        if (File.Exists(path))
+        {
+            watchPartyHeaderImage =
+                Plugin.TextureProvider.GetFromFile(path);
         }
     }
 
@@ -1183,11 +1206,24 @@ introText);
     {
         Colors = ThemeCatalog.Get(Plugin.Cfg.UiTheme, Plugin.Cfg.UiBackground);
         EnsureCustomBackgroundLoaded();
+        EnsureReactPreviewLoaded();
+        EnsureWatchPartyHeaderLoaded();
+
         customBackgroundActive = Plugin.Cfg.UiBackground == UiBackground.Custom && customBackground is not null;
         EnsureSubscriptionVideosLoaded();
+
         using var theme = new ThemeScope();
         CaptureCurrentPosition();
+        if (!windowMinimized)
+        {
+            var currentSize = ImGui.GetWindowSize();
 
+            if (currentSize != userWindowSize)
+            {
+                userResized = true;
+                userWindowSize = currentSize;
+            }
+        }
 
         if (windowMinimized)
         {
@@ -1233,13 +1269,11 @@ introText);
             avail.Y,
             120f);
 
-        var showRightRail = false;
-        var rightWidth = showRightRail ? RightRailWidth : 0f;
-        var centerWidth = MathF.Max(avail.X - SidebarWidth - rightWidth, 0f);
+        var centerWidth = MathF.Max(avail.X - SidebarWidth, 0f);
 
-        if (!miniMode)
+
         {
-         
+
 
             ImGui.SameLine(0, 0);
 
@@ -1384,64 +1418,41 @@ introText);
                 }
             }
 
-           
-        }
 
-        if (showRightRail)
-        {
-            if (!miniMode)
+
+
+            var showingPlaybackBar =
+          playbackActive ||
+            (ImGui.GetTime() - playbackStoppedAt) < 0.35f;
+
+            if (showingPlaybackBar)
             {
-                ImGui.SameLine(0, 0);
+                var playbackWindowPos = ImGui.GetWindowPos();
+                var playbackWindowSize = ImGui.GetWindowSize();
+
+                ImGui.SetCursorScreenPos(
+                    playbackWindowPos + new Vector2(
+                        SidebarWidth,
+                        playbackWindowSize.Y - BottomBarHeight));
+
+                DrawBottomBar(playbackActive);
             }
-            using (ImRaii.PushColor(ImGuiCol.ChildBg, SidebarBg))
-            using (ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, new Vector2(16, 18)))
-            using (var rail = ImRaii.Child("##rightRail", new Vector2(RightRailWidth, topHeight), false, NavPaneFlags))
+
+            // Overlay last — its own ImGui window so clicks aren't eaten by the content/rail children.
+            DrawWindowControlsStrip();
+
+            DrawPlaybackErrorToast();
+
+            if (showingFirstLaunch)
             {
-                if (rail)
+                if (!firstLaunchStarted)
                 {
-                    if (playbackActive)
-                    {
-                        DrawPlaybackRightRail();
-                    }
-                    else
-                    {
-                        DrawHomeRightRail();
-                    }
+                    firstLaunchStarted = true;
+                    _ = BeginFirstLaunchAsync();
                 }
+
+                DrawFirstLaunchOverlay();
             }
-        }
-
-        var showingPlaybackBar =
-      playbackActive ||
-        (ImGui.GetTime() - playbackStoppedAt) < 0.35f;
-
-        if (showingPlaybackBar)
-        {
-            var windowPos = ImGui.GetWindowPos();
-            var windowSize = ImGui.GetWindowSize();
-
-            ImGui.SetCursorScreenPos(
-                windowPos + new Vector2(
-                    SidebarWidth,
-                    windowSize.Y - BottomBarHeight));
-
-            DrawBottomBar(playbackActive);
-        }
-
-        // Overlay last — its own ImGui window so clicks aren't eaten by the content/rail children.
-        DrawWindowControlsStrip();
-
-        DrawPlaybackErrorToast();
-
-        if (showingFirstLaunch)
-        {
-            if (!firstLaunchStarted)
-            {
-                firstLaunchStarted = true;
-                _ = BeginFirstLaunchAsync();
-            }
-
-            DrawFirstLaunchOverlay();
         }
     }
 
@@ -1550,7 +1561,7 @@ introText);
     private void DrawMinimizedBar()
     {
         var origin = ImGui.GetWindowPos();
-        var size = ImGui.GetWindowSize();
+        var size = MinimizedSize;
         var drawList = ImGui.GetWindowDrawList();
         var rounding = size.Y * 0.5f;
 

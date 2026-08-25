@@ -7,6 +7,7 @@ namespace AlphaChannel.Plugin;
 // Watch party lives on Player: host/join/roster + ephemeral room chat (stream.chat).
 internal sealed partial class MainWindow
 {
+    private string partyJoinInput = string.Empty;
     private readonly List<(string Name, string Text)> partyChatLines = [];
     private string partyChatInput = string.Empty;
     private bool partyChatStickToBottom = true;
@@ -365,17 +366,23 @@ internal sealed partial class MainWindow
 
                     ImGui.Dummy(new Vector2(0f, 4f));
 
-                    ImGui.SetNextItemWidth(-108f);
+                    ImGui.SetNextItemWidth(-118f);
 
                     using (ImRaii.PushStyle(
                         ImGuiStyleVar.FrameRounding,
-                        8f)
+                        10f)
                         .Push(
                             ImGuiStyleVar.FramePadding,
-                            new Vector2(14f, 10f)))
+                            new Vector2(14f, 8f)))
                     using (ImRaii.PushColor(
                         ImGuiCol.FrameBg,
-                        new Vector4(0.045f, 0.06f, 0.105f, 1f)))
+                        new Vector4(0.055f, 0.07f, 0.115f, 1f))
+                        .Push(
+                            ImGuiCol.FrameBgHovered,
+                            new Vector4(0.07f, 0.09f, 0.145f, 1f))
+                        .Push(
+                            ImGuiCol.FrameBgActive,
+                            new Vector4(0.07f, 0.09f, 0.145f, 1f)))
                     {
                         if (playerFocusJoin)
                         {
@@ -389,6 +396,7 @@ internal sealed partial class MainWindow
                             ref joinHostNameInput,
                             32);
                     }
+                }
 
                     ImGui.SameLine(0f, 10f);
 
@@ -425,7 +433,7 @@ internal sealed partial class MainWindow
                     break;
                 }
         }
-    }
+    
 
     private void DrawPartySocialPanel()
     {

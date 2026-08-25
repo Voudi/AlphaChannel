@@ -76,6 +76,7 @@ public sealed class Plugin : IDalamudPlugin
     // this a viewer could fire off dozens of concurrent PlayVideo calls for the same URL before the
     // first one ever finishes initializing - exactly what looked like a permanently frozen screen.
     private string? lastAppliedRemoteUrl;
+    private bool waitingForMedia;
 
     // Same accent color as MainWindow's theme, duplicated here rather than shared since this is
     // the only in-world reaction color used (no per-icon color mapping for v1 - see
@@ -305,6 +306,12 @@ public sealed class Plugin : IDalamudPlugin
             ApplyRemoteState(remoteState);
         }
 
+        if (waitingForMedia && !screenController.Engine.IsActive)
+        {
+            AepLog.Warning("[WatchParty] Attempting waiting screen spawn");
+            video.ShowWaitingScreen();
+        }
+
         ApplyAutoPause();
 
         UpdateRecentlyWatched();
@@ -470,17 +477,35 @@ public sealed class Plugin : IDalamudPlugin
     // the game's main thread. video.Play and the screen transform both touch main-thread-only game
     // state (this is exactly what threw "Not on main thread!" when applied here directly), so this
     // just records the latest message and OnFrameworkUpdate applies it on the next tick instead.
-    private void OnRemoteState(AlphaChannel.Contracts.StreamControl message) => pendingRemoteState = message;
+    private void OnRemoteState(AlphaChannel.Contracts.StreamControl message)
+    {
+        AepLog.Warning(
+            $"[WatchParty] Queued remote state URL={message.Url ?? "NULL"}");
+
+        pendingRemoteState = message;
+    }
 
     // Viewer path (including /achannel watch): apply URL/position/pause + screen transform to this
     // client's local ScreenPainter. Relay /rt only — not Penumbra — so anyone without AlphaChannel
     // (e.g. Lightless-only) cannot see the screen.
     private void ApplyRemoteState(AlphaChannel.Contracts.StreamControl message)
     {
-        if (stream.Mode != StreamMode.Viewing || message.Url is not { Length: > 0 } url)
+        if (string.IsNullOrEmpty(message.Url))
         {
+            AepLog.Warning("[WatchParty] Received empty media state");
+            waitingForMedia = true;
             return;
         }
+
+        if (stream.Mode != StreamMode.Viewing)
+        {
+            AepLog.Warning($"[WatchParty] Ignoring state because mode is {stream.Mode}");
+            return;
+        }
+
+        waitingForMedia = false;
+
+        var url = message.Url;
 
         // Also re-trigger whenever the local player is genuinely idle (e.g. right after Join's own
         // queue.Clear()/video.Stop()) even if the URL happens to match the last one applied -
