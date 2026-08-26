@@ -78,6 +78,10 @@ public sealed class Plugin : IDalamudPlugin
     private string? lastAppliedRemoteUrl;
     private bool waitingForMedia;
 
+    // Latest state received from the host. Kept even while this viewer has
+    // chosen not to spawn their local TV.
+    private AlphaChannel.Contracts.StreamControl? latestRemoteState;
+
     // Same accent color as MainWindow's theme, duplicated here rather than shared since this is
     // the only in-world reaction color used (no per-icon color mapping for v1 - see
     // MainWindow.Reactions.cs's own note on why the buttons only send a glyph, not a color).
@@ -131,6 +135,9 @@ public sealed class Plugin : IDalamudPlugin
         mainWindow = new MainWindow(screenController, video, queue, stream, RequestRename, authClient, signInFlow,
             friendsClient, activityClient, dmClient, reportClient, tweeterClient, pluginHubClient, venuesClient, liveClient,
             twitchClient, keyVault, whisperMirror, UpdateSessionForCurrentCharacter);
+
+        mainWindow.OnViewerTvSpawnRequested = SpawnViewerTv;
+
         nearbyAutoWatch = new NearbyAutoWatch(stream, mainWindow);
         windowSystem.AddWindow(mainWindow);
 
@@ -306,7 +313,9 @@ public sealed class Plugin : IDalamudPlugin
             ApplyRemoteState(remoteState);
         }
 
-        if (waitingForMedia && !screenController.Engine.IsActive)
+        if (mainWindow.ViewerTvEnabled &&
+            waitingForMedia &&
+            !screenController.Engine.IsActive)
         {
             AepLog.Warning("[WatchParty] Attempting waiting screen spawn");
             video.ShowWaitingScreen();
@@ -485,21 +494,51 @@ public sealed class Plugin : IDalamudPlugin
         pendingRemoteState = message;
     }
 
+    private void SpawnViewerTv()
+    {
+        if (stream.Mode != StreamMode.Viewing)
+        {
+            return;
+        }
+
+        var state = latestRemoteState;
+
+        if (state is null || string.IsNullOrEmpty(state.Url))
+        {
+            waitingForMedia = true;
+            video.ShowWaitingScreen();
+            return;
+        }
+
+        ApplyRemoteState(state);
+    }
+
     // Viewer path (including /achannel watch): apply URL/position/pause + screen transform to this
     // client's local ScreenPainter. Relay /rt only — not Penumbra — so anyone without AlphaChannel
     // (e.g. Lightless-only) cannot see the screen.
     private void ApplyRemoteState(AlphaChannel.Contracts.StreamControl message)
     {
+        if (stream.Mode != StreamMode.Viewing)
+        {
+            AepLog.Warning($"[WatchParty] Ignoring state because mode is {stream.Mode}");
+            return;
+        }
+
+        // Always remember the host's latest state, even when this viewer has
+        // chosen not to spawn their local TV.
+        latestRemoteState = message;
+
+        // Joining the watch party no longer automatically starts local
+        // playback or creates a screen.
+        if (!mainWindow.ViewerTvEnabled)
+        {
+            return;
+        }
+
         if (string.IsNullOrEmpty(message.Url))
         {
             AepLog.Warning("[WatchParty] Received empty media state");
             waitingForMedia = true;
-            return;
-        }
-
-        if (stream.Mode != StreamMode.Viewing)
-        {
-            AepLog.Warning($"[WatchParty] Ignoring state because mode is {stream.Mode}");
             return;
         }
 

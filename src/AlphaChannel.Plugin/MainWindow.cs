@@ -210,6 +210,9 @@ internal sealed partial class MainWindow : Window, IDisposable
 
     internal bool IsNamePromptActive => namePromptActive;
 
+    internal bool ViewerTvEnabled { get; private set; }
+    internal Action? OnViewerTvSpawnRequested { get; set; }
+
     // Updated every tick from Plugin.cs (cheap dictionary lookup there) - shown here instead of the
     // raw UserId so players never need to read each other an opaque GUID to join a stream.
     internal string? CurrentDisplayName { get; set; }
@@ -2423,8 +2426,29 @@ ImGui.GetColorU32(Vector4.One));
 
     private void DrawRoster(string label, bool allowPromote)
     {
+
+        if (stream.Mode == StreamMode.Viewing)
+        {
+            if (ImGui.Button(ViewerTvEnabled ? "Despawn TV" : "Spawn TV"))
+            {
+                if (ViewerTvEnabled)
+                {
+                    // Local-only shutdown. Stay joined to the watch party.
+                    ViewerTvEnabled = false;
+                    video.Stop();
+                }
+                else
+                {
+                    ViewerTvEnabled = true;
+                    OnViewerTvSpawnRequested?.Invoke();
+                }
+            }
+
+            ImGui.Spacing();
+        }
+
         // ---------------------------------------------------------
-        // TEMPORARY UI PREVIEW
+        // UI PREVIEW
         // ---------------------------------------------------------
 
         const bool showPreviewViewer = true;

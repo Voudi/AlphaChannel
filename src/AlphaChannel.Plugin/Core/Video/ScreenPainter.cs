@@ -251,9 +251,6 @@ float4 LoadingPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
     color += float3(0.55, 0.20, 1.0) * headGlow;
 
 
-    
-
-
     return float4(saturate(color), 1.0);
 }
 

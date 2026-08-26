@@ -824,16 +824,6 @@ childPos + new Vector2(width, 2),
 
                 var volX = width - volClusterW - 70f;
 
-                // Stop button - far right
-                ImGui.SetCursorPos(new Vector2(
-                    width - skipSize - 42f,
-                    topY + (playSize - skipSize) * 0.5f));
-
-                if (DrawTransportStopButton(skipSize))
-                {
-                    StopPlayback();
-                }
-
 
                 // Center transport
                 ImGui.SetCursorPos(new Vector2(

@@ -78,19 +78,7 @@ internal sealed partial class MainWindow
             }
 
             ImGui.SameLine();
-            if (IconButton(FontAwesomeIcon.Forward))
-            {
-                queue.Advance();
-            }
-
-            ImGui.SameLine();
             DrawVolumeControl();
-
-            ImGui.SameLine();
-            if (IconButton(FontAwesomeIcon.PowerOff))
-            {
-                StopPlayback();
-            }
         });
 
         ImGui.Spacing();

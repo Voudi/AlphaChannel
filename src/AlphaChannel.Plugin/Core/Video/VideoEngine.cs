@@ -77,6 +77,8 @@ internal sealed class VideoEngine : IDisposable
     private int _pendingVolume = 60;
 
     private volatile bool _rendererFailed;
+    private Task? _renderTask;
+    private volatile bool _disposing;
 
     // Read fresh at Play() time by MpvRenderer.Initialize so a settings change takes effect on
     // the next video, not the current one - matching how the old VideoPlayer read these.
@@ -129,6 +131,7 @@ internal sealed class VideoEngine : IDisposable
     // the failure is known and its caller's try/catch never sees it.
     internal string? LastError { get; private set; }
 
+
     internal void StopVideo()
     {
         _stopRequested = true;
@@ -178,6 +181,7 @@ internal sealed class VideoEngine : IDisposable
         _renderCancellation.Dispose();
         _renderCancellation =
             new CancellationTokenSource();
+
     }
 
     private void ResetFailedRenderer()
@@ -235,6 +239,10 @@ internal sealed class VideoEngine : IDisposable
 
     internal void PlayVideo(string url, int playbackPosition = 0, bool isPlaying = true)
     {
+        if (_disposing)
+        {
+            return;
+        }
         // Never reuse an MPV instance that has already suffered a playback failure.
         if (_rendererFailed)
         {
@@ -258,7 +266,7 @@ internal sealed class VideoEngine : IDisposable
 
         _screenPainter.SetLoading(true);
 
-        Task.Run(async () =>
+        _renderTask = Task.Run(async () =>
         {
             if (IsYTURL(url))
             {
@@ -475,6 +483,7 @@ internal sealed class VideoEngine : IDisposable
 
     internal void OnFrameworkUpdate()
     {
+
         var localPlayer = Plugin.ObjectTable.LocalPlayer;
         if (localPlayer is not null && _isActive)
         {
@@ -593,7 +602,50 @@ internal sealed class VideoEngine : IDisposable
 
     public void Dispose()
     {
-        _mpvRenderer?.Dispose();
+        _disposing = true;
+        _stopRequested = true;
+        _isActive = false;
+
+        try
+        {
+            _mpvRenderer?.Stop();
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning(
+                $"[MPV] Failed to stop renderer during shutdown: {exception.Message}");
+        }
+
+        try
+        {
+            if (_renderTask is not null &&
+                !_renderTask.IsCompleted)
+            {
+                _renderTask.Wait(TimeSpan.FromSeconds(3));
+            }
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning(
+                $"[MPV] Failed waiting for render task during shutdown: {exception.Message}");
+        }
+
+        try
+        {
+            _mpvRenderer?.Dispose();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The render task already disposed it.
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning(
+                $"[MPV] Failed renderer dispose during shutdown: {exception.Message}");
+        }
+
+        _mpvRenderer = null;
+
         _screenPainter.Dispose();
         _previewShaderResourceView.Dispose();
         _screenTexture.Dispose();
