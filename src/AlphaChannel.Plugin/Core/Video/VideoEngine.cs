@@ -80,6 +80,9 @@ internal sealed class VideoEngine : IDisposable
     private Task? _renderTask;
     private volatile bool _disposing;
 
+    private DateTime _lastAudioLevelUpdate =
+    DateTime.MinValue;
+
     // Read fresh at Play() time by MpvRenderer.Initialize so a settings change takes effect on
     // the next video, not the current one - matching how the old VideoPlayer read these.
     internal bool HardwareDecoding { get; set; }
@@ -122,6 +125,47 @@ internal sealed class VideoEngine : IDisposable
 
     internal bool IsActive => _isActive;
 
+    internal bool IsAudioOnly { get; private set; }
+
+    // Hides the world-space TV without stopping or disposing playback.
+    // Used when a paused host temporarily despawns their screen.
+    internal void DespawnScreen()
+    {
+        if (!_isActive)
+        {
+            return;
+        }
+
+        _isActive = false;
+
+        _screenPainter.SetLoading(false);
+        _screenPainter.SetTarget(null);
+    }
+
+    // Restores a previously-despawned TV without restarting playback
+    // or changing its saved world position.
+    internal void RespawnScreen()
+    {
+        if (_isActive)
+        {
+            return;
+        }
+
+        if (Plugin.ObjectTable.LocalPlayer is null)
+        {
+            return;
+        }
+
+        _screenPainter.SetTarget(_screenTexture);
+
+        _isActive = true;
+
+        _screenPainter.SetTransform(
+            ScreenPosition,
+            ScreenYaw,
+            ScreenScale);
+    }
+
     internal nint PreviewTextureHandle =>
     _previewShaderResourceView.NativePointer;
 
@@ -138,6 +182,10 @@ internal sealed class VideoEngine : IDisposable
 
         _isActive = false;
         _rendererFailed = false;
+        IsAudioOnly = false;
+
+        _screenPainter.SetAudioOnly(false);
+        _screenPainter.SetAudioLevel(0f);
 
         _mpvRenderer?.Stop();
 
@@ -191,7 +239,10 @@ internal sealed class VideoEngine : IDisposable
         _mpvRenderer = null;
         _rendererFailed = false;
         _isActive = false;
+        IsAudioOnly = false;
 
+        _screenPainter.SetAudioOnly(false);
+        _screenPainter.SetAudioLevel(0f);
         _screenPainter.SetLoading(false);
         _screenPainter.SetTarget(null);
 
@@ -261,6 +312,7 @@ internal sealed class VideoEngine : IDisposable
 
         LastError = null;
         _stopRequested = false;
+        IsAudioOnly = false;
 
         AssignScreenForSession(_screenTexture);
 
@@ -304,29 +356,66 @@ internal sealed class VideoEngine : IDisposable
                 _mpvRenderer = new MpvRenderer();
 
                 _mpvRenderer.OnError =
-     message =>
-     {
-         LastError = message;
-         _rendererFailed = true;
+                    message =>
+                    {
+                        LastError = message;
+                        _rendererFailed = true;
 
-         _isActive = false;
+                        _isActive = false;
 
-         _screenPainter.SetLoading(false);
-         _screenPainter.SetTarget(null);
+                        IsAudioOnly = false;
 
-         AepLog.Warning(
-             $"[MPV] Playback failed; renderer marked for reset: {message}");
-     };
+                        _screenPainter.SetAudioOnly(false);
+                        _screenPainter.SetLoading(false);
+                        _screenPainter.SetTarget(null);
+
+                        AepLog.Warning(
+                            $"[MPV] Playback failed; renderer marked for reset: {message}");
+                    };
+
+                _mpvRenderer.OnMediaLoaded =
+      () =>
+      {
+          var renderer =
+              _mpvRenderer;
+
+          if (renderer is null)
+          {
+              return;
+          }
+
+          bool hasAudio =
+              renderer.HasAudioTrack();
+
+          bool hasVideo =
+              renderer.HasVideoTrack();
+
+          bool audioOnly =
+              hasAudio &&
+              !hasVideo;
+
+          IsAudioOnly =
+              audioOnly;
+
+          _screenPainter.SetAudioOnly(
+              audioOnly);
+
+          if (audioOnly)
+          {
+              _screenPainter.SetLoading(false);
+          }
+      };
+
+                // Normal video: remove the loading screen once mpv
+                // has actually rendered its first video frame.
                 _mpvRenderer.OnFrameRendered =
-    () => _screenPainter.SetLoading(false);
-
-
+                    () => _screenPainter.SetLoading(false);
 
                 _mpvRenderer.Initialize(
                     ScreenWidth,
                     ScreenHeight,
                     _screenTexture,
-                    _renderCancellation,
+                            _renderCancellation,
                     HardwareDecoding,
                     MaxQualityHeight,
                     AllowInsecureDirectUrls,
@@ -483,6 +572,26 @@ internal sealed class VideoEngine : IDisposable
 
     internal void OnFrameworkUpdate()
     {
+        //
+        // Update the audio visualizer at roughly 30 Hz.
+        //
+        // There is no reason to query mpv 60+ times per second;
+        // the shader itself still renders every frame using the
+        // most recently measured value.
+        //
+        if (IsAudioOnly &&
+            _mpvRenderer is not null &&
+            (DateTime.UtcNow -
+             _lastAudioLevelUpdate)
+                .TotalMilliseconds >= 33)
+        {
+            _lastAudioLevelUpdate =
+                DateTime.UtcNow;
+
+            _screenPainter.SetAudioLevel(
+                _mpvRenderer.GetAudioLevel());
+        }
+
 
         var localPlayer = Plugin.ObjectTable.LocalPlayer;
         if (localPlayer is not null && _isActive)

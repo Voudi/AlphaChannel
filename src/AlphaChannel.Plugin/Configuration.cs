@@ -165,6 +165,9 @@ internal sealed class Configuration : IPluginConfiguration
     // Off = session-only mirror; on = Linkpearl-style archive (default).
     public bool ArchiveWhispersToDisk { get; set; } = true;
 
+    // Mirror incoming Alpha Channel watch-party chat messages into the FFXIV chatbox.
+    public bool RelayPartyChatToGameChat { get; set; }
+
     // Last placements for the full window and the minimized capsule — same idea as Aetherphone's
     // MaximizedPosition / MinimizedPosition so minimize/restore/reopen land where you left them.
     public Vector2? MaximizedPosition { get; set; }

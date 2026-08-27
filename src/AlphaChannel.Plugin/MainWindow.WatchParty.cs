@@ -10,12 +10,6 @@ internal sealed partial class MainWindow
 
     private void DrawWatchPartyPage()
     {
-        ImGui.Spacing();
-
-        ImGui.Separator();
-
-        ImGui.Spacing();
-
         if (stream.Mode == StreamMode.Hosting ||
             stream.Mode == StreamMode.Viewing)
         {
@@ -33,8 +27,8 @@ internal sealed partial class MainWindow
 
         DrawWatchPartyActions();
 
-        ImGui.Spacing();
-        ImGui.Spacing();
+        ImGui.SetCursorPosY(
+            ImGui.GetCursorPosY() + 10f);
 
         DrawWatchPartyFeatures();
     }
@@ -489,7 +483,7 @@ hovered
 
                         ImGui.TextColored(
                             Accent,
-                            FontAwesomeIcon.Plus.ToIconString());
+                            FontAwesomeIcon.Play.ToIconString());
 
                         ImGui.SetWindowFontScale(1f);
                     }
@@ -772,7 +766,7 @@ joinMin + new Vector2(
                 {
                     ImGui.InputTextWithHint(
                         "##hostName",
-                        "Enter their AlphaChannel name",
+                        "Enter their Alpha Channel username",
                         ref joinHostNameInput,
                         32);
                 }
@@ -964,58 +958,144 @@ joinMin + new Vector2(
 
 
         DrawWatchPartyFeatureCard(
-            "💬",
-            "Live Chat",
-            "Talk with friends while watching.",
-            cardWidth);
+     FontAwesomeIcon.CommentDots.ToIconString(),
+     "Live Chat",
+     "Talk with friends while watching.",
+     cardWidth,
+     new Vector4(0.35f, 0.75f, 1.00f, 1f));
 
         ImGui.SameLine(0, gap);
 
         DrawWatchPartyFeatureCard(
-            "😂",
+            FontAwesomeIcon.Heart.ToIconString(),
             "Reactions",
             "Send emojis and react live.",
-            cardWidth);
+            cardWidth,
+            new Vector4(1.00f, 0.55f, 0.75f, 1f));
 
         ImGui.SameLine(0, gap);
 
         DrawWatchPartyFeatureCard(
-            "🔄",
+            FontAwesomeIcon.Sync.ToIconString(),
             "Sync Playback",
             "Everyone stays on the same moment.",
-            cardWidth);
+            cardWidth,
+            new Vector4(0.45f, 0.90f, 0.60f, 1f));
     }
 
     private void DrawWatchPartyFeatureCard(
-    string icon,
-    string title,
-    string description,
-    float width)
+     string icon,
+     string title,
+     string description,
+     float width,
+     Vector4 featureColor)
     {
         using var card =
             ImRaii.Child(
                 $"##watchFeature_{title}",
-new Vector2(
-    width,
-    85),
-                true);
+                new Vector2(
+                    width,
+                    95f),
+                false,
+                ImGuiWindowFlags.NoBackground |
+                ImGuiWindowFlags.NoScrollbar |
+                ImGuiWindowFlags.NoScrollWithMouse);
 
         if (!card)
             return;
 
-        ImGui.Text(icon);
+        //
+        // Work out the width of the icon + title so the whole heading
+        // can be centered as one unit.
+        //
+        Vector2 iconSize;
+        Vector2 titleSize;
 
-        ImGui.SameLine();
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        {
+            ImGui.SetWindowFontScale(1.7f);
+            iconSize = ImGui.CalcTextSize(icon);
+            ImGui.SetWindowFontScale(1f);
+        }
 
-        ImGui.Text(title);
+        using (ImRaii.PushFont(UiBuilder.DefaultFont))
+        {
+            ImGui.SetWindowFontScale(1.4f);
+            titleSize = ImGui.CalcTextSize(title);
+            ImGui.SetWindowFontScale(1f);
+        }
 
-        ImGui.TextColored(
-            MutedText,
-            description);
+        const float headingGap = 12f;
 
-        // restore layout cursor for SameLine
-        ImGui.SetCursorScreenPos(
-            ImGui.GetCursorScreenPos() + new Vector2(width, 0));
+        var headingWidth =
+            iconSize.X +
+            headingGap +
+            titleSize.X;
+
+        var headingStartX =
+            MathF.Max(
+                0f,
+                (width - headingWidth) * 0.5f);
+
+        ImGui.SetCursorPosX(
+            headingStartX);
+
+        //
+        // Icon
+        //
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        {
+            ImGui.SetWindowFontScale(1.7f);
+
+            ImGui.TextColored(
+                featureColor,
+                icon);
+
+            ImGui.SetWindowFontScale(1f);
+        }
+
+        ImGui.SameLine(
+            0f,
+            headingGap);
+
+        //
+        // Title
+        //
+        using (ImRaii.PushFont(UiBuilder.DefaultFont))
+        {
+            ImGui.SetWindowFontScale(1.4f);
+
+            ImGui.TextColored(
+                featureColor,
+                title);
+
+            ImGui.SetWindowFontScale(1f);
+        }
+
+        //
+        // Description
+        //
+        ImGui.SetCursorPosY(
+            ImGui.GetCursorPosY() + 7f);
+
+        using (ImRaii.PushFont(UiBuilder.DefaultFont))
+        {
+            ImGui.SetWindowFontScale(1.1f);
+
+            var descriptionSize =
+                ImGui.CalcTextSize(description);
+
+            ImGui.SetCursorPosX(
+                MathF.Max(
+                    0f,
+                    (width - descriptionSize.X) * 0.5f));
+
+            ImGui.TextColored(
+                MutedText,
+                description);
+
+            ImGui.SetWindowFontScale(1f);
+        }
     }
     private void DrawChatDrawer()
     {

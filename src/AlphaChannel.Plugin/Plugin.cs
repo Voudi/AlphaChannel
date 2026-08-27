@@ -54,6 +54,9 @@ public sealed class Plugin : IDalamudPlugin
     private readonly NearbyAutoWatch nearbyAutoWatch;
     private ulong lastWhisperContentId = ulong.MaxValue;
 
+    // TEMP: allows us to test the username UI even when a username already exists.
+    private bool devUsernamePromptShown;
+
     // Written from the network thread (OnRemoteState), read/cleared on the main thread
     // (OnFrameworkUpdate) - a plain reference field is fine here, a single pointer swap is already
     // atomic in .NET and only the latest state ever matters, no torn reads to guard against.
@@ -77,6 +80,12 @@ public sealed class Plugin : IDalamudPlugin
     // first one ever finishes initializing - exactly what looked like a permanently frozen screen.
     private string? lastAppliedRemoteUrl;
     private bool waitingForMedia;
+
+    private bool screenRangePaused;
+    private bool screenRangeWarningShown;
+
+    private const float HostScreenWarnDistance = 35f;
+    private const float HostScreenPauseDistance = 45f;
 
     // Latest state received from the host. Kept even while this viewer has
     // chosen not to spawn their local TV.
@@ -145,9 +154,13 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.Draw += windowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainWindow;
         ContextMenu.OnMenuOpened += OnMenuOpened;
-        CommandManager.AddHandler("/achannel", new CommandInfo(OnCommand)
+        CommandManager.AddHandler("/alpha", new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open AlphaChannel. /achannel watch <name> | leave | stage.",
+            HelpMessage = "Open Alpha Channel. /alpha watch <name> | leave | stage.",
+        });
+        CommandManager.AddHandler("/wp", new CommandInfo(OnWatchPartyChatCommand)
+        {
+            HelpMessage = "Send a message to your current Alpha Channel watch party.",
         });
     }
 
@@ -169,7 +182,7 @@ public sealed class Plugin : IDalamudPlugin
             case "watch":
                 if (rest.Length == 0)
                 {
-                    ChatGui.Print("Usage: /achannel watch <host name>");
+                    ChatGui.Print("Usage: /alpha watch <host name>");
                     return;
                 }
 
@@ -201,6 +214,31 @@ public sealed class Plugin : IDalamudPlugin
                 ToggleMainWindow();
                 break;
         }
+    }
+
+    private void OnWatchPartyChatCommand(
+    string command,
+    string arguments)
+    {
+        var message =
+            arguments.Trim();
+
+        if (stream.Mode is not (StreamMode.Hosting or StreamMode.Viewing))
+        {
+            ChatGui.Print(
+                "[AlphaChannel] You are not currently in a watch party.");
+            return;
+        }
+
+        if (message.Length == 0)
+        {
+            ChatGui.Print(
+                "Usage: /wp <message>");
+            return;
+        }
+
+        _ = stream.SendChatAsync(
+            message);
     }
 
     private static unsafe void SendChatCommand(string command)
@@ -288,6 +326,87 @@ public sealed class Plugin : IDalamudPlugin
         mainWindow.OpenUi();
     }
 
+    private void ApplyHostScreenRangePause()
+    {
+        // Viewer playback is handled separately.
+        if (stream.Mode != StreamMode.Hosting)
+        {
+            screenRangePaused = false;
+            screenRangeWarningShown = false;
+            return;
+        }
+
+        // Nothing currently playing locally.
+        if (queue.Current is null || !screenController.Engine.IsActive)
+        {
+            screenRangePaused = false;
+            screenRangeWarningShown = false;
+            return;
+        }
+
+        var localPlayer = ObjectTable.LocalPlayer;
+
+        // LocalPlayer commonly disappears briefly during zoning/teleport.
+        // Treat that the same as leaving the TV's usable area.
+        if (localPlayer is null)
+        {
+            if (!screenRangePaused)
+            {
+                ChatGui.Print(
+                    "[AlphaChannel] Playback paused because you're no longer near the TV.");
+
+                AepLog.Info(
+                    "[WatchParty] Host left TV area; pausing playback.");
+
+                video.Pause(true);
+                screenRangePaused = true;
+            }
+
+            return;
+        }
+
+        var distance = Vector3.Distance(
+            localPlayer.Position,
+            screenController.Engine.ScreenPosition);
+
+        // One warning while approaching the cutoff.
+        if (distance > HostScreenWarnDistance &&
+            distance <= HostScreenPauseDistance &&
+            !screenRangeWarningShown)
+        {
+            ChatGui.Print(
+                "[AlphaChannel] You're getting too far from the TV. Move closer or playback will pause.");
+
+            screenRangeWarningShown = true;
+        }
+
+        // Hard cutoff.
+        if (distance > HostScreenPauseDistance)
+        {
+            if (!screenRangePaused)
+            {
+                ChatGui.Print(
+                    "[AlphaChannel] Playback paused because you're too far from the TV.");
+
+                AepLog.Info(
+                    $"[WatchParty] Host is {distance:F1} yalms from TV; pausing playback.");
+
+                video.Pause(true);
+                screenRangePaused = true;
+            }
+
+            return;
+        }
+
+        // Back inside the safe zone. Allow a future warning/pause cycle,
+        // but deliberately do NOT resume playback automatically.
+        if (distance <= HostScreenWarnDistance)
+        {
+            screenRangeWarningShown = false;
+            screenRangePaused = false;
+        }
+    }
+
     private void OnFrameworkUpdate(IFramework framework)
     {
         screenController.OnFrameworkUpdate();
@@ -322,6 +441,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ApplyAutoPause();
+        ApplyHostScreenRangePause();
 
         UpdateRecentlyWatched();
 
@@ -436,12 +556,49 @@ public sealed class Plugin : IDalamudPlugin
     private void EnsureCharacterHasName()
     {
         var contentId = ReadLocalContentId();
-        if (contentId == 0 || Cfg.CharacterDisplayNames.ContainsKey(contentId) || mainWindow.IsNamePromptActive)
+
+        if (contentId == 0 ||
+            mainWindow.IsNamePromptActive)
         {
             return;
         }
 
-        PromptForName(contentId, ObjectTable.LocalPlayer?.Name.TextValue ?? "Player");
+        // TEMP DEVELOPMENT:
+        // Force the username prompt once per plugin session,
+        // but only after the user has opened Alpha Channel themselves.
+        if (!devUsernamePromptShown &&
+            mainWindow.IsOpen)
+        {
+            devUsernamePromptShown = true;
+
+            var suggested =
+                Cfg.CharacterDisplayNames.GetValueOrDefault(contentId) ??
+                ObjectTable.LocalPlayer?.Name.TextValue ??
+                "Player";
+
+            PromptForName(
+                contentId,
+                suggested);
+
+            return;
+        }
+
+        // Existing normal behaviour.
+        if (Cfg.CharacterDisplayNames.ContainsKey(contentId))
+        {
+            return;
+        }
+
+        // Don't force the whole plugin UI open just because the
+        // character still needs a username. Wait until they open it.
+        if (!mainWindow.IsOpen)
+        {
+            return;
+        }
+
+        PromptForName(
+            contentId,
+            ObjectTable.LocalPlayer?.Name.TextValue ?? "Player");
     }
 
     // Manually triggered from MainWindow's "Rename" button - same flow as the automatic
@@ -631,7 +788,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
-        CommandManager.RemoveHandler("/achannel");
+        CommandManager.RemoveHandler("/alpha");
+        CommandManager.RemoveHandler("/wp");
         ContextMenu.OnMenuOpened -= OnMenuOpened;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleMainWindow;
         PluginInterface.UiBuilder.Draw -= windowSystem.Draw;

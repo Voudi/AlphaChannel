@@ -110,7 +110,7 @@ internal sealed partial class MainWindow
             case SettingsTab.Account:
                 SettingsSection(
                     "Account",
-                    "Sign-in, display name, and invite code.");
+                    "Sign-in, username, and invite code.");
 
                 DrawAccountSettings();
                 break;

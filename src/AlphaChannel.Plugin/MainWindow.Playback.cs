@@ -74,7 +74,19 @@ internal sealed partial class MainWindow
 
             if (IconButton(isPaused ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause))
             {
-                video.Pause(!isPaused);
+                // The local host must have their TV spawned before
+                // paused playback can be resumed.
+                if (isPaused &&
+                    stream.Mode != StreamMode.Viewing &&
+                    !screenController.Engine.IsActive)
+                {
+                    Plugin.ChatGui.Print(
+                        "[Alpha Channel] Respawn TV to begin playing.");
+                }
+                else
+                {
+                    video.Pause(!isPaused);
+                }
             }
 
             ImGui.SameLine();

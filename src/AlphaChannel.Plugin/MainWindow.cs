@@ -665,6 +665,46 @@ sideLeft
                 windowPos.X + windowSize.X,
                 windowPos.Y + windowSize.Y);
 
+        // -------------------------------------------------
+        // Input blocker
+        // -------------------------------------------------
+        // A real top-level ImGui window is required here.
+        // An InvisibleButton inside the main window does not reliably block
+        // clicks against the sidebar/content child windows underneath.
+
+        ImGui.SetNextWindowPos(
+            windowPos,
+            ImGuiCond.Always);
+
+        ImGui.SetNextWindowSize(
+            windowSize,
+            ImGuiCond.Always);
+
+        ImGui.SetNextWindowBgAlpha(0f);
+
+        const ImGuiWindowFlags blockerFlags =
+            ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse |
+            ImGuiWindowFlags.NoCollapse |
+            ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoNav |
+            ImGuiWindowFlags.NoDocking;
+
+        if (ImGui.Begin(
+            "##firstLaunchInputBlockerWindow",
+            blockerFlags))
+        {
+            ImGui.SetCursorPos(Vector2.Zero);
+
+            ImGui.InvisibleButton(
+                "##firstLaunchInputBlocker",
+                windowSize);
+        }
+
+
         // Full window themed overlay
         drawList.AddRectFilled(
             min,
@@ -1240,8 +1280,9 @@ introText);
         }
 
         DrawCustomBackgroundLayer();
-        DrawNamePrompt();
+
         DrawSignInModal();
+        DrawProfilePopup();
         DrawProfilePopup();
         // DrawGlowBorder();
 
@@ -1445,6 +1486,11 @@ introText);
             DrawWindowControlsStrip();
 
             DrawPlaybackErrorToast();
+
+            if (!showingFirstLaunch)
+            {
+                DrawNamePrompt();
+            }
 
             if (showingFirstLaunch)
             {
@@ -2188,9 +2234,9 @@ ImGui.GetColorU32(Vector4.One));
         ImGui.SetCursorScreenPos(
             origin + new Vector2(55, 5));
 
-        if (!string.IsNullOrEmpty(CurrentCharacterName))
+        if (!string.IsNullOrEmpty(session?.DisplayName))
         {
-            ImGui.TextUnformatted(CurrentCharacterName);
+            ImGui.TextUnformatted(session.DisplayName);
         }
         else
         {
@@ -2400,52 +2446,223 @@ ImGui.GetColorU32(Vector4.One));
 
     private void DrawNamePrompt()
     {
-        if (namePromptPending)
+        if (!namePromptActive)
         {
-            ImGui.OpenPopup("Choose your name");
+            return;
+        }
+
+        const float promptWidth = 360f;
+        const float promptHeight = 205f;
+
+        //
+        // Cover only the Alpha Channel window.
+        //
+        var parentPos =
+            ImGui.GetWindowPos();
+
+        var parentSize =
+            ImGui.GetWindowSize();
+
+        var promptPos =
+            new Vector2(
+                parentPos.X +
+                (parentSize.X - promptWidth) * 0.5f,
+                parentPos.Y +
+                (parentSize.Y - promptHeight) * 0.5f);
+
+        ImGui.SetNextWindowPos(
+            parentPos,
+            ImGuiCond.Always);
+
+        ImGui.SetNextWindowSize(
+            parentSize,
+            ImGuiCond.Always);
+
+        ImGui.SetNextWindowBgAlpha(0f);
+
+        const ImGuiWindowFlags overlayFlags =
+            ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse |
+            ImGuiWindowFlags.NoCollapse |
+            ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoNav |
+            ImGuiWindowFlags.NoDocking |
+            ImGuiWindowFlags.NoBackground;
+
+        if (!ImGui.Begin(
+                "##usernameOverlay",
+                overlayFlags))
+        {
+            ImGui.End();
+            return;
+        }
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        //
+        // Darken Alpha Channel behind the prompt.
+        //
+        drawList.AddRectFilled(
+            parentPos,
+            parentPos + parentSize,
+            ImGui.GetColorU32(
+                new Vector4(
+                    0f,
+                    0f,
+                    0f,
+                    0.48f)));
+
+        //
+        // Draw the username card itself.
+        //
+        var promptMax =
+            promptPos +
+            new Vector2(
+                promptWidth,
+                promptHeight);
+
+        drawList.AddRectFilled(
+            promptPos,
+            promptMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.055f,
+                    0.065f,
+                    0.11f,
+                    1f)),
+            10f);
+
+        drawList.AddRect(
+            promptPos,
+            promptMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.45f)),
+            10f,
+            ImDrawFlags.RoundCornersAll,
+            1f);
+
+        //
+        // Everything below is inside the SAME overlay window,
+        // so clicking the dark area can no longer cover the prompt.
+        //
+        const float padding = 20f;
+
+        ImGui.SetCursorScreenPos(
+            promptPos +
+            new Vector2(
+                padding,
+                17f));
+
+        ImGui.SetWindowFontScale(1.15f);
+
+        ImGui.TextColored(
+            Vector4.One,
+            "Choose your username");
+
+        ImGui.SetWindowFontScale(1f);
+
+        ImGui.SetCursorScreenPos(
+            promptPos +
+            new Vector2(
+                padding,
+                52f));
+
+        ImGui.TextColored(
+            MutedText,
+            "Choose the username other Alpha Channel users will see.");
+
+        //
+        // Username input.
+        //
+        ImGui.SetCursorScreenPos(
+            promptPos +
+            new Vector2(
+                padding,
+                91f));
+
+        ImGui.SetNextItemWidth(
+            promptWidth -
+            (padding * 2f));
+
+        using (ImRaii.PushColor(
+            ImGuiCol.FrameBg,
+            new Vector4(
+                0.025f,
+                0.03f,
+                0.055f,
+                1f)))
+        using (ImRaii.PushColor(
+            ImGuiCol.Border,
+            new Vector4(
+                Accent.X,
+                Accent.Y,
+                Accent.Z,
+                0.75f)))
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.FrameBorderSize,
+            1f))
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.FrameRounding,
+            5f))
+        {
+            ImGui.InputText(
+                "##usernameInput",
+                ref namePromptInput,
+                32);
+        }
+
+        var valid =
+            !string.IsNullOrWhiteSpace(
+                namePromptInput);
+
+        //
+        // Confirm button.
+        //
+        ImGui.SetCursorScreenPos(
+            promptPos +
+            new Vector2(
+                padding,
+                145f));
+
+        if (!valid)
+        {
+            ImGui.BeginDisabled();
+        }
+
+        if (ImGui.Button(
+                "Confirm",
+                new Vector2(
+                    100f,
+                    32f)))
+        {
+            onNameConfirmed?.Invoke(
+                namePromptInput.Trim());
+
+            onNameConfirmed = null;
+            namePromptActive = false;
             namePromptPending = false;
         }
 
-        ImGui.SetNextWindowSize(new Vector2(320, 0));
-        if (ImGui.BeginPopupModal("Choose your name", ImGuiWindowFlags.NoResize))
+        if (!valid)
         {
-            ImGui.TextWrapped("Pick the name other viewers will see for you.");
-            ImGui.SetNextItemWidth(-1f);
-            ImGui.InputText("##displayName", ref namePromptInput, 32);
-            if (ImGui.Button("Confirm") && namePromptInput.Trim().Length > 0)
-            {
-                onNameConfirmed?.Invoke(namePromptInput.Trim());
-                onNameConfirmed = null;
-                namePromptActive = false;
-                ImGui.CloseCurrentPopup();
-            }
-
-            ImGui.EndPopup();
+            ImGui.EndDisabled();
         }
+
+        ImGui.End();
     }
 
     private void DrawRoster(string label, bool allowPromote)
     {
 
-        if (stream.Mode == StreamMode.Viewing)
-        {
-            if (ImGui.Button(ViewerTvEnabled ? "Despawn TV" : "Spawn TV"))
-            {
-                if (ViewerTvEnabled)
-                {
-                    // Local-only shutdown. Stay joined to the watch party.
-                    ViewerTvEnabled = false;
-                    video.Stop();
-                }
-                else
-                {
-                    ViewerTvEnabled = true;
-                    OnViewerTvSpawnRequested?.Invoke();
-                }
-            }
-
-            ImGui.Spacing();
-        }
+      
 
         // ---------------------------------------------------------
         // UI PREVIEW

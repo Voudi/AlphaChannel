@@ -91,7 +91,7 @@ internal sealed partial class MainWindow
         {
             ImGui.TextColored(
                 Danger,
-                "Pick a display name in Settings so friends can find you.");
+                "Pick a username in Settings so friends can find you.");
 
             ImGui.SameLine();
 
@@ -302,7 +302,7 @@ internal sealed partial class MainWindow
                 ImGui.SetWindowFontScale(1f);
 
                 // =================================================
-                // RIGHT — search by AlphaChannel name
+                // RIGHT — search by Alpha Channel username
                 // =================================================
 
                 ImGui.SetCursorScreenPos(
@@ -312,7 +312,7 @@ internal sealed partial class MainWindow
 
                 ImGui.TextColored(
                     MutedText,
-                    "Or search by their AlphaChannel name");
+                    "Or search by their Alpha Channel username");
 
                 ImGui.SetCursorScreenPos(
                     new Vector2(
@@ -393,7 +393,7 @@ internal sealed partial class MainWindow
 
                 ImGui.TextColored(
                     MutedText,
-                    "Enter their full AlphaChannel name.");
+                    "Enter their full Alpha Channel username.");
 
                 ImGui.SetWindowFontScale(1f);
             }

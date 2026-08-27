@@ -839,12 +839,23 @@ childPos + new Vector2(width, 2),
 
                 ImGui.SetCursorPosY(topY);
 
-                if (DrawTransportPlayButton(isPaused, playSize))
+            if (DrawTransportPlayButton(isPaused, playSize))
+            {
+                // Only block when this button is trying to RESUME playback.
+                if (isPaused &&
+                    stream.Mode != StreamMode.Viewing &&
+                    !screenController.Engine.IsActive)
+                {
+                    Plugin.ChatGui.Print(
+                        "[Alpha Channel] Respawn TV to begin playing.");
+                }
+                else
                 {
                     video.Pause(!isPaused);
                 }
+            }
 
-                ImGui.SameLine(0, gap);
+            ImGui.SameLine(0, gap);
                 ImGui.SetCursorPosY(topY + (playSize - skipSize) * 0.5f);
                 if (DrawTransportGhostButton(FontAwesomeIcon.StepForward, skipSize))
                 {

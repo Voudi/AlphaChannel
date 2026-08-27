@@ -114,18 +114,8 @@ internal sealed partial class MainWindow
                         Vector4.One,
                         session.DisplayName);
 
-                    ImGui.SameLine(0f, 7f);
-
-                    ImGui.SetWindowFontScale(0.82f);
-
-                    ImGui.TextColored(
-                        MutedText,
-                        $"@{session.Handle}");
-
-                    ImGui.SetWindowFontScale(1f);
-
                     // -------------------------------------------------
-                    // Display name
+                    // Username
                     // -------------------------------------------------
 
                     ImGui.SetCursorPos(
@@ -135,7 +125,7 @@ internal sealed partial class MainWindow
 
                     ImGui.TextColored(
                         MutedText,
-                        "Display name");
+                        "Username");
 
                     ImGui.SetWindowFontScale(1f);
 
@@ -385,7 +375,7 @@ internal sealed partial class MainWindow
 
                 ImGui.TextColored(
                     Danger,
-                    "Pick a display name so friends can find and add you.");
+                    "Pick a username so friends can find and add you.");
             }
 
             if (displayNameError is { Length: > 0 } nameError)
@@ -1738,7 +1728,7 @@ internal sealed partial class MainWindow
         var name = onboardingNameInput.Trim();
         if (!DisplayNameRules.IsValid(name))
         {
-            onboardingNameError = "Pick a name so friends can find you.";
+            onboardingNameError = "Pick a username name so friends can find you.";
             return;
         }
 
@@ -1819,7 +1809,7 @@ internal sealed partial class MainWindow
             case SignInState.Onboarding:
                 ImGui.TextColored(Good, "Signed in! A couple of quick questions:");
                 ImGui.Spacing();
-                ImGui.TextWrapped("Pick a gamer tag - this is what friends search for and see everywhere (not your character name).");
+                ImGui.TextWrapped("Pick a username - this is what friends search for and see everywhere");
                 var onboardingNameValid = DisplayNameRules.IsValid(onboardingNameInput);
                 ImGui.SetNextItemWidth(-1f);
                 using (ImRaii.Disabled(onboardingNameSubmitting))

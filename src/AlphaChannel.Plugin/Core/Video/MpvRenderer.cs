@@ -51,7 +51,7 @@ namespace AlphaChannel.Plugin.Video
 		private GCHandle _updateCallbackHandle;
 		private bool _closed = true;
 		private Thread? _eventThread;
-
+        private float _smoothedAudioLevel;
         //Set by VideoEngine right after construction - the event loop below runs on its own
         //background thread, so this is the only path an async mpv-side failure (a bad yt-dlp
         //resolve, a codec/network error reported well after Play() already returned) has to reach
@@ -59,6 +59,8 @@ namespace AlphaChannel.Plugin.Video
         internal Action<string>? OnError;
 
         internal Action? OnFrameRendered;
+        internal Action? OnMediaLoaded;
+
         private readonly Lock _snapshotLock = new();
 		private IntPtr _latestSnapshot;
 
@@ -122,10 +124,24 @@ namespace AlphaChannel.Plugin.Video
 			_ = mpv_set_option_string(_mpvCtx, "ytdl-raw-options", ytdlRawOptions);
 			_ = mpv_set_option_string(_mpvCtx, "idle", "yes");
 			_ = mpv_set_option_string(_mpvCtx, "keep-open", "yes");
-			// Wine's own certificate store is essentially empty by default - only disabling
-			// verification worked around it on this project's Wine setup. Never applies on real
-			// Windows, and only when the user has explicitly opted in.
-			if (WineEnvironment.IsWine && allowInsecureDirectUrls)
+
+            // Measure the actual decoded audio level.
+            //
+            // "alphavol" is the filter label used later with
+            // af-metadata/alphavol/... to retrieve RMS volume.
+            //
+            // reset=1 makes astats calculate a fresh value for each
+            // incoming audio frame instead of accumulating statistics
+            // across the entire track.
+            _ = mpv_set_option_string(
+                _mpvCtx,
+                "af",
+                "@alphavol:lavfi=[astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=RMS_level]");
+
+            // Wine's own certificate store is essentially empty by default - only disabling
+            // verification worked around it on this project's Wine setup. Never applies on real
+            // Windows, and only when the user has explicitly opted in.
+            if (WineEnvironment.IsWine && allowInsecureDirectUrls)
 			{
 				_ = mpv_set_option_string(_mpvCtx, "tls-verify", "no");
 			}
@@ -215,19 +231,20 @@ namespace AlphaChannel.Plugin.Video
 			if (_closed || _cancelToken!.Token.IsCancellationRequested)
 			{ AepLog.Debug("[MPV] Video Player stopped"); return false; }
 
-			// Everything below touches state (_mpvRenderCtx, _bufferPtr, _snapA/_snapB,
-			// _targetTexture) that StopRender's cleanup task frees/nulls under the same
-			// _renderLock. Holding the lock for the whole render+enqueue - and rechecking these
-			// fields after acquiring it - is what stops a queued UpdateSubresource closure from
-			// ever outliving the buffers/texture it captured: either this runs fully before
-			// StopRender's cleanup (which then cancels the just-queued work before freeing), or
-			// StopRender's cleanup wins the lock first and this bails out on the null/zero check.
-			// This is a separate lock from _mpvLock (which guards _mpvCtx command/property calls)
-			// on purpose - RenderFrame runs once per mpv frame and holds this for the actual
-			// native render+copy, so sharing it with _mpvLock would make every UI-thread property
-			// poll (GetProperties, IsEofReached, ...) queue up behind that native call and stall
-			// the game's own frame rate.
-			lock (_renderLock)
+            // Everything below touches state (_mpvRenderCtx, _bufferPtr, _snapA/_snapB,
+            // _targetTexture) that StopRender frees/nulls under the same _renderLock.
+            // Holding the lock for the whole render+enqueue - and rechecking these
+            // fields after acquiring it - prevents a queued UpdateSubresource closure
+            // from outliving the buffers/texture it captured: either this runs fully
+            // before StopRender (which then cancels the just-queued work before freeing),
+            // or StopRender wins the lock first and this bails out on the null/zero check.
+            //
+            // This is a separate lock from _mpvLock (which guards _mpvCtx command/property
+            // calls) on purpose - RenderFrame runs once per mpv frame and holds this for
+            // the actual native render+copy, so sharing it with _mpvLock would make every
+            // UI-thread property poll (GetProperties, IsEofReached, ...) queue up behind
+            // that native call and stall the game's own frame rate.
+            lock (_renderLock)
 			{
 				if (_closed || _mpvRenderCtx == IntPtr.Zero)
 				{
@@ -292,94 +309,157 @@ namespace AlphaChannel.Plugin.Video
 		// Guards _mpvRenderCtx/_bufferPtr/_snapA/_snapB/_targetTexture specifically - see the
 		// comment in RenderFrame for why this is kept separate from _mpvLock.
 		private readonly Lock _renderLock = new();
-		public void StopRender()
-		{
-			_closed = true;
-			_cancelToken!.Cancel();
-			lock (_snapshotLock)
-			{
-				_latestSnapshot = IntPtr.Zero;
-			}
+        public void StopRender()
+        {
+            _closed = true;
 
-			Task.Run(() =>
-			{
-				lock (_renderLock)
-				{
-					// Cancelling here, inside the same lock RenderFrame enqueues its
-					// UpdateSubresource closure under, guarantees this always runs after any
-					// enqueue that raced ahead of it - so nothing queued survives to fire against
-					// the buffers/texture this block is about to free below.
-					DxHandler.CancelRenderThreadWork(RenderKey);
+            _cancelToken?.Cancel();
 
-					if (_mpvRenderCtx != IntPtr.Zero)
-					{
-						mpv_render_context_free(_mpvRenderCtx);
-						_mpvRenderCtx = IntPtr.Zero;
-					}
-					if (_updateCallbackHandle.IsAllocated)
-					{
-						_updateCallbackHandle.Free();
-					}
+            // Wake RenderFrame if it is currently blocked in _frameReady.Wait().
+            try
+            {
+                _frameReady.Set();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Already disposed by an earlier cleanup.
+            }
 
-					if (_bufferPtr != IntPtr.Zero)
-					{
-						Marshal.FreeHGlobal(_bufferPtr);
-						_bufferPtr = IntPtr.Zero;
-					}
-					if (_snapA != IntPtr.Zero)
-					{
-						Marshal.FreeHGlobal(_snapA);
-						_snapA = IntPtr.Zero;
-					}
-					if (_snapB != IntPtr.Zero)
-					{
-						Marshal.FreeHGlobal(_snapB);
-						_snapB = IntPtr.Zero;
-					}
+            lock (_snapshotLock)
+            {
+                _latestSnapshot = IntPtr.Zero;
+            }
 
-					Marshal.FreeHGlobal(_sizePtr);
-					Marshal.FreeHGlobal(_stridePtr);
-					Marshal.FreeHGlobal(_formatPtr);
-					Marshal.FreeHGlobal(_renderParamsPtr);
+            // This MUST be synchronous.
+            //
+            // RenderFrame queues UpdateSubresource callbacks while holding
+            // _renderLock. Taking the same lock here guarantees that either:
+            //
+            // 1. RenderFrame finishes queueing first, then we cancel that work; or
+            // 2. shutdown gets the lock first, after which RenderFrame sees
+            //    _closed / the cleared render context and exits.
+            //
+            // Most importantly, StopRender cannot return while a queued GPU upload
+            // still references the texture or native snapshot buffers.
+            lock (_renderLock)
+            {
+                DxHandler.CancelRenderThreadWork(RenderKey);
 
-					_targetTexture = null;
-				}
+                if (_mpvRenderCtx != IntPtr.Zero)
+                {
+                    mpv_render_context_free(_mpvRenderCtx);
+                    _mpvRenderCtx = IntPtr.Zero;
+                }
 
-				lock (_mpvLock)
-				{
-					if (_mpvCtx != IntPtr.Zero)
-					{
-						mpv_terminate_destroy(_mpvCtx);
-						_mpvCtx = IntPtr.Zero;
-					}
-				}
-			});
+                if (_updateCallbackHandle.IsAllocated)
+                {
+                    _updateCallbackHandle.Free();
+                }
 
-			_eventThread?.Join(2000);
-		}
+                if (_bufferPtr != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(_bufferPtr);
+                    _bufferPtr = IntPtr.Zero;
+                }
 
-		public void Play(string url, double playbackPosition, bool isPlaying)
-		{
-			if (!_closed)
-			{
-				AepLog.Debug("Playing New Video at " + playbackPosition + " | " + isPlaying);
-				lock (_mpvLock)
-				{
-					if(url == string.Empty)
-					{
-						Stop();
-					}
-					else
-					{
-						string startStr = ((int)playbackPosition).ToString(System.Globalization.CultureInfo.InvariantCulture);
-						string pauseStr = !isPlaying ? ",pause=yes" : string.Empty;
-						_ = mpv_command(_mpvCtx, ["loadfile", url, "replace", "0", $"start={startStr}{pauseStr}", null!]);	
-					}
-				}
-			}
-		}
+                if (_snapA != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(_snapA);
+                    _snapA = IntPtr.Zero;
+                }
 
-		public void Stop()
+                if (_snapB != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(_snapB);
+                    _snapB = IntPtr.Zero;
+                }
+
+                if (_sizePtr != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(_sizePtr);
+                    _sizePtr = IntPtr.Zero;
+                }
+
+                if (_stridePtr != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(_stridePtr);
+                    _stridePtr = IntPtr.Zero;
+                }
+
+                if (_formatPtr != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(_formatPtr);
+                    _formatPtr = IntPtr.Zero;
+                }
+
+                if (_renderParamsPtr != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(_renderParamsPtr);
+                    _renderParamsPtr = IntPtr.Zero;
+                }
+
+                _targetTexture = null;
+            }
+
+            lock (_mpvLock)
+            {
+                if (_mpvCtx != IntPtr.Zero)
+                {
+                    mpv_terminate_destroy(_mpvCtx);
+                    _mpvCtx = IntPtr.Zero;
+                }
+            }
+
+            if (_eventThread is not null &&
+                _eventThread != Thread.CurrentThread)
+            {
+                _eventThread.Join(2000);
+            }
+
+            _eventThread = null;
+        }
+
+        public void Play(string url, double playbackPosition, bool isPlaying)
+        {
+            if (!_closed)
+            {
+                _smoothedAudioLevel = 0f;
+                AepLog.Debug("Playing New Video at " + playbackPosition + " | " + isPlaying);
+
+                lock (_mpvLock)
+                {
+                    if (url == string.Empty)
+                    {
+                        Stop();
+                    }
+                    else if (playbackPosition > 0)
+                    {
+                        string startStr = ((int)playbackPosition)
+                            .ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+                        string pauseStr = !isPlaying ? ",pause=yes" : string.Empty;
+
+                        _ = mpv_command(
+                            _mpvCtx,
+                            ["loadfile", url, "replace", "0", $"start={startStr}{pauseStr}", null!]);
+                    }
+                    else if (!isPlaying)
+                    {
+                        _ = mpv_command(
+                            _mpvCtx,
+                            ["loadfile", url, "replace", "0", "pause=yes", null!]);
+                    }
+                    else
+                    {
+                        _ = mpv_command(
+                            _mpvCtx,
+                            ["loadfile", url, "replace", "0", null!]);
+                    }
+                }
+            }
+        }
+
+        public void Stop()
 		{
 			if (!_closed)
 			{
@@ -510,7 +590,180 @@ namespace AlphaChannel.Plugin.Video
 			}
 		}
 
-		public string? GetMediaTitle()
+        public bool HasVideoTrack()
+        {
+            if (_closed)
+            {
+                return false;
+            }
+
+            lock (_mpvLock)
+            {
+                if (_mpvCtx == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr ptr =
+                    mpv_get_property_string(
+                        _mpvCtx,
+                        "vid");
+
+                if (ptr == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                try
+                {
+                    var value =
+                        Marshal.PtrToStringUTF8(ptr);
+
+                    return !string.IsNullOrWhiteSpace(value) &&
+                           !value.Equals(
+                               "no",
+                               StringComparison.OrdinalIgnoreCase);
+                }
+                finally
+                {
+                    mpv_free(ptr);
+                }
+            }
+        }
+
+        public bool HasAudioTrack()
+        {
+            if (_closed)
+            {
+                return false;
+            }
+
+            lock (_mpvLock)
+            {
+                if (_mpvCtx == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                IntPtr ptr =
+                    mpv_get_property_string(
+                        _mpvCtx,
+                        "aid");
+
+                if (ptr == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                try
+                {
+                    var value =
+                        Marshal.PtrToStringUTF8(ptr);
+
+                    return !string.IsNullOrWhiteSpace(value) &&
+                           !value.Equals(
+                               "no",
+                               StringComparison.OrdinalIgnoreCase);
+                }
+                finally
+                {
+                    mpv_free(ptr);
+                }
+            }
+        }
+
+        public float GetAudioLevel()
+        {
+            if (_closed)
+            {
+                return 0f;
+            }
+
+            lock (_mpvLock)
+            {
+                if (_mpvCtx == IntPtr.Zero)
+                {
+                    return 0f;
+                }
+
+                IntPtr ptr =
+                    mpv_get_property_string(
+                        _mpvCtx,
+                        "af-metadata/alphavol/by-key/lavfi.astats.Overall.RMS_level");
+
+                if (ptr == IntPtr.Zero)
+                {
+                    // Metadata may not have arrived yet.
+                    // Let the previous value decay naturally instead
+                    // of snapping the visualizer instantly to zero.
+                    _smoothedAudioLevel *= 0.88f;
+
+                    return _smoothedAudioLevel;
+                }
+
+                try
+                {
+                    string? value =
+                        Marshal.PtrToStringUTF8(ptr);
+
+                    if (string.IsNullOrWhiteSpace(value) ||
+                        value.Equals(
+                            "-inf",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        _smoothedAudioLevel *= 0.82f;
+
+                        return _smoothedAudioLevel;
+                    }
+
+                    if (!double.TryParse(
+                            value,
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out double db))
+                    {
+                        return _smoothedAudioLevel;
+                    }
+
+                    //
+                    // astats returns RMS in dB.
+                    //
+                    // For the visualizer:
+                    //
+                    // -60 dB = effectively silent
+                    //   0 dB = maximum
+                    //
+                    float target =
+                        (float)Math.Clamp(
+                            (db + 60.0) / 60.0,
+                            0.0,
+                            1.0);
+
+                    //
+                    // Fast attack, slower release.
+                    //
+                    // Loud transients should make the bars jump quickly,
+                    // while drops should fall smoothly rather than flicker.
+                    //
+                    float smoothing =
+                        target > _smoothedAudioLevel
+                            ? 0.45f
+                            : 0.12f;
+
+                    _smoothedAudioLevel +=
+                        (target - _smoothedAudioLevel) *
+                        smoothing;
+
+                    return _smoothedAudioLevel;
+                }
+                finally
+                {
+                    mpv_free(ptr);
+                }
+            }
+        }
+
+        public string? GetMediaTitle()
 		{
 			if (_closed)
 			{
@@ -634,15 +887,24 @@ namespace AlphaChannel.Plugin.Video
 				}
 			}
 		}
-		
-		public void Dispose()
-		{
-			StopRender();
-			_frameReady.Dispose();
-			GC.SuppressFinalize(this);
-		}
 
-		private void EventLoop()
+        public void Dispose()
+        {
+            StopRender();
+
+            try
+            {
+                _frameReady.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Dispose may be reached more than once during shutdown.
+            }
+
+            GC.SuppressFinalize(this);
+        }
+
+        private void EventLoop()
 		{
 			
             AepLog.Verbose("[MPV] event loop started");
@@ -695,8 +957,11 @@ namespace AlphaChannel.Plugin.Video
                         
                         case 7: // MPV_EVENT_END_FILE
 								break;
-                        
-                        case 8:  AepLog.Verbose("[MPV] FILE_LOADED");      break;
+
+                        case 8: // MPV_EVENT_FILE_LOADED
+                            AepLog.Verbose("[MPV] FILE_LOADED");
+                            OnMediaLoaded?.Invoke();
+                            break;
                         case 14: AepLog.Verbose("[MPV] CLIENT_MESSAGE");   break;
                         case 15: AepLog.Verbose("[MPV] VIDEO_RECONFIG");   break;
                         case 16: AepLog.Verbose("[MPV] AUDIO_RECONFIG");   break;

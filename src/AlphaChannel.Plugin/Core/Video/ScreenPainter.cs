@@ -45,17 +45,25 @@ internal sealed unsafe class ScreenPainter : IDisposable
 	private readonly VertexShader _vs;
     private readonly PixelShader _ps;
     private readonly PixelShader _loadingPs;
+    private readonly PixelShader _audioPs;
     private readonly PixelShader _glowPs;
     private readonly PixelShader _titlePs;
     private readonly PixelShader _reactionsPs;
 
     private volatile bool _isLoading;
+    private volatile bool _isAudioOnly;
+    private volatile float _audioLevel;
+    private float _audioAnimationTime;
+    private float _audioAnimationSpeed = 0.65f;
+    private DateTime _lastAudioAnimationUpdateUtc =
+        DateTime.UtcNow;
     private DateTime _loadingStartedAtUtc = DateTime.MinValue;
     private readonly SamplerState _sampler;
-	private readonly RasterizerState _rasterState;
-	private readonly DepthStencilState _depthState;
-	private readonly BlendState _alphaBlend;
-	private readonly Buffer _cbuf;
+    private readonly RasterizerState _rasterState;
+    private readonly DepthStencilState _depthState;
+    private readonly DepthStencilState _noDepthState;
+    private readonly BlendState _alphaBlend;
+    private readonly Buffer _cbuf;
 	private readonly TitleTextureRenderer _titleRenderer = new();
 
 	//Aetherphone addition on top of the upstream port - a soft ambient-light quad drawn larger than and
@@ -254,6 +262,216 @@ float4 LoadingPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
     return float4(saturate(color), 1.0);
 }
 
+float4 AudioPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
+{
+    for (int r = 0; r < uiRectCount; r++)
+    {
+        float4 rect = uiRects[r];
+
+        if (i.pos.x >= rect.x &&
+            i.pos.x < rect.x + rect.z &&
+            i.pos.y >= rect.y &&
+            i.pos.y < rect.y + rect.w)
+        {
+            discard;
+        }
+    }
+
+    if (!isFrontFace)
+    {
+        return float4(0.015, 0.015, 0.02, 1.0);
+    }
+
+    float2 uv = i.uv;
+
+    // Dark blue-purple background.
+    float3 top =
+        float3(0.030, 0.018, 0.085);
+
+    float3 bottom =
+        float3(0.006, 0.008, 0.025);
+
+    float3 color =
+        lerp(top, bottom, uv.y);
+
+    //
+    // Soft central purple illumination.
+    //
+    float2 center =
+        float2(0.5, 0.46);
+
+    float2 p =
+        uv - center;
+
+    p.x *= SCREEN_ASPECT;
+
+    float dist =
+        length(p);
+
+    float halo =
+        1.0 -
+        smoothstep(0.05, 0.55, dist);
+
+    color +=
+        float3(0.16, 0.035, 0.34) *
+        halo *
+        0.55;
+
+    //
+    // Subtle animated background pulse.
+    //
+    float pulse =
+        0.5 +
+        0.5 *
+        sin(reactionMeta.y * 1.8);
+
+    color +=
+        float3(0.025, 0.008, 0.055) *
+        pulse *
+        halo;
+
+    float3 accent =
+    float3(0.72, 0.30, 1.0);
+
+    //
+    // Animated equalizer.
+    //
+    const int BAR_COUNT = 13;
+
+    float eq = 0.0;
+
+    for (int bar = 0;
+         bar < BAR_COUNT;
+         bar++)
+    {
+        float barX =
+            0.32 +
+            ((float)bar /
+             (BAR_COUNT - 1)) *
+            0.36;
+
+      float audioLevel =
+    saturate(reactionMeta.z);
+
+// Boost the real volume reading so normal music
+// uses more of the available visual range.
+float boostedLevel =
+    saturate(
+        pow(audioLevel, 0.65) *
+        1.45);
+
+// reactionMeta.y is already a continuously accumulated,
+// volume-controlled animation phase from ScreenPainter.
+float phase =
+    reactionMeta.y +
+    (float)bar * 1.37;
+
+float secondaryPhase =
+    reactionMeta.y * 0.62 +
+    (float)bar * 0.73;
+
+float animatedShape =
+    0.5 +
+    0.5 *
+    sin(phase);
+
+animatedShape =
+    animatedShape * 0.70 +
+    (0.5 +
+     0.5 *
+     sin(secondaryPhase)) * 0.30;
+
+// Give the individual bars slightly different
+// natural heights.
+float barSensitivity =
+    0.70 +
+    0.30 *
+    (0.5 +
+     0.5 *
+     sin(
+         (float)bar *
+         1.19));
+
+// Even quiet audio gets a tiny amount of movement.
+float minimumMotion =
+    0.012 +
+    animatedShape * 0.012;
+
+// The REAL audio volume controls how energetic
+// the animated movement becomes.
+float reactiveMotion =
+    boostedLevel *
+    (
+        0.060 +
+        animatedShape * 0.090
+    ) *
+    barSensitivity;
+
+float height =
+    minimumMotion +
+    reactiveMotion;
+
+        float dx =
+            abs(uv.x - barX);
+
+        float dy =
+            abs(uv.y - 0.63);
+
+        float barShape =
+            (1.0 -
+             smoothstep(
+                 0.007,
+                 0.011,
+                 dx)) *
+
+            (1.0 -
+             smoothstep(
+                 height,
+                 height + 0.008,
+                 dy));
+
+        eq =
+            max(eq, barShape);
+    }
+
+    float3 eqColor =
+        lerp(
+            float3(0.35, 0.10, 0.70),
+            float3(0.82, 0.35, 1.00),
+            uv.x);
+
+    color =
+        lerp(
+            color,
+            eqColor,
+            eq);
+
+    //
+    // Thin accent line underneath.
+//
+float accentLine =
+    (1.0 -
+     smoothstep(
+         0.001,
+         0.004,
+         abs(uv.y - 0.735))) *
+
+    (1.0 -
+     smoothstep(
+         0.32,
+         0.40,
+         abs(uv.x - 0.5)));
+
+color +=
+    accent *
+    accentLine *
+    0.5;
+
+    return float4(
+        saturate(color),
+        1.0);
+}
+
 			float4 PS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 			{
 				for (int r = 0; r < uiRectCount; r++)
@@ -389,23 +607,80 @@ float4 LoadingPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 				return accum;
 			}";
 
-        using (var vsb = ShaderBytecode.Compile(hlsl, "VS", "vs_4_0"))
-        using (var psb = ShaderBytecode.Compile(hlsl, "PS", "ps_4_0"))
-        using (var loadingPsb = ShaderBytecode.Compile(hlsl, "LoadingPS", "ps_4_0"))
-        using (var glowPsb = ShaderBytecode.Compile(hlsl, "GlowPS", "ps_4_0"))
-        using (var titlePsb = ShaderBytecode.Compile(hlsl, "TitlePS", "ps_4_0"))
-        using (var reactionsPsb = ShaderBytecode.Compile(hlsl, "ReactionsPS", "ps_4_0"))
+        using (var vsb =
+     ShaderBytecode.Compile(
+         hlsl,
+         "VS",
+         "vs_4_0"))
+        using (var psb =
+            ShaderBytecode.Compile(
+                hlsl,
+                "PS",
+                "ps_4_0"))
+        using (var loadingPsb =
+            ShaderBytecode.Compile(
+                hlsl,
+                "LoadingPS",
+                "ps_4_0"))
+        using (var audioPsb =
+            ShaderBytecode.Compile(
+                hlsl,
+                "AudioPS",
+                "ps_4_0"))
+        using (var glowPsb =
+            ShaderBytecode.Compile(
+                hlsl,
+                "GlowPS",
+                "ps_4_0"))
+        using (var titlePsb =
+            ShaderBytecode.Compile(
+                hlsl,
+                "TitlePS",
+                "ps_4_0"))
+        using (var reactionsPsb =
+            ShaderBytecode.Compile(
+                hlsl,
+                "ReactionsPS",
+                "ps_4_0"))
         {
-            _vs = new VertexShader(DxHandler.Device, vsb);
-            _ps = new PixelShader(DxHandler.Device, psb);
-            _loadingPs = new PixelShader(DxHandler.Device, loadingPsb);
-            _glowPs = new PixelShader(DxHandler.Device, glowPsb);
-            _titlePs = new PixelShader(DxHandler.Device, titlePsb);
-            _reactionsPs = new PixelShader(DxHandler.Device, reactionsPsb);
-        }
-    
+            _vs =
+                new VertexShader(
+                    DxHandler.Device,
+                    vsb);
 
-		_sampler = new SamplerState(DxHandler.Device, new SamplerStateDescription
+            _ps =
+                new PixelShader(
+                    DxHandler.Device,
+                    psb);
+
+            _loadingPs =
+                new PixelShader(
+                    DxHandler.Device,
+                    loadingPsb);
+
+            _audioPs =
+                new PixelShader(
+                    DxHandler.Device,
+                    audioPsb);
+
+            _glowPs =
+                new PixelShader(
+                    DxHandler.Device,
+                    glowPsb);
+
+            _titlePs =
+                new PixelShader(
+                    DxHandler.Device,
+                    titlePsb);
+
+            _reactionsPs =
+                new PixelShader(
+                    DxHandler.Device,
+                    reactionsPsb);
+        }
+
+
+        _sampler = new SamplerState(DxHandler.Device, new SamplerStateDescription
 		{
 			Filter = Filter.MinMagMipLinear,
 			AddressU = TextureAddressMode.Clamp,
@@ -431,10 +706,19 @@ float4 LoadingPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 			DepthComparison = Comparison.GreaterEqual
 		});
 
-		//Standard straight-alpha blending for the glow and title-banner passes - the main quad stays fully
-		//opaque (BlendState = null further down), only these two extra passes need to blend with whatever
-		//is already in the back buffer.
-		var alphaBlendDescription = new BlendStateDescription();
+        _noDepthState = new DepthStencilState(
+    DxHandler.Device,
+    new DepthStencilStateDescription
+    {
+        IsDepthEnabled = false,
+        DepthWriteMask = DepthWriteMask.Zero,
+        DepthComparison = Comparison.Always
+    });
+
+        //Standard straight-alpha blending for the glow and title-banner passes - the main quad stays fully
+        //opaque (BlendState = null further down), only these two extra passes need to blend with whatever
+        //is already in the back buffer.
+        var alphaBlendDescription = new BlendStateDescription();
 		alphaBlendDescription.RenderTarget[0] = new RenderTargetBlendDescription
 		{
 			IsBlendEnabled = true,
@@ -453,6 +737,32 @@ float4 LoadingPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 
 		DxHandler.OnPresent += DrawIfReady;
 	}
+
+    internal void SetAudioOnly(bool audioOnly)
+    {
+        if (audioOnly && !_isAudioOnly)
+        {
+            _audioAnimationTime = 0f;
+            _audioAnimationSpeed = 0.65f;
+            _lastAudioAnimationUpdateUtc =
+                DateTime.UtcNow;
+        }
+
+        _isAudioOnly =
+            audioOnly;
+
+        AepLog.Debug(
+            $"[ScreenPainter] Audio-only display: {audioOnly}");
+    }
+
+    internal void SetAudioLevel(float level)
+    {
+        _audioLevel =
+            Math.Clamp(
+                level,
+                0f,
+                1f);
+    }
 
     internal void SetLoading(bool loading)
     {
@@ -584,18 +894,32 @@ float4 LoadingPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 			Marshal.AddRef(rtvPtr);
 			_cachedRtvPtr = rtvPtr;
 		}
-		if (dsvPtr != _cachedDsvPtr || _cachedDsv == null)
-		{
-			_cachedDsv?.Dispose();
-			_cachedDsv = new DepthStencilView(dsvPtr);
-			Marshal.AddRef(dsvPtr);
-			_cachedDsvPtr = dsvPtr;
-		}
+        DepthStencilView? dsv = null;
 
-		RenderTargetView rtv = _cachedRtv;
-		DepthStencilView dsv = _cachedDsv;
+        if (dsvPtr != 0)
+        {
+            if (dsvPtr != _cachedDsvPtr ||
+                _cachedDsv == null)
+            {
+                _cachedDsv?.Dispose();
 
-		DeviceContext ctx = DxHandler.Device!.ImmediateContext;
+                _cachedDsv =
+                    new DepthStencilView(dsvPtr);
+
+                Marshal.AddRef(dsvPtr);
+
+                _cachedDsvPtr =
+                    dsvPtr;
+            }
+
+            dsv =
+                _cachedDsv;
+        }
+
+        RenderTargetView rtv =
+            _cachedRtv;
+
+        DeviceContext ctx = DxHandler.Device!.ImmediateContext;
 
 		RenderTargetView[] prevRtvs = ctx.OutputMerger.GetRenderTargets(1, out DepthStencilView? prevDsv);
 		VertexShader? prevVs = ctx.VertexShader.Get();
@@ -608,14 +932,75 @@ float4 LoadingPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 
 		try
 		{
+            if (_isAudioOnly)
+            {
+                DateTime now =
+                    DateTime.UtcNow;
+
+                float deltaSeconds =
+                    (float)(now -
+                        _lastAudioAnimationUpdateUtc)
+                        .TotalSeconds;
+
+                _lastAudioAnimationUpdateUtc =
+                    now;
+
+                // Protect against a huge jump after a breakpoint,
+                // plugin hitch, loading screen, etc.
+                deltaSeconds =
+                    Math.Clamp(
+                        deltaSeconds,
+                        0f,
+                        0.1f);
+
+                // Same basic range we wanted before:
+                // quiet = slow, loud = energetic.
+                float targetSpeed =
+                    0.65f +
+                    (3.40f - 0.65f) *
+                    _audioLevel;
+
+                // Smooth changes in speed rather than snapping directly
+                // to the new volume-derived speed.
+                float speedBlend =
+                    1f -
+                    MathF.Exp(
+                        -deltaSeconds * 7f);
+
+                _audioAnimationSpeed +=
+                    (targetSpeed -
+                     _audioAnimationSpeed) *
+                    speedBlend;
+
+                // Crucially, accumulate phase instead of doing
+                // elapsedTime * changingSpeed.
+                _audioAnimationTime +=
+                    deltaSeconds *
+                    _audioAnimationSpeed;
+            }
+
             var p = new ScreenParams
             {
-                WorldViewProj = worldViewProj.Value,
-                Curvature = Curvature,
-                TitleAlpha = titleAlpha,
-                LoadingTime = _isLoading
-                    ? (float)(DateTime.UtcNow - _loadingStartedAtUtc).TotalSeconds
-                    : 0f
+                WorldViewProj =
+          worldViewProj.Value,
+
+                Curvature =
+          Curvature,
+
+                TitleAlpha =
+          titleAlpha,
+
+                LoadingTime =
+    _isAudioOnly
+        ? _audioAnimationTime
+        : _isLoading
+            ? (float)(DateTime.UtcNow -
+                _loadingStartedAtUtc).TotalSeconds
+            : 0f,
+
+                // HLSL sees this as reactionMeta.z.
+                ReactionPad1 =
+          _audioLevel
             };
 
             p.UiRectCount = CollectUiRects(ref p);
@@ -630,8 +1015,11 @@ float4 LoadingPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 			ctx.InputAssembler.InputLayout = null;
 			ctx.InputAssembler.PrimitiveTopology = PrimitiveTopology.TriangleStrip;
 			ctx.Rasterizer.State = _rasterState;
-			ctx.OutputMerger.DepthStencilState = _depthState;
-			ctx.VertexShader.Set(_vs);
+            ctx.OutputMerger.DepthStencilState =
+    dsv is not null
+        ? _depthState
+        : _noDepthState;
+            ctx.VertexShader.Set(_vs);
 			ctx.VertexShader.SetConstantBuffer(0, _cbuf);
 			ctx.PixelShader.SetConstantBuffer(0, _cbuf);
 			ctx.PixelShader.SetShaderResource(0, _srv);
@@ -655,13 +1043,32 @@ float4 LoadingPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 			ScreenParams* pp = &p;
 			ctx.UpdateSubresource(new SharpDX.DataBox((nint)pp), _cbuf);
 
-        ctx.OutputMerger.BlendState = null;
-        ctx.PixelShader.Set(_isLoading ? _loadingPs : _ps);
-        ctx.Draw(VertexCount, 0);
+            ctx.OutputMerger.BlendState =
+                null;
 
-        //Now-playing banner, composited on top of the sharp quad - same worldViewProj/cbuffer already
-        //bound from the main draw above, just a different pixel shader and a second texture.
-        if (!_isLoading && titleSrv != null && titleAlpha > 0f)
+            if (_isLoading)
+            {
+                ctx.PixelShader.Set(
+                    _loadingPs);
+            }
+            else if (_isAudioOnly)
+            {
+                ctx.PixelShader.Set(
+                    _audioPs);
+            }
+            else
+            {
+                ctx.PixelShader.Set(
+                    _ps);
+            }
+
+            ctx.Draw(
+                VertexCount,
+                0);
+
+            //Now-playing banner, composited on top of the sharp quad - same worldViewProj/cbuffer already
+            //bound from the main draw above, just a different pixel shader and a second texture.
+            if (!_isLoading && titleSrv != null && titleAlpha > 0f)
         {
 				ctx.OutputMerger.BlendState = _alphaBlend;
 				ctx.PixelShader.Set(_titlePs);
@@ -729,10 +1136,23 @@ float4 LoadingPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 				continue;
 			}
 
-			//GetBounds is the same engine-computed bounding box FFXIV itself uses for mouse-collision testing
-			//against this node - the actual current rendered extent, in real screen pixels, accounting for
-			//scale/resolution/borders already. No guessing at Width/Height/ScreenX/Y or a fudge-factor padding.
-			FFXIVClientStructs.FFXIV.Common.Math.Bounds bounds;
+            try
+            {
+                var addonName =
+                    unit->NameString;
+
+                AepLog.Debug(
+                    $"[ScreenPainter/UI] Masking addon: {addonName}");
+            }
+            catch
+            {
+                // Diagnostic only.
+            }
+
+            //GetBounds is the same engine-computed bounding box FFXIV itself uses for mouse-collision testing
+            //against this node - the actual current rendered extent, in real screen pixels, accounting for
+            //scale/resolution/borders already. No guessing at Width/Height/ScreenX/Y or a fudge-factor padding.
+            FFXIVClientStructs.FFXIV.Common.Math.Bounds bounds;
 			unit->RootNode->GetBounds(&bounds);
 
 			float x = bounds.Pos1.X;
@@ -755,53 +1175,101 @@ float4 LoadingPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 		return count;
 	}
 
-	//Pure memory reads - no hooking, no calling into the game. Colour comes from the swapchain's own back
-	//buffer (that's what's actually presented), but depth comes from RenderTargetManager's own DepthStencil
-	//field - the real opaque-scene depth buffer, as opposed to the swapchain's own DepthStencil (which only
-	//ever holds a stale clear value by this point in the frame).
-	private static bool TryGetSceneTargets(out nint rtvPtr, out nint dsvPtr, out uint width, out uint height)
-	{
-		rtvPtr = 0;
-		dsvPtr = 0;
-		width = 0;
-		height = 0;
+    //Pure memory reads - no hooking, no calling into the game. Colour comes from the swapchain's own back
+    //buffer (that's what's actually presented), but depth comes from RenderTargetManager's own DepthStencil
+    //field - the real opaque-scene depth buffer, as opposed to the swapchain's own DepthStencil (which only
+    //ever holds a stale clear value by this point in the frame).
+    private static bool TryGetSceneTargets(
+    out nint rtvPtr,
+    out nint dsvPtr,
+    out uint width,
+    out uint height)
+    {
+        rtvPtr = 0;
+        dsvPtr = 0;
+        width = 0;
+        height = 0;
 
-		GfxKernel.Device* device = GfxKernel.Device.Instance();
-		if (device == null || device->SwapChain == null)
-		{
-			return false;
-		}
+        GfxKernel.Device* device =
+            GfxKernel.Device.Instance();
 
-		GfxKernel.Texture* backBuffer = device->SwapChain->BackBuffer;
-		if (backBuffer == null || backBuffer->MipRenderTargets == null)
-		{
-			return false;
-		}
+        if (device == null ||
+            device->SwapChain == null)
+        {
+            return false;
+        }
 
-		FFXIVClientStructs.FFXIV.Client.Graphics.Render.RenderTargetManager* rtm = FFXIVClientStructs.FFXIV.Client.Graphics.Render.RenderTargetManager.Instance();
-		GfxKernel.Texture* sceneDepth = rtm != null ? rtm->DepthStencil : null;
-		if (rtm == null || sceneDepth == null || sceneDepth->MipRenderTargets == null)
-		{
-			return false;
-		}
-		//Binding an RTV and DSV together in one draw call requires matching dimensions - if the internal
-		//render resolution differs from the swapchain's (e.g. a "rendering resolution" scale setting below
-		//100%), skip this frame rather than pairing mismatched targets.
-		if (rtm->Resolution_Width != device->SwapChain->Width || rtm->Resolution_Height != device->SwapChain->Height)
-		{
-			return false;
-		}
+        GfxKernel.Texture* backBuffer =
+            device->SwapChain->BackBuffer;
 
-		rtvPtr = (nint)backBuffer->MipRenderTargets[0].D3D11RenderTargetViewOrDepthStencilView;
-		dsvPtr = (nint)sceneDepth->MipRenderTargets[0].D3D11RenderTargetViewOrDepthStencilView;
-		width = device->SwapChain->Width;
-		height = device->SwapChain->Height;
-		return rtvPtr != 0 && dsvPtr != 0;
-	}
+        if (backBuffer == null ||
+            backBuffer->MipRenderTargets == null)
+        {
+            return false;
+        }
 
-	//extraScale multiplies on top of the screen's own Scale, purely for the glow pass drawing a larger
-	//copy of the same quad - 1 for the real screen (the default, used everywhere else).
-	private NumericsMatrix4x4? ComputeWorldViewProj(float extraScale = 1f)
+        //
+        // The swapchain colour target is enough to draw the TV.
+        // Scene depth is optional: when FFXIV dynamic resolution
+        // makes its scene depth smaller than the swapchain, fall
+        // back to drawing without depth instead of hiding the TV.
+        //
+        rtvPtr =
+            (nint)backBuffer
+                ->MipRenderTargets[0]
+                .D3D11RenderTargetViewOrDepthStencilView;
+
+        width =
+            device->SwapChain->Width;
+
+        height =
+            device->SwapChain->Height;
+
+        if (rtvPtr == 0)
+        {
+            return false;
+        }
+
+        var rtm =
+            FFXIVClientStructs.FFXIV.Client.Graphics.Render
+                .RenderTargetManager.Instance();
+
+        if (rtm == null)
+        {
+            return true;
+        }
+
+        GfxKernel.Texture* sceneDepth =
+            rtm->DepthStencil;
+
+        if (sceneDepth == null ||
+            sceneDepth->MipRenderTargets == null)
+        {
+            return true;
+        }
+
+        //
+        // Only bind the scene DSV when its dimensions match the
+        // swapchain RTV. Otherwise leave dsvPtr == 0 and DrawIfReady
+        // will use the no-depth fallback.
+        //
+        if (rtm->Resolution_Width ==
+                device->SwapChain->Width &&
+            rtm->Resolution_Height ==
+                device->SwapChain->Height)
+        {
+            dsvPtr =
+                (nint)sceneDepth
+                    ->MipRenderTargets[0]
+                    .D3D11RenderTargetViewOrDepthStencilView;
+        }
+
+        return true;
+    }
+
+    //extraScale multiplies on top of the screen's own Scale, purely for the glow pass drawing a larger
+    //copy of the same quad - 1 for the real screen (the default, used everywhere else).
+    private NumericsMatrix4x4? ComputeWorldViewProj(float extraScale = 1f)
 	{
 		//The "active game camera" (Client.Game.Control.CameraManager) is a different object from the plain
 		//scene-graph camera (Client.Graphics.Scene.CameraManager) - go through the game-level camera and
@@ -874,13 +1342,15 @@ float4 LoadingPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 		_cachedRtv?.Dispose();
 		_cachedDsv?.Dispose();
 		_cbuf.Dispose();
-		_alphaBlend.Dispose();
-		_depthState.Dispose();
-		_rasterState.Dispose();
-		_sampler.Dispose();
+        _alphaBlend.Dispose();
+        _noDepthState.Dispose();
+        _depthState.Dispose();
+        _rasterState.Dispose();
+        _sampler.Dispose();
         _titlePs.Dispose();
         _reactionsPs.Dispose();
         _glowPs.Dispose();
+        _audioPs.Dispose();
         _loadingPs.Dispose();
         _ps.Dispose();
         _vs.Dispose();
