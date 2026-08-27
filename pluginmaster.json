@@ -3,7 +3,7 @@
     "Author": "Voudi",
     "Name": "AlphaChannel",
     "InternalName": "AlphaChannel.Plugin",
-    "AssemblyVersion": "2.1.4.2",
+    "AssemblyVersion": "2.1.4.3",
     "Description": "Your shared video space in FFXIV - Watch tv together anywhere in Eorzea.",
     "ApplicableVersion": "any",
     "Tags": [
@@ -18,7 +18,7 @@
     "DownloadCount": 0,
     "LastUpdate": 1786073514,
 "RepoUrl": "https://github.com/Voudi/AlphaChannel",
-"DownloadLinkInstall": "https://github.com/Voudi/AlphaChannel/releases/download/v2.1.4.2/latest.zip",
-"DownloadLinkUpdate": "https://github.com/Voudi/AlphaChannel/releases/download/v2.1.4.2/latest.zip"
+"DownloadLinkInstall": "https://github.com/Voudi/AlphaChannel/releases/download/v2.1.4.3/latest.zip",
+"DownloadLinkUpdate": "https://github.com/Voudi/AlphaChannel/releases/download/v2.1.4.3/latest.zip"
   }
 ]
