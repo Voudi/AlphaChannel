@@ -29,6 +29,8 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
     [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
 
+    [PluginService] internal static IGameConfig GameConfig { get; private set; } = null!;
+
     internal static Configuration Cfg { get; private set; } = null!;
 
     private readonly WindowSystem windowSystem = new("AlphaChannel");
@@ -712,21 +714,35 @@ public sealed class Plugin : IDalamudPlugin
             video.Play(url);
         }
 
-        // The host publishes state every tick with no diff-check (see the publish site's own
-        // comment on why), so this runs constantly. Seeking to the exact reported position every
-        // single time fights the viewer's own playback clock - it never gets to run forward
-        // smoothly, it just gets yanked back to a slightly-network-lagged position 60 times a
-        // second, which is the actual jank a viewer would see. Only correct real drift instead.
-        if (message.PositionSeconds is { } position)
+        bool isLiveHls =
+     url.Contains(
+         ":8888/live/",
+         StringComparison.OrdinalIgnoreCase)
+     &&
+     url.EndsWith(
+         "/index.m3u8",
+         StringComparison.OrdinalIgnoreCase);
+
+        if (!isLiveHls)
         {
-            var localPosition = video.GetProgress().Position;
-            if (MathF.Abs(localPosition - (float)position) > SyncToleranceSeconds)
+            if (message.PositionSeconds is double remotePosition)
             {
-                video.Seek((float)position);
+                var localPosition =
+                    video.GetProgress().Position;
+
+                if (MathF.Abs(
+                        localPosition -
+                        (float)remotePosition) >
+                    SyncToleranceSeconds)
+                {
+                    video.Seek(
+                        (float)remotePosition);
+                }
             }
         }
 
-        video.Pause(message.Paused ?? false);
+        video.Pause(
+            message.Paused ?? false);
         video.SetOverlayTitle(url, string.Empty);
 
         if (message.ScreenX is { } x && message.ScreenY is { } y && message.ScreenZ is { } z &&

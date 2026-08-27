@@ -31,17 +31,44 @@ internal static class LiveEndpoints
         // hash check, not caller identity - knowing this URL exists gets you nothing without also
         // knowing (or successfully guessing) a real account's stream secret, which is exactly as
         // hard here as anywhere else it's checked.
-        app.MapPost("/live/media/auth", async (MediaAuthRequest request, LiveService live, CancellationToken ct) =>
+        app.MapPost("/live/media/auth", async (
+     MediaAuthRequest request,
+     LiveService live,
+     ILogger<LiveService> logger,
+     CancellationToken ct) =>
         {
-            // Only publishing is actually gated - reads/playback stay unauthenticated (confirmed
-            // decision, same trust model as every other shareable URL in this app already has).
-            if (!string.Equals(request.Action, "publish", StringComparison.OrdinalIgnoreCase))
+            logger.LogWarning(
+                "[LIVE DEBUG] Media auth received: Action={Action}, Path={Path}, HasQuery={HasQuery}",
+                request.Action,
+                request.Path,
+                !string.IsNullOrWhiteSpace(request.Query));
+
+            if (!string.Equals(
+                    request.Action,
+                    "publish",
+                    StringComparison.OrdinalIgnoreCase))
             {
+                logger.LogWarning(
+                    "[LIVE DEBUG] Non-publish request allowed.");
+
                 return Results.Ok();
             }
 
-            var allowed = request.Path is { Length: > 0 } path && await live.AuthenticatePublishAsync(path, request.Query, ct);
-            return allowed ? Results.Ok() : Results.Unauthorized();
+            var allowed =
+                request.Path is { Length: > 0 } path &&
+                await live.AuthenticatePublishAsync(
+                    path,
+                    request.Query,
+                    ct);
+
+            logger.LogWarning(
+                "[LIVE DEBUG] Publish authentication result: Allowed={Allowed}, Path={Path}",
+                allowed,
+                request.Path);
+
+            return allowed
+                ? Results.Ok()
+                : Results.Unauthorized();
         });
 
         // Unlike /auth above, these two don't verify any per-account secret - they just flip live
@@ -51,15 +78,75 @@ internal static class LiveEndpoints
         // are curl calls we write ourselves, so - unlike /auth - they CAN carry the shared secret.
         var mediaHooks = app.MapGroup("/live/media").AddEndpointFilter<MediaWebhookFilter>();
 
-        mediaHooks.MapPost("/ready", async (string path, LiveService live, CancellationToken ct) =>
+        mediaHooks.MapPost("/ready", async (
+            string path,
+            LiveService live,
+            ILogger<LiveService> logger,
+            CancellationToken ct) =>
         {
-            await live.MarkLiveAsync(path, ct);
+            logger.LogWarning(
+                "[LIVE DEBUG] READY webhook received. Path={Path}",
+                path);
+
+            await live.MarkLiveAsync(
+                path,
+                ct);
+
+            logger.LogWarning(
+                "[LIVE DEBUG] MarkLiveAsync completed. Path={Path}",
+                path);
+
             return Results.Ok();
         });
 
-        mediaHooks.MapPost("/notready", async (string path, LiveService live, CancellationToken ct) =>
+        mediaHooks.MapPost("/notready", async (
+            string path,
+            LiveService live,
+            ILogger<LiveService> logger,
+            CancellationToken ct) =>
         {
-            await live.MarkOfflineAsync(path, ct);
+            mediaHooks.MapPost("/ready", async (
+                string path,
+                LiveService live,
+                ILogger<LiveService> logger,
+                CancellationToken ct) =>
+            {
+                logger.LogWarning(
+                    "[LIVE DEBUG] READY webhook received. Path={Path}",
+                    path);
+
+                await live.MarkLiveAsync(
+                    path,
+                    ct);
+
+                logger.LogWarning(
+                    "[LIVE DEBUG] MarkLiveAsync completed. Path={Path}",
+                    path);
+
+                return Results.Ok();
+            });
+
+            mediaHooks.MapPost("/notready", async (
+                string path,
+                LiveService live,
+                ILogger<LiveService> logger,
+                CancellationToken ct) =>
+            {
+                logger.LogWarning(
+                    "[LIVE DEBUG] NOTREADY webhook received. Path={Path}",
+                    path);
+
+                await live.MarkOfflineAsync(
+                    path,
+                    ct);
+
+                logger.LogWarning(
+                    "[LIVE DEBUG] MarkOfflineAsync completed. Path={Path}",
+                    path);
+
+                return Results.Ok();
+            });
+
             return Results.Ok();
         });
     }

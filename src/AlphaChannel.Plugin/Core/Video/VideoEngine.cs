@@ -524,7 +524,9 @@ internal sealed class VideoEngine : IDisposable
 
     internal void SetVolume(int vol)
     {
-        _pendingVolume = Math.Clamp(vol, 0, 100);
+        vol = Math.Clamp(vol, 0, 200);
+        _pendingVolume = vol;
+
         if (!_renderCancellation.Token.IsCancellationRequested)
         {
             _mpvRenderer?.SetVolume(vol);

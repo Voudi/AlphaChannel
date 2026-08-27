@@ -1,6 +1,7 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Utility.Raii;
+using Dalamud.Game.Config;
 
 namespace AlphaChannel.Plugin;
 
@@ -468,6 +469,22 @@ internal sealed partial class MainWindow
                     Vector4.One),
                 label);
         }
+    }
+
+    private static bool IsFfxivSoundMuted()
+    {
+        return Plugin.GameConfig.TryGet(
+                   SystemConfigOption.IsSndMaster,
+                   out uint muted)
+               && muted != 0;
+    }
+
+    private static void SetFfxivSoundMuted(
+        bool muted)
+    {
+        Plugin.GameConfig.Set(
+            SystemConfigOption.IsSndMaster,
+            muted ? 1u : 0u);
     }
 
     private void DrawPartyTvSpawnButton()
@@ -1066,6 +1083,160 @@ internal sealed partial class MainWindow
             new Vector2(0f, 12f));
 
         DrawPartyTvSpawnButton();
+
+        ImGui.Dummy(
+            new Vector2(0f, 18f));
+
+        //
+        // Local TV volume
+        //
+
+        ImGui.SetWindowFontScale(0.88f);
+
+        ImGui.TextColored(
+            Vector4.One,
+            "TV volume");
+
+        ImGui.SetWindowFontScale(1f);
+
+        ImGui.Dummy(
+            new Vector2(0f, 6f));
+
+        var volume = Plugin.Cfg.Volume;
+
+        ImGui.SetNextItemWidth(
+            MathF.Max(
+                80f,
+                ImGui.GetContentRegionAvail().X - 58f));
+
+        if (ImGui.SliderInt(
+                "##partyTvVolume",
+                ref volume,
+                0,
+                130,
+                ""))
+        {
+            Plugin.Cfg.Volume = volume;
+
+            video.SetVolume(
+                Plugin.Cfg.Muted
+                    ? 0
+                    : volume);
+        }
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            Plugin.Cfg.Save();
+        }
+
+        ImGui.SameLine(0f, 8f);
+
+        ImGui.TextColored(
+            volume > 100
+                ? Gold
+                : Vector4.One,
+            $"{volume}%");
+
+        ImGui.Dummy(
+            new Vector2(0f, 8f));
+        //
+        // Mute FFXIV Control
+        //
+        ImGui.Dummy(
+    new Vector2(0f, 10f));
+
+        var ffxivMuted =
+            IsFfxivSoundMuted();
+
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.FrameRounding,
+            8f))
+        using (ImRaii.PushColor(
+            ImGuiCol.Button,
+            ffxivMuted
+                ? new Vector4(
+                    Danger.X,
+                    Danger.Y,
+                    Danger.Z,
+                    0.45f)
+                : new Vector4(
+                    0.055f,
+                    0.07f,
+                    0.115f,
+                    1f))
+            .Push(
+                ImGuiCol.ButtonHovered,
+                ffxivMuted
+                    ? new Vector4(
+                        Danger.X,
+                        Danger.Y,
+                        Danger.Z,
+                        0.62f)
+                    : new Vector4(
+                        0.075f,
+                        0.095f,
+                        0.15f,
+                        1f))
+            .Push(
+                ImGuiCol.ButtonActive,
+                ffxivMuted
+                    ? new Vector4(
+                        Danger.X,
+                        Danger.Y,
+                        Danger.Z,
+                        0.78f)
+                    : new Vector4(
+                        0.075f,
+                        0.095f,
+                        0.15f,
+                        1f)))
+        {
+            var buttonSize =
+                new Vector2(
+                    180f,
+                    34f);
+
+            var buttonPos =
+                ImGui.GetCursorScreenPos();
+
+            if (ImGui.Button(
+                "##toggleFfxivSound",
+                buttonSize))
+            {
+                SetFfxivSoundMuted(
+                    !ffxivMuted);
+            }
+
+            DrawPlayerActionButtonContent(
+                buttonPos,
+                buttonSize,
+                ffxivMuted
+                    ? FontAwesomeIcon.VolumeUp
+                    : FontAwesomeIcon.VolumeMute,
+                ffxivMuted
+                    ? "Restore FFXIV Sounds"
+                    : "Mute FFXIV Sounds",
+                Vector4.One);
+        }
+        //
+        // TV mute
+        //
+
+        var muted = Plugin.Cfg.Muted;
+
+        if (ImGui.Checkbox(
+                "Mute TV",
+                ref muted))
+        {
+            Plugin.Cfg.Muted = muted;
+
+            video.SetVolume(
+                muted
+                    ? 0
+                    : Plugin.Cfg.Volume);
+
+            Plugin.Cfg.Save();
+        }
 
         ImGui.Dummy(
             new Vector2(0f, 20f));

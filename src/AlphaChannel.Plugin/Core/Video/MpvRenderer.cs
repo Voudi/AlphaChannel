@@ -125,6 +125,14 @@ namespace AlphaChannel.Plugin.Video
 			_ = mpv_set_option_string(_mpvCtx, "idle", "yes");
 			_ = mpv_set_option_string(_mpvCtx, "keep-open", "yes");
 
+            // Live HLS streams such as MediaMTX need mpv to keep
+            // refreshing the playlist instead of treating the current
+            // playlist window like a short finite media file.
+            _ = mpv_set_option_string(
+                _mpvCtx,
+                "demuxer-lavf-o",
+                "live_start_index=-1");
+
             // Measure the actual decoded audio level.
             //
             // "alphavol" is the filter label used later with
@@ -936,8 +944,10 @@ namespace AlphaChannel.Plugin.Video
 									string? prefix = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr2));
 									string? level  = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr2 + 8));
 									string? text   = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr2 + 16));
-									if (level == "error" && text != null)
-									{
+                                    if ((level == "error" ||
+     level == "warn") &&
+    text != null)
+                                    {
 										// Every other mpv/ytdl error (bot-check, network stall, format
 										// unavailable, ...) used to only reach AepLog.Verbose below, which
 										// is filtered out of the visible log by default - a real failure
@@ -954,9 +964,11 @@ namespace AlphaChannel.Plugin.Video
                         case 4:  AepLog.Verbose("[MPV] SET_PROPERTY_REPLY"); break;
                         case 5:  AepLog.Verbose("[MPV] COMMAND_REPLY");      break;
                         case 6:  AepLog.Verbose("[MPV] START_FILE");         break;
-                        
+
                         case 7: // MPV_EVENT_END_FILE
-								break;
+                            AepLog.Warning(
+                                "[MPV] END_FILE received.");
+                            break;
 
                         case 8: // MPV_EVENT_FILE_LOADED
                             AepLog.Verbose("[MPV] FILE_LOADED");

@@ -693,6 +693,10 @@ internal sealed partial class MainWindow
             case 4:
                 DrawGoLive();
                 break;
+
+            case 5:
+                DrawDJLive();
+                break;
         }
     }
 
@@ -715,7 +719,7 @@ internal sealed partial class MainWindow
         const float gap = 8f;
         const float buttonHeight = 38f;
 
-        const int tabCount = 5;
+        const int tabCount = 6;
 
         var buttonWidth =
             (availableWidth -
@@ -762,8 +766,16 @@ internal sealed partial class MainWindow
 
         DrawPlayerSourceTab(
             FontAwesomeIcon.BroadcastTower,
-            "Go Live",
+            "Stream Live (OBS)",
             4,
+            buttonSize);
+
+        ImGui.SameLine(0, gap);
+
+        DrawPlayerSourceTab(
+            FontAwesomeIcon.Music,
+            "Music / DJ",
+            5,
             buttonSize);
     }
 

@@ -298,15 +298,17 @@ internal sealed partial class MainWindow
 
         ImGui.SameLine();
         ImGui.SetNextItemWidth(120f);
+
         var volume = Plugin.Cfg.Volume;
-        if (ImGui.SliderInt("##volume", ref volume, 0, 100))
+
+        if (ImGui.SliderInt("##volume", ref volume, 0, 130, "%d%%"))
         {
             Plugin.Cfg.Volume = volume;
             video.SetVolume(Plugin.Cfg.Muted ? 0 : volume);
         }
 
         if (ImGui.IsItemDeactivatedAfterEdit())
-        {ImGui.SameLine();
+        {
             Plugin.Cfg.Save();
         }
     }

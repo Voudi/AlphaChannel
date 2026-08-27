@@ -3,20 +3,32 @@
   "WorkspaceRootPath": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\core\\video\\screenpainter.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\core\\video\\screenpainter.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
       "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\core\\video\\videoengine.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\core\\video\\videoengine.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\core\\video\\mpvrenderer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\core\\video\\mpvrenderer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.djlive.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.djlive.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.player.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.player.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.party.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.party.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.golive.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.golive.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.watchparty.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.watchparty.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\plugin.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\plugin.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.playback.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
@@ -27,16 +39,80 @@
       "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.shell.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.party.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.party.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\core\\video\\mpvrenderer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\core\\video\\mpvrenderer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\live\\liveendpoints.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\live\\liveendpoints.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.settings.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.settings.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\live\\liveservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\live\\liveservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\dockerfile||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\dockerfile||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\data\\entities.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\data\\entities.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\data\\alphachanneldbcontext.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\data\\alphachanneldbcontext.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\live\\livedirectory.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\live\\livedirectory.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\live\\mediawebhookfilter.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\live\\mediawebhookfilter.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\data\\migrations\\20260806144722_uniqueopenlivesession.designer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\data\\migrations\\20260806144722_uniqueopenlivesession.designer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\data\\migrations\\20260806080654_addlivestreaming.designer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\data\\migrations\\20260806080654_addlivestreaming.designer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\data\\migrations\\20260806080654_addlivestreaming.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\data\\migrations\\20260806080654_addlivestreaming.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\data\\migrations\\20260806144722_uniqueopenlivesession.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\data\\migrations\\20260806144722_uniqueopenlivesession.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{3B643A12-DF94-DDF9-2ED5-997508279AB2}|src\\AlphaChannel.Contracts\\AlphaChannel.Contracts.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.contracts\\livecontracts.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{3B643A12-DF94-DDF9-2ED5-997508279AB2}|src\\AlphaChannel.Contracts\\AlphaChannel.Contracts.csproj|solutionrelative:src\\alphachannel.contracts\\livecontracts.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\auth\\liveclient.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\auth\\liveclient.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\core\\video\\screenpainter.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\core\\video\\screenpainter.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.home.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.home.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.player.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.player.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.screen.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
@@ -79,14 +155,6 @@
       "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\configuration.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\plugin.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\plugin.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.watchparty.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.watchparty.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
       "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.viewchannel.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.viewchannel.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
@@ -99,10 +167,6 @@
       "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.signin.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.settings.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.settings.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
       "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\core\\video\\screencontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\core\\video\\screencontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
@@ -113,10 +177,6 @@
     {
       "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\streamclient.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\streamclient.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{3B643A12-DF94-DDF9-2ED5-997508279AB2}|src\\AlphaChannel.Contracts\\AlphaChannel.Contracts.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.contracts\\streamcontracts.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
@@ -133,10 +193,6 @@
     {
       "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\social\\presencelabels.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\social\\presencelabels.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\live\\livedirectory.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|solutionrelative:src\\alphachannel.server\\live\\livedirectory.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{271F2EBD-7A03-67C8-8371-4038FB69FD53}|src\\AlphaChannel.Server\\AlphaChannel.Server.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.server\\social\\friendservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
@@ -183,10 +239,6 @@
       "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.search.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.golive.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.golive.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
       "AbsoluteMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|d:\\users\\mattie\\documents\\coding projects\\tv\\alphachannel\\src\\alphachannel.plugin\\mainwindow.tweeter.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{B21D5467-56DE-A539-738E-A0E1A4E39731}|src\\AlphaChannel.Plugin\\AlphaChannel.Plugin.csproj|solutionrelative:src\\alphachannel.plugin\\mainwindow.tweeter.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
@@ -230,17 +282,17 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 7,
+          "SelectedChildIndex": 4,
           "Children": [
             {
               "$type": "Document",
-              "DocumentIndex": 5,
+              "DocumentIndex": 8,
               "Title": "MainWindow.Shell.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Shell.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Shell.cs",
               "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Shell.cs",
               "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Shell.cs",
-              "ViewState": "AgIAAD0DAAAAAAAAAAAmwFADAAApAAAAAAAAAA==",
+              "ViewState": "AgIAAIsDAAAAAAAAAAAcwJkDAAAbAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-08-17T05:13:19.177Z",
               "IsPinned": true,
@@ -248,85 +300,332 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 6,
-              "Title": "MainWindow.Party.cs",
-              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Party.cs",
-              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Party.cs",
-              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Party.cs",
-              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Party.cs",
-              "ViewState": "AgIAAD8CAAAAAAAAAAAUwEwCAAAAAAAAAAAAAA==",
+              "DocumentIndex": 1,
+              "Title": "MainWindow.DJLive.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.DJLive.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.DJLive.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.DJLive.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.DJLive.cs",
+              "ViewState": "AgIAAA4FAAAAAAAAAAAUwA8FAAAJAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-21T00:54:00.87Z",
+              "WhenOpened": "2026-08-27T15:04:28.588Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
               "DocumentIndex": 4,
-              "Title": "MainWindow.Playback.cs",
-              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Playback.cs",
-              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Playback.cs",
-              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Playback.cs",
-              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Playback.cs",
-              "ViewState": "AgIAAEIAAAAAAAAAAAAUwFYAAAARAAAAAAAAAA==",
+              "Title": "MainWindow.GoLive.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.GoLive.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.GoLive.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.GoLive.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.GoLive.cs",
+              "ViewState": "AgIAABoAAAAAAAAAAAAowCQAAAAbAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-18T16:29:07.702Z",
+              "WhenOpened": "2026-08-19T10:15:33.929Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 7,
-              "Title": "MainWindow.Home.cs",
-              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Home.cs",
-              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Home.cs",
-              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Home.cs",
-              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Home.cs",
-              "ViewState": "AgIAAEoDAAAAAAAAAAAiwFwDAAARAAAAAAAAAA==",
+              "DocumentIndex": 6,
+              "Title": "Plugin.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Plugin.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Plugin.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Plugin.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Plugin\\Plugin.cs",
+              "ViewState": "AgIAABQAAAAAAAAAAAA6wB8AAABZAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-18T22:21:53.418Z",
+              "WhenOpened": "2026-08-17T07:47:15.167Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
-              "Title": "MainWindow.cs",
-              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.cs",
-              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.cs",
-              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.cs",
-              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.cs",
-              "ViewState": "AgIAAEkKAAAAAAAAAAAUwGMKAAAFAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-17T01:45:27.453Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 0,
               "Title": "VideoEngine.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Core\\Video\\VideoEngine.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Core\\Video\\VideoEngine.cs",
               "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Core\\Video\\VideoEngine.cs",
               "RelativeToolTip": "src\\AlphaChannel.Plugin\\Core\\Video\\VideoEngine.cs",
-              "ViewState": "AgIAAOUAAAAAAAAAAAAcwPYAAAAnAAAAAAAAAA==",
+              "ViewState": "AgIAAAMAAAAAAAAAAAAAAA8AAAAjAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-08-17T07:48:49.183Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "MainWindow.Playback.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Playback.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Playback.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Playback.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Playback.cs",
+              "ViewState": "AgIAACMBAAAAAAAAAAAmwDMBAAAJAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-18T16:29:07.702Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "MainWindow.WatchParty.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.WatchParty.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.WatchParty.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.WatchParty.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.WatchParty.cs",
+              "ViewState": "AgIAADcEAAAAAAAAAAAswFMEAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-21T00:30:03.71Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "MainWindow.Party.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Party.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Party.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Party.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Party.cs",
+              "ViewState": "AgIAABcIAAAAAAAAAAAUwDQIAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-21T00:54:00.87Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
               "DocumentIndex": 2,
+              "Title": "MainWindow.Player.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Player.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Player.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Player.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Player.cs",
+              "ViewState": "AgIAAPECAAAAAAAAAAAmwAoDAAAYAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-18T16:30:02.887Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 9,
               "Title": "MpvRenderer.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Core\\Video\\MpvRenderer.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Core\\Video\\MpvRenderer.cs",
               "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Core\\Video\\MpvRenderer.cs",
               "RelativeToolTip": "src\\AlphaChannel.Plugin\\Core\\Video\\MpvRenderer.cs",
-              "ViewState": "AgIAAJwBAAAAAAAAAAAmwLEBAAAVAAAAAAAAAA==",
+              "ViewState": "AgIAAMwDAAAAAAAAAAAUwOkDAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-08-17T07:23:13.721Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 10,
+              "Title": "MainWindow.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.cs",
+              "ViewState": "AgIAAIgLAAAAAAAAAAAswKQLAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-17T01:45:27.453Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 11,
+              "Title": "LiveEndpoints.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Live\\LiveEndpoints.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Live\\LiveEndpoints.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Live\\LiveEndpoints.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Server\\Live\\LiveEndpoints.cs",
+              "ViewState": "AgIAAHwAAAAAAAAAAAAUwIcAAABKAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-27T02:44:46.362Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 12,
+              "Title": "MainWindow.Settings.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Settings.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Settings.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Settings.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Settings.cs",
+              "ViewState": "AgIAAHsIAAAAAAAAAAAmwI8IAAAJAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-17T20:02:19.597Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 13,
+              "Title": "LiveService.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Live\\LiveService.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Live\\LiveService.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Live\\LiveService.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Server\\Live\\LiveService.cs",
+              "ViewState": "AgIAALMAAAAAAAAAAAAIwMAAAAARAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-27T02:31:35.338Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 14,
+              "Title": "Program.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Program.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Program.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Program.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Server\\Program.cs",
+              "ViewState": "AgIAADgAAAAAAAAAAAAmwEcAAAAhAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-25T19:28:57.184Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 15,
+              "Title": "Dockerfile",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Dockerfile",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Dockerfile",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Dockerfile",
+              "RelativeToolTip": "src\\AlphaChannel.Server\\Dockerfile",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAIAAAA4AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-08-27T03:05:50.413Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 16,
+              "Title": "Entities.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Data\\Entities.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Data\\Entities.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Data\\Entities.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Server\\Data\\Entities.cs",
+              "ViewState": "AgIAAFYBAAAAAAAAAAAQwGABAAALAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-27T02:43:39.404Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 17,
+              "Title": "AlphaChannelDbContext.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Data\\AlphaChannelDbContext.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Data\\AlphaChannelDbContext.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Data\\AlphaChannelDbContext.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Server\\Data\\AlphaChannelDbContext.cs",
+              "ViewState": "AgIAAHEAAAAAAAAAAAAUwH0AAABPAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-27T02:43:38.493Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 18,
+              "Title": "LiveDirectory.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Live\\LiveDirectory.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Live\\LiveDirectory.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Live\\LiveDirectory.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Server\\Live\\LiveDirectory.cs",
+              "ViewState": "AgIAAAEAAAAAAAAAAAAUwBQAAABXAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-25T19:28:33.462Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 19,
+              "Title": "MediaWebhookFilter.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Live\\MediaWebhookFilter.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Live\\MediaWebhookFilter.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Live\\MediaWebhookFilter.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Server\\Live\\MediaWebhookFilter.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAkAAAAsAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-27T02:46:28.539Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 20,
+              "Title": "20260806144722_UniqueOpenLiveSession.Designer.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Data\\Migrations\\20260806144722_UniqueOpenLiveSession.Designer.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Data\\Migrations\\20260806144722_UniqueOpenLiveSession.Designer.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Data\\Migrations\\20260806144722_UniqueOpenLiveSession.Designer.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Server\\Data\\Migrations\\20260806144722_UniqueOpenLiveSession.Designer.cs",
+              "ViewState": "AgIAAKoBAAAAAAAAAAAmwL4BAAAqAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-27T02:53:33.378Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 21,
+              "Title": "20260806080654_AddLiveStreaming.Designer.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Data\\Migrations\\20260806080654_AddLiveStreaming.Designer.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Data\\Migrations\\20260806080654_AddLiveStreaming.Designer.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Data\\Migrations\\20260806080654_AddLiveStreaming.Designer.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Server\\Data\\Migrations\\20260806080654_AddLiveStreaming.Designer.cs",
+              "ViewState": "AgIAAKIBAAAAAAAAAAAAALUBAAAqAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-27T02:53:31.486Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 23,
+              "Title": "20260806144722_UniqueOpenLiveSession.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Data\\Migrations\\20260806144722_UniqueOpenLiveSession.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Data\\Migrations\\20260806144722_UniqueOpenLiveSession.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Data\\Migrations\\20260806144722_UniqueOpenLiveSession.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Server\\Data\\Migrations\\20260806144722_UniqueOpenLiveSession.cs",
+              "ViewState": "AgIAABkAAAAAAAAAAAAcwCgAAAAjAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-27T02:23:02.241Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 22,
+              "Title": "20260806080654_AddLiveStreaming.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Data\\Migrations\\20260806080654_AddLiveStreaming.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Data\\Migrations\\20260806080654_AddLiveStreaming.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Data\\Migrations\\20260806080654_AddLiveStreaming.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Server\\Data\\Migrations\\20260806080654_AddLiveStreaming.cs",
+              "ViewState": "AgIAACwAAAAAAAAAAAAcwDoAAAAiAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-27T02:22:46.955Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 24,
+              "Title": "LiveContracts.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Contracts\\LiveContracts.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Contracts\\LiveContracts.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Contracts\\LiveContracts.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Contracts\\LiveContracts.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAYAAABWAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-27T02:31:35.026Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 25,
+              "Title": "LiveClient.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Auth\\LiveClient.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Auth\\LiveClient.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Auth\\LiveClient.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Plugin\\Auth\\LiveClient.cs",
+              "ViewState": "AgIAACEAAAAAAAAAAAAmwCYAAABgAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-27T02:28:20.694Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 26,
               "Title": "ScreenPainter.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Core\\Video\\ScreenPainter.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Core\\Video\\ScreenPainter.cs",
@@ -339,20 +638,19 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 8,
-              "Title": "MainWindow.Player.cs",
-              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Player.cs",
-              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Player.cs",
-              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Player.cs",
-              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Player.cs",
-              "ViewState": "AgIAAEwEAAAAAAAAAAAUwGkEAAAAAAAAAAAAAA==",
+              "DocumentIndex": 27,
+              "Title": "MainWindow.Home.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Home.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Home.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Home.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Home.cs",
+              "ViewState": "AgIAAEoDAAAAAAAAAAAiwFwDAAARAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-18T16:30:02.887Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-18T22:21:53.418Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 9,
+              "DocumentIndex": 28,
               "Title": "MainWindow.Screen.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Screen.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Screen.cs",
@@ -360,12 +658,11 @@
               "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Screen.cs",
               "ViewState": "AgIAANkBAAAAAAAAAAAUwPYBAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-17T07:48:46.913Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-17T07:48:46.913Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 10,
+              "DocumentIndex": 29,
               "Title": "RoomManager.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\RoomManager.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\RoomManager.cs",
@@ -373,12 +670,11 @@
               "RelativeToolTip": "src\\AlphaChannel.Server\\RoomManager.cs",
               "ViewState": "AgIAABQAAAAAAAAAAAAmwCwAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-25T17:49:15.804Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-25T17:49:15.804Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 11,
+              "DocumentIndex": 30,
               "Title": "ActivityContracts.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Contracts\\ActivityContracts.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Contracts\\ActivityContracts.cs",
@@ -386,12 +682,11 @@
               "RelativeToolTip": "src\\AlphaChannel.Contracts\\ActivityContracts.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAABIAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-26T21:48:17.392Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-26T21:48:17.392Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 12,
+              "DocumentIndex": 31,
               "Title": "ActivityEndpoints.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Social\\ActivityEndpoints.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Social\\ActivityEndpoints.cs",
@@ -399,12 +694,11 @@
               "RelativeToolTip": "src\\AlphaChannel.Server\\Social\\ActivityEndpoints.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAABgAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-26T21:48:06.46Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-26T21:48:06.46Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 13,
+              "DocumentIndex": 32,
               "Title": "ActivityService.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Social\\ActivityService.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Social\\ActivityService.cs",
@@ -412,12 +706,11 @@
               "RelativeToolTip": "src\\AlphaChannel.Server\\Social\\ActivityService.cs",
               "ViewState": "AgIAAGgAAAAAAAAAAAAkwIMAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-26T21:48:03.313Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-26T21:48:03.313Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 15,
+              "DocumentIndex": 34,
               "Title": "MainWindow.Queue.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Queue.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Queue.cs",
@@ -425,12 +718,11 @@
               "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Queue.cs",
               "ViewState": "AgIAAKIBAAAAAAAAAAAYwLYBAAAiAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-18T16:30:37.549Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-18T16:30:37.549Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 14,
+              "DocumentIndex": 33,
               "Title": "ConnectionHandler.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\ConnectionHandler.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\ConnectionHandler.cs",
@@ -438,12 +730,11 @@
               "RelativeToolTip": "src\\AlphaChannel.Server\\ConnectionHandler.cs",
               "ViewState": "AgIAAAEBAAAAAAAAAAAswB0BAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-25T17:53:43.461Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-25T17:53:43.461Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 16,
+              "DocumentIndex": 35,
               "Title": "appsettings.json",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\appsettings.json",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\appsettings.json",
@@ -451,12 +742,11 @@
               "RelativeToolTip": "src\\AlphaChannel.Server\\appsettings.json",
               "ViewState": "AgIAAAMAAAAAAAAAAAAAAAMAAAAdAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
-              "WhenOpened": "2026-08-25T17:53:37.415Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-25T17:53:37.415Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 17,
+              "DocumentIndex": 36,
               "Title": "DxHandler.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Core\\Video\\DxHandler.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Core\\Video\\DxHandler.cs",
@@ -464,12 +754,11 @@
               "RelativeToolTip": "src\\AlphaChannel.Plugin\\Core\\Video\\DxHandler.cs",
               "ViewState": "AgIAAEQAAAAAAAAAAAAYwEsAAAADAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-26T19:51:35.379Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-26T19:51:35.379Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 18,
+              "DocumentIndex": 37,
               "Title": "Configuration.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Configuration.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Configuration.cs",
@@ -477,38 +766,11 @@
               "RelativeToolTip": "src\\AlphaChannel.Plugin\\Configuration.cs",
               "ViewState": "AgIAAJoAAAAAAAAAAAA1wKgAAAA2AAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-17T01:51:13.314Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-17T01:51:13.314Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 19,
-              "Title": "Plugin.cs",
-              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Plugin.cs",
-              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Plugin.cs",
-              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Plugin.cs",
-              "RelativeToolTip": "src\\AlphaChannel.Plugin\\Plugin.cs",
-              "ViewState": "AgIAAAkDAAAAAAAAAAAAwCUDAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-17T07:47:15.167Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 20,
-              "Title": "MainWindow.WatchParty.cs",
-              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.WatchParty.cs",
-              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.WatchParty.cs",
-              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.WatchParty.cs",
-              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.WatchParty.cs",
-              "ViewState": "AgIAAAYAAAAAAAAAAAAAABcAAAAoAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-21T00:30:03.71Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 21,
+              "DocumentIndex": 38,
               "Title": "MainWindow.ViewChannel.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.ViewChannel.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.ViewChannel.cs",
@@ -516,12 +778,11 @@
               "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.ViewChannel.cs",
               "ViewState": "AgIAAB8AAAAAAAAAAAAAAB8AAAAIAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-21T18:49:05.68Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-21T18:49:05.68Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 22,
+              "DocumentIndex": 39,
               "Title": "MainWindow.Social.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Social.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Social.cs",
@@ -529,12 +790,11 @@
               "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Social.cs",
               "ViewState": "AgIAACABAAAAAAAAAAAIwDABAAA7AAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-21T04:09:15.573Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-21T04:09:15.573Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 23,
+              "DocumentIndex": 40,
               "Title": "MainWindow.SignIn.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.SignIn.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.SignIn.cs",
@@ -542,25 +802,11 @@
               "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.SignIn.cs",
               "ViewState": "AgIAALIGAAAAAAAAAAAwwMIGAAAzAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-18T21:57:36.549Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-08-18T21:57:36.549Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 24,
-              "Title": "MainWindow.Settings.cs",
-              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Settings.cs",
-              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Settings.cs",
-              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Settings.cs",
-              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.Settings.cs",
-              "ViewState": "AgIAAGMAAAAAAAAAAAAIwHIAAAAkAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-17T20:02:19.597Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 25,
+              "DocumentIndex": 41,
               "Title": "ScreenController.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Core\\Video\\ScreenController.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Core\\Video\\ScreenController.cs",
@@ -572,7 +818,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 26,
+              "DocumentIndex": 42,
               "Title": "VideoPlayer.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Core\\Video\\VideoPlayer.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Core\\Video\\VideoPlayer.cs",
@@ -584,7 +830,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 30,
+              "DocumentIndex": 45,
               "Title": "NearbyAutoWatch.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\NearbyAutoWatch.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\NearbyAutoWatch.cs",
@@ -596,7 +842,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 27,
+              "DocumentIndex": 43,
               "Title": "StreamClient.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\StreamClient.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\StreamClient.cs",
@@ -608,19 +854,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 28,
-              "Title": "Program.cs",
-              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Program.cs",
-              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Program.cs",
-              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Program.cs",
-              "RelativeToolTip": "src\\AlphaChannel.Server\\Program.cs",
-              "ViewState": "AgIAAHAAAAAAAAAAAAAYwHwAAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-25T19:28:57.184Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 29,
+              "DocumentIndex": 44,
               "Title": "StreamContracts.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Contracts\\StreamContracts.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Contracts\\StreamContracts.cs",
@@ -632,7 +866,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 31,
+              "DocumentIndex": 46,
               "Title": "PresenceService.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Social\\PresenceService.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Social\\PresenceService.cs",
@@ -644,7 +878,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 32,
+              "DocumentIndex": 47,
               "Title": "PresenceLabels.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Social\\PresenceLabels.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Social\\PresenceLabels.cs",
@@ -656,19 +890,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 33,
-              "Title": "LiveDirectory.cs",
-              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Live\\LiveDirectory.cs",
-              "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Live\\LiveDirectory.cs",
-              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Live\\LiveDirectory.cs",
-              "RelativeToolTip": "src\\AlphaChannel.Server\\Live\\LiveDirectory.cs",
-              "ViewState": "AgIAAAIAAAAAAAAAAAAwwAYAAAA0AAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-25T19:28:33.462Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 34,
+              "DocumentIndex": 48,
               "Title": "FriendService.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Social\\FriendService.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Social\\FriendService.cs",
@@ -680,7 +902,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 35,
+              "DocumentIndex": 49,
               "Title": "MainWindow.Messages.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Messages.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Messages.cs",
@@ -692,7 +914,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 36,
+              "DocumentIndex": 50,
               "Title": "MainWindow.Activity.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Activity.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Activity.cs",
@@ -704,7 +926,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 37,
+              "DocumentIndex": 51,
               "Title": "AetherStreamQueue.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Core\\Video\\AetherStreamQueue.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Core\\Video\\AetherStreamQueue.cs",
@@ -716,7 +938,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 38,
+              "DocumentIndex": 52,
               "Title": "AvatarStorage.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Server\\Auth\\AvatarStorage.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Server\\Auth\\AvatarStorage.cs",
@@ -728,7 +950,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 39,
+              "DocumentIndex": 53,
               "Title": "VideoUrlResolver.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Core\\Video\\VideoUrlResolver.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Core\\Video\\VideoUrlResolver.cs",
@@ -740,7 +962,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 40,
+              "DocumentIndex": 54,
               "Title": "MainWindow.VideoGrid.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.VideoGrid.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.VideoGrid.cs",
@@ -752,7 +974,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 41,
+              "DocumentIndex": 55,
               "Title": "MainWindow.Reactions.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Reactions.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Reactions.cs",
@@ -764,7 +986,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 42,
+              "DocumentIndex": 56,
               "Title": "MainWindow.Avatar.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Avatar.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Avatar.cs",
@@ -776,7 +998,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 43,
+              "DocumentIndex": 57,
               "Title": "Resources.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Core\\Video\\Resources.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Core\\Video\\Resources.cs",
@@ -788,7 +1010,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 44,
+              "DocumentIndex": 58,
               "Title": "MainWindow.Search.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Search.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Search.cs",
@@ -800,19 +1022,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 45,
-              "Title": "MainWindow.GoLive.cs",
-              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.GoLive.cs",
-              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.GoLive.cs",
-              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.GoLive.cs",
-              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.GoLive.cs",
-              "ViewState": "AgIAAOMAAAAAAAAAAAAiwPgAAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-19T10:15:33.929Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 46,
+              "DocumentIndex": 59,
               "Title": "MainWindow.Tweeter.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Tweeter.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Tweeter.cs",
@@ -824,7 +1034,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 47,
+              "DocumentIndex": 60,
               "Title": "MainWindow.YouTubeTopics.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.YouTubeTopics.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.YouTubeTopics.cs",
@@ -836,7 +1046,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 48,
+              "DocumentIndex": 61,
               "Title": "MainWindow.PluginHub.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.PluginHub.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.PluginHub.cs",
@@ -848,7 +1058,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 49,
+              "DocumentIndex": 62,
               "Title": "MainWindow.Apps.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Apps.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Apps.cs",
@@ -860,7 +1070,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 50,
+              "DocumentIndex": 63,
               "Title": "MainWindow.Whispers.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Whispers.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Whispers.cs",
@@ -872,7 +1082,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 51,
+              "DocumentIndex": 64,
               "Title": "AuthClient.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Auth\\AuthClient.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Auth\\AuthClient.cs",
@@ -884,7 +1094,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 52,
+              "DocumentIndex": 65,
               "Title": "MainWindow.Profile.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.Profile.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.Profile.cs",
@@ -896,7 +1106,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 53,
+              "DocumentIndex": 66,
               "Title": "TitleTextureRenderer.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Core\\Video\\TitleTextureRenderer.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Core\\Video\\TitleTextureRenderer.cs",
@@ -908,7 +1118,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 54,
+              "DocumentIndex": 67,
               "Title": "UiTheme.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\UiTheme.cs",
               "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\UiTheme.cs",
