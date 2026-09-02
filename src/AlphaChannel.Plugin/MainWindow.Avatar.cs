@@ -109,6 +109,109 @@ internal sealed partial class MainWindow
         ImGui.Dummy(size);
     }
 
+    // Draws an avatar at an explicit screen position without changing
+    // ImGui cursor/layout state.
+    //
+    // Use this inside custom rows that manage their own positioning,
+    // such as Watch Party chat and reaction activity rows.
+    private void DrawAvatarAt(
+        Vector2 topLeft,
+        string? iconName,
+        string? colorHex,
+        float diameter,
+        string? imageUrl = null)
+    {
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        var size =
+            new Vector2(
+                diameter,
+                diameter);
+
+        var center =
+            topLeft +
+            size * 0.5f;
+
+        var radius =
+            diameter * 0.5f;
+
+        var absoluteUrl =
+            ResolveAvatarUrl(
+                imageUrl);
+
+        var texture =
+            absoluteUrl is null
+                ? null
+                : thumbnails.Get(
+                    absoluteUrl);
+
+        if (texture is not null)
+        {
+            var (uv0, uv1) =
+                CoverUvs(
+                    texture.Width,
+                    texture.Height,
+                    diameter,
+                    diameter);
+
+            drawList.AddImageRounded(
+                texture.Handle,
+                topLeft,
+                topLeft + size,
+                uv0,
+                uv1,
+                ImGui.GetColorU32(
+                    Vector4.One),
+                radius);
+
+            drawList.AddCircle(
+                center,
+                radius,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        1f,
+                        1f,
+                        1f,
+                        0.12f)),
+                0,
+                1.25f);
+
+            return;
+        }
+
+        drawList.AddCircleFilled(
+            center,
+            radius,
+            ImGui.GetColorU32(
+                ParseAvatarColor(
+                    colorHex)));
+
+        if (iconName is { Length: > 0 } &&
+            Enum.TryParse<FontAwesomeIcon>(
+                iconName,
+                out var icon))
+        {
+            using (ImRaii.PushFont(
+                UiBuilder.IconFont))
+            {
+                var glyph =
+                    icon.ToIconString();
+
+                var textSize =
+                    ImGui.CalcTextSize(
+                        glyph);
+
+                drawList.AddText(
+                    center -
+                    textSize * 0.5f,
+                    ImGui.GetColorU32(
+                        Vector4.One),
+                    glyph);
+            }
+        }
+    }
+
     // Wraps into rows of 9 rather than relying on ImGui's automatic wrapping (which needs per-item
     // width math anyway) - simpler to just count and force a newline.
     private static bool DrawIconPicker(ref string? selectedIcon)

@@ -45,8 +45,33 @@ internal sealed class StreamClient : IDisposable
     // Filled from Dispatch (a background thread) - drained by MainWindow's Draw (main thread) each
     // frame, so this needs to be thread-safe for that handoff, same reasoning as everywhere else
     // in this plugin that crosses from the receive loop back to the main thread.
-    internal ConcurrentQueue<(string SenderUserId, string Glyph)> IncomingReactions { get; } = new();
-    internal ConcurrentQueue<(string DisplayName, string Text)> IncomingChat { get; } = new();
+    internal ConcurrentQueue<(
+        string UserId,
+        string DisplayName,
+        string Glyph)> IncomingReactions
+    { get; } = new();
+
+    internal ConcurrentQueue<(
+        string UserId,
+        string DisplayName,
+        string Text)> IncomingChat
+    { get; } = new();
+
+    internal ConcurrentQueue<(
+        string DisplayName,
+        Guid RequestId,
+        string Url,
+        string Title,
+        string Source,
+        TimeSpan? Duration,
+        string? ThumbnailUrl)> IncomingMediaRequests
+    { get; } = new();
+
+    internal ConcurrentQueue<(
+    Guid RequestId,
+    bool PlayNow,
+    int QueuePosition)> IncomingMediaRequestResults
+    { get; } = new();
 
     internal event Action<StreamControl>? OnState;
     internal event Action? OnJoined;
@@ -218,7 +243,10 @@ internal sealed class StreamClient : IDisposable
             case SignalType.StreamEnded:
                 Mode = StreamMode.None;
                 HostId = null;
+
                 IncomingChat.Clear();
+                IncomingMediaRequests.Clear();
+
                 OnEnded?.Invoke();
                 break;
 
@@ -240,14 +268,183 @@ internal sealed class StreamClient : IDisposable
 
                 break;
 
-            case SignalType.StreamReaction when message.Reaction is { Length: > 0 } glyph &&
-                message.UserId is { Length: > 0 } senderId:
-                IncomingReactions.Enqueue((senderId, glyph));
-                break;
+            case SignalType.StreamReaction
+               when message.Reaction is { Length: > 0 } glyph &&
+                    message.UserId is { Length: > 0 } senderId:
+                {
+                    string displayName;
+
+                    // ---------------------------------------------------------
+                    // Our own reaction
+                    // ---------------------------------------------------------
+                    //
+                    // The host is not necessarily present in Roster, so resolve
+                    // our own account directly from the local display-name
+                    // provider first.
+                    // ---------------------------------------------------------
+
+                    if (string.Equals(
+                            senderId,
+                            myAccountId,
+                            StringComparison.Ordinal))
+                    {
+                        displayName =
+                            displayNameProvider() ??
+                            "You";
+                    }
+                    else
+                    {
+                        // -----------------------------------------------------
+                        // Another party member
+                        // -----------------------------------------------------
+                        //
+                        // The roster already maps the relay UserId to the
+                        // friendly Alpha Channel display name.
+                        // -----------------------------------------------------
+
+                        var participant =
+                            Roster.FirstOrDefault(
+                                member =>
+                                    string.Equals(
+                                        member.UserId,
+                                        senderId,
+                                        StringComparison.Ordinal));
+
+                        displayName =
+                            participant?.DisplayName ??
+                            message.DisplayName ??
+                            "Someone";
+                    }
+
+                    IncomingReactions.Enqueue(
+                        (
+                            senderId,
+                            displayName,
+                            glyph
+                        ));
+
+                    break;
+                }
 
             case SignalType.StreamChat when message.ChatText is { Length: > 0 } text:
-                IncomingChat.Enqueue((message.DisplayName ?? message.UserId ?? "Someone", text));
-                break;
+                {
+                    var displayName =
+                        message.DisplayName ??
+                        message.UserId ??
+                        "Someone";
+
+                    const string mediaRequestPrefix =
+       "[[AC_MEDIA_REQUEST_1]]";
+
+                    const string mediaResultPrefix =
+    "[[AC_MEDIA_RESULT_1]]";
+
+                    if (text.StartsWith(
+        mediaResultPrefix,
+        StringComparison.Ordinal))
+                    {
+                        var payload =
+                            text[mediaResultPrefix.Length..];
+
+                        var parts =
+                            payload.Split('|');
+
+                        if (parts.Length != 3 ||
+                            !Guid.TryParseExact(
+                                parts[0],
+                                "N",
+                                out var requestId) ||
+                            !int.TryParse(
+                                parts[2],
+                                out var queuePosition))
+                        {
+                            AepLog.Warning(
+                                "[Stream] Ignored malformed media request result.");
+
+                            break;
+                        }
+
+                        var playNow =
+                            parts[1] == "play";
+
+                        if (!playNow &&
+                            parts[1] != "queue")
+                        {
+                            AepLog.Warning(
+                                "[Stream] Ignored unknown media request result.");
+
+                            break;
+                        }
+
+                        IncomingMediaRequestResults.Enqueue(
+                            (
+                                requestId,
+                                playNow,
+                                queuePosition
+                            ));
+
+                        break;
+                    }
+
+                    if (text.StartsWith(
+               mediaRequestPrefix,
+               StringComparison.Ordinal))
+                    {
+                        var payload =
+                            text[mediaRequestPrefix.Length..];
+
+                        var separatorIndex =
+                            payload.IndexOf('|');
+
+                        if (separatorIndex <= 0)
+                        {
+                            AepLog.Warning(
+                                "[Stream] Ignored malformed media request.");
+
+                            break;
+                        }
+
+                        var requestIdText =
+                            payload[..separatorIndex];
+
+                        var url =
+                            payload[(separatorIndex + 1)..];
+
+                        if (!Guid.TryParseExact(
+                                requestIdText,
+                                "N",
+                                out var requestId) ||
+                            string.IsNullOrWhiteSpace(url))
+                        {
+                            AepLog.Warning(
+                                "[Stream] Ignored malformed media request.");
+
+                            break;
+                        }
+
+                        IncomingMediaRequests.Enqueue(
+                            (
+                                displayName,
+                                requestId,
+                                url,
+                                url,
+                                string.Empty,
+                                null,
+                                null
+                            ));
+
+                        break;
+                    }
+
+                    IncomingChat.Enqueue(
+                        (
+                            message.UserId ?? string.Empty,
+                            displayName,
+                            text
+                        ));
+
+                    break;
+                }
         }
     }
 
@@ -319,7 +516,62 @@ internal sealed class StreamClient : IDisposable
         SendAsync(new StreamControl { Type = SignalType.StreamReaction, Reaction = glyph });
 
     internal Task SendChatAsync(string text) =>
-        SendAsync(new StreamControl { Type = SignalType.StreamChat, ChatText = text });
+        SendAsync(new StreamControl
+        {
+            Type = SignalType.StreamChat,
+            ChatText = text
+        });
+
+
+
+    internal Task SendMediaRequestAsync(
+      string url,
+      string title,
+      string source,
+      TimeSpan? duration,
+      string? thumbnailUrl)
+    {
+        const string mediaRequestPrefix =
+            "[[AC_MEDIA_REQUEST_1]]";
+
+        var requestId =
+            Guid.NewGuid();
+
+        return SendAsync(
+            new StreamControl
+            {
+                Type = SignalType.StreamChat,
+                ChatText =
+                    mediaRequestPrefix +
+                    requestId.ToString("N") +
+                    "|" +
+                    url
+            });
+    }
+
+    internal Task SendMediaRequestResultAsync(
+    Guid requestId,
+    bool playNow,
+    int queuePosition)
+    {
+        const string mediaResultPrefix =
+            "[[AC_MEDIA_RESULT_1]]";
+
+        return SendAsync(
+            new StreamControl
+            {
+                Type = SignalType.StreamChat,
+                ChatText =
+                    mediaResultPrefix +
+                    requestId.ToString("N") +
+                    "|" +
+                    (playNow
+                        ? "play"
+                        : "queue") +
+                    "|" +
+                    queuePosition
+            });
+    }
 
     internal async Task LeaveAsync()
     {
@@ -332,7 +584,9 @@ internal sealed class StreamClient : IDisposable
         Mode = StreamMode.None;
         HostId = null;
         Roster = [];
+
         IncomingChat.Clear();
+        IncomingMediaRequests.Clear();
     }
 
     private async Task SendAsync(StreamControl message)

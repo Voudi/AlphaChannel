@@ -10,14 +10,37 @@ namespace AlphaChannel.Plugin;
 // not a broadcast), and Plugin.cs is it.
 internal sealed partial class MainWindow
 {
-    private static readonly FontAwesomeIcon[] ReactionIcons =
+    private sealed record ReactionDefinition(
+        FontAwesomeIcon Icon,
+        string Name,
+        bool PatreonOnly = false);
+
+    private static readonly ReactionDefinition[] Reactions =
     [
+        new(
         FontAwesomeIcon.ThumbsUp,
+        "Like"),
+
+    new(
         FontAwesomeIcon.Laugh,
+        "Laugh"),
+
+    new(
         FontAwesomeIcon.Heart,
+        "Love"),
+
+    new(
         FontAwesomeIcon.Surprise,
+        "Surprised"),
+
+    new(
         FontAwesomeIcon.Star,
-    ];
+        "Hype"),
+];
+
+    private const int VisibleReactionCount = 5;
+
+    private int reactionPage;
 
     private void DrawSectionTitle(
     FontAwesomeIcon icon,
@@ -92,8 +115,8 @@ internal sealed partial class MainWindow
                 ImGui.GetContentRegionAvail().X;
 
             var totalWidth =
-                (ReactionIcons.Length * buttonSize.X) +
-                ((ReactionIcons.Length - 1) * 12f);
+                (Reactions.Length * buttonSize.X) +
+                ((Reactions.Length - 1) * 12f);
 
             var startX =
                 MathF.Max(
@@ -107,49 +130,56 @@ internal sealed partial class MainWindow
 
 
             for (var index = 0;
-         index < ReactionIcons.Length;
-         index++)
+                 index < Reactions.Length;
+                 index++)
             {
                 if (index > 0)
                 {
-                    ImGui.SameLine(0, 12);
+                    ImGui.SameLine(
+                        0f,
+                        12f);
                 }
 
                 DrawReactionButton(
-                    ReactionIcons[index],
+                    Reactions[index],
                     buttonSize);
             }
         }
     }
 
     private void DrawReactionButton(
-    FontAwesomeIcon icon,
-    Vector2 size)
+     ReactionDefinition reaction,
+     Vector2 size)
     {
+        var locked =
+            reaction.PatreonOnly;
+
+        using (ImRaii.Disabled(
+            locked))
         using (ImRaii.PushStyle(
             ImGuiStyleVar.FrameRounding,
-14f))
+            14f))
         {
             if (ImGui.Button(
-                    $"##reaction_{icon}",
+                    $"##reaction_{reaction.Name}",
                     size))
             {
                 _ = stream.SendReactionAsync(
-                    icon.ToIconString());
+                    reaction.Icon.ToIconString());
             }
         }
-
 
         var drawList =
             ImGui.GetWindowDrawList();
 
-
         var min =
             ImGui.GetItemRectMin();
 
+        var max =
+            ImGui.GetItemRectMax();
 
         var iconText =
-     icon.ToIconString();
+            reaction.Icon.ToIconString();
 
         Vector2 textSize;
 
@@ -157,7 +187,8 @@ internal sealed partial class MainWindow
             UiBuilder.IconFont))
         {
             textSize =
-                ImGui.CalcTextSize(iconText);
+                ImGui.CalcTextSize(
+                    iconText);
 
             var pos =
                 new Vector2(
@@ -170,8 +201,187 @@ internal sealed partial class MainWindow
             drawList.AddText(
                 pos,
                 ImGui.GetColorU32(
-                    Vector4.One),
+                    locked
+                        ? MutedText
+                        : Vector4.One),
                 iconText);
         }
+
+        if (locked)
+        {
+            using (ImRaii.PushFont(
+                UiBuilder.IconFont))
+            {
+                var lockText =
+                    FontAwesomeIcon.Lock.ToIconString();
+
+                var lockSize =
+                    ImGui.CalcTextSize(
+                        lockText);
+
+                drawList.AddText(
+                    new Vector2(
+                        max.X -
+                        lockSize.X -
+                        4f,
+                        max.Y -
+                        lockSize.Y -
+                        3f),
+                    ImGui.GetColorU32(
+                        Gold),
+                    lockText);
+            }
+        }
+
+        if (ImGui.IsItemHovered(
+                ImGuiHoveredFlags.AllowWhenDisabled))
+        {
+            ImGui.SetTooltip(
+                locked
+                    ? $"{reaction.Name} — Patreon reaction"
+                    : reaction.Name);
+        }
     }
+
+    private void DrawCompactReactions(
+      float width)
+    {
+        if (stream.Mode == StreamMode.None)
+        {
+            return;
+        }
+
+        const float reactionSize = 28f;
+        const float reactionGap = 5f;
+        const float arrowWidth = 26f;
+
+        var maxPage =
+            Math.Max(
+                0,
+                (Reactions.Length - 1) /
+                VisibleReactionCount);
+
+        reactionPage =
+            Math.Clamp(
+                reactionPage,
+                0,
+                maxPage);
+
+        var startIndex =
+            reactionPage *
+            VisibleReactionCount;
+
+        var endIndex =
+            Math.Min(
+                startIndex +
+                VisibleReactionCount,
+                Reactions.Length);
+
+        var showPrevious =
+            reactionPage > 0;
+
+        var showNext =
+            reactionPage < maxPage;
+
+        var visibleCount =
+            endIndex -
+            startIndex;
+
+        var totalWidth =
+            visibleCount *
+            reactionSize +
+            Math.Max(
+                0,
+                visibleCount - 1) *
+            reactionGap;
+
+        if (showPrevious)
+        {
+            totalWidth +=
+                arrowWidth +
+                reactionGap;
+        }
+
+        if (showNext)
+        {
+            totalWidth +=
+                arrowWidth +
+                reactionGap;
+        }
+
+        // Center the whole reaction strip inside the space
+        // allocated to the React Live block.
+        var startX =
+            ImGui.GetCursorPosX() +
+            MathF.Max(
+                0f,
+                (width - totalWidth) *
+                0.5f);
+
+        ImGui.SetCursorPosX(
+            startX);
+
+        if (showPrevious)
+        {
+            if (ImGui.Button(
+                    "‹##reactionPrevious",
+                    new Vector2(
+                        arrowWidth,
+                        reactionSize)))
+            {
+                reactionPage--;
+            }
+
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip(
+                    "Previous reactions");
+            }
+
+            ImGui.SameLine(
+                0f,
+                reactionGap);
+        }
+
+        for (var index = startIndex;
+             index < endIndex;
+             index++)
+        {
+            if (index > startIndex)
+            {
+                ImGui.SameLine(
+                    0f,
+                    reactionGap);
+            }
+
+            DrawReactionButton(
+                Reactions[index],
+                new Vector2(
+                    reactionSize,
+                    reactionSize));
+        }
+
+        if (showNext)
+        {
+            ImGui.SameLine(
+                0f,
+                reactionGap);
+
+            if (ImGui.Button(
+                    "›##reactionNext",
+                    new Vector2(
+                        arrowWidth,
+                        reactionSize)))
+            {
+                reactionPage++;
+            }
+
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip(
+                    "More reactions");
+            }
+        }
+    }
+
 }

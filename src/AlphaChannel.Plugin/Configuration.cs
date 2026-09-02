@@ -1,7 +1,8 @@
 using AlphaChannel.Plugin.Auth;
+using AlphaChannel.Plugin.Video;
 using Dalamud.Configuration;
+using Dalamud.Game.ClientState.Keys;
 using Dalamud.Plugin;
-
 namespace AlphaChannel.Plugin;
 
 [Serializable]
@@ -83,6 +84,50 @@ internal sealed class Configuration : IPluginConfiguration
     public int Volume { get; set; } = 100;
     public bool Muted { get; set; }
 
+    //
+    // SNES Player 1 keyboard controls.
+    //
+    // Stored as VirtualKey integer values so existing config files
+    // continue to deserialize cleanly and bindings can be changed
+    // without touching the emulator core.
+    //
+
+    public int SnesKeyUp { get; set; } =
+        (int)VirtualKey.UP;
+
+    public int SnesKeyDown { get; set; } =
+        (int)VirtualKey.DOWN;
+
+    public int SnesKeyLeft { get; set; } =
+        (int)VirtualKey.LEFT;
+
+    public int SnesKeyRight { get; set; } =
+        (int)VirtualKey.RIGHT;
+
+    public int SnesKeyA { get; set; } =
+        (int)VirtualKey.X;
+
+    public int SnesKeyB { get; set; } =
+        (int)VirtualKey.Z;
+
+    public int SnesKeyX { get; set; } =
+        (int)VirtualKey.S;
+
+    public int SnesKeyY { get; set; } =
+        (int)VirtualKey.A;
+
+    public int SnesKeyL { get; set; } =
+        (int)VirtualKey.Q;
+
+    public int SnesKeyR { get; set; } =
+        (int)VirtualKey.W;
+
+    public int SnesKeyStart { get; set; } =
+        (int)VirtualKey.RETURN;
+
+    public int SnesKeySelect { get; set; } =
+        (int)VirtualKey.RSHIFT;
+
     // Path to a cookies.txt file the player exported themselves from their own logged-in browser
     // session - never anything we generate or transmit, just a local file path handed to yt-dlp so
     // age-restricted videos can play. Opt-in and empty by default.
@@ -97,8 +142,21 @@ internal sealed class Configuration : IPluginConfiguration
     // character they were playing when they picked it, not to the Windows/plugin install, so an alt
     // gets its own prompt instead of inheriting the main character's name.
     public Dictionary<ulong, string> CharacterDisplayNames { get; set; } = new();
-
     public List<VideoQueueRecord> VideoQueue { get; set; } = new();
+
+    public List<SavedQueueProfile?> SavedQueueProfiles { get; set; } = CreateDefaultQueueSlots();
+
+    private static List<SavedQueueProfile?> CreateDefaultQueueSlots()
+    {
+        return new List<SavedQueueProfile?>
+    {
+        null,
+        null,
+        null
+    };
+    }
+
+    public int ActiveQueueSlot { get; set; } = 0;
 
     // YouTube videos favourited by the player.
     // Store stable YouTube video IDs rather than full URLs.

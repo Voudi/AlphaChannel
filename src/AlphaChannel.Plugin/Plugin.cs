@@ -30,6 +30,8 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
 
     [PluginService] internal static IGameConfig GameConfig { get; private set; } = null!;
+    [PluginService] internal static IKeyState KeyState { get; private set; } = null!;
+    [PluginService] internal static IGamepadState GamepadState { get; private set; } = null!;
 
     internal static Configuration Cfg { get; private set; } = null!;
 
@@ -63,6 +65,7 @@ public sealed class Plugin : IDalamudPlugin
     // (OnFrameworkUpdate) - a plain reference field is fine here, a single pointer swap is already
     // atomic in .NET and only the latest state ever matters, no torn reads to guard against.
     private volatile AlphaChannel.Contracts.StreamControl? pendingRemoteState;
+    private string? lastReceivedRemoteUrl;
 
     // True only when WE paused playback because of combat/a cutscene, not when the host paused it
     // manually - otherwise leaving combat would un-pause a video the host deliberately stopped.
@@ -121,7 +124,12 @@ public sealed class Plugin : IDalamudPlugin
         video.SetVolume(Cfg.Muted ? 0 : Cfg.Volume);
         video.CookiesPath = Cfg.YouTubeCookiesPath;
         video.UseFirefoxCookies = Cfg.UseFirefoxCookies;
-        queue = new AetherStreamQueue(video);
+        var activeProfile =
+    Cfg.SavedQueueProfiles[Cfg.ActiveQueueSlot];
+
+        queue = new AetherStreamQueue(
+            video,
+            activeProfile?.Entries ?? Enumerable.Empty<VideoQueueRecord>());
         stream = new StreamClient(Cfg, () => Cfg.CharacterDisplayNames.GetValueOrDefault(ReadLocalContentId()),
             () => Cfg.CharacterSessions.GetValueOrDefault(ReadLocalContentId()));
         stream.OnState += OnRemoteState;
@@ -211,6 +219,47 @@ public sealed class Plugin : IDalamudPlugin
                 }
 
                 break;
+
+            case "snes":
+                {
+                    var romPath =
+                        rest.Trim().Trim('"');
+
+                    if (romPath.Length == 0)
+                    {
+                        ChatGui.Print(
+                            "Usage: /alpha snes <full path to .sfc/.smc ROM>");
+
+                        return;
+                    }
+
+                    bool started =
+                        screenController.Engine.PlaySnes(
+                            romPath);
+
+                    if (!started)
+                    {
+                        ChatGui.Print(
+                            $"[AlphaChannel] SNES failed: {screenController.Engine.LastError ?? "Unknown error"}");
+                    }
+                    else
+                    {
+                        ChatGui.Print(
+                            "[AlphaChannel] SNES game started.");
+                    }
+
+                    break;
+                }
+
+            case "snes-stop":
+                {
+                    screenController.Engine.StopVideo();
+
+                    ChatGui.Print(
+                        "[AlphaChannel] SNES game stopped.");
+
+                    break;
+                }
 
             default:
                 ToggleMainWindow();
@@ -459,12 +508,25 @@ public sealed class Plugin : IDalamudPlugin
         // (Mode.None) would never publish, never become Hosting, and nobody could ever join them.
         // Mode != Viewing still correctly blocks a host who was just transferred away (Mode flips
         // to Viewing) from continuing to publish their own stale local queue state.
-        if (stream.Mode != StreamMode.Viewing && queue.Current is { } current && screenController.Engine.IsActive)
+        var current = queue.Current;
+
+        if (stream.Mode != StreamMode.Viewing &&
+            current is not null &&
+            screenController.Engine.IsActive)
         {
             var (position, _, paused) = video.GetProgress();
-            _ = stream.PublishStateAsync(current.Url, position, paused, screenController.Engine.ScreenPosition,
-                screenController.Engine.ScreenYaw, screenController.Engine.ScreenScale);
-            video.SetOverlayTitle(current.Title, current.Source);
+
+            _ = stream.PublishStateAsync(
+                current.Url,
+                position,
+                paused,
+                screenController.Engine.ScreenPosition,
+                screenController.Engine.ScreenYaw,
+                screenController.Engine.ScreenScale);
+
+            video.SetOverlayTitle(
+                current.Title,
+                current.Source);
         }
     }
 
@@ -526,26 +588,84 @@ public sealed class Plugin : IDalamudPlugin
     // behavior but rendered on the actual video screen instead.
     private void UpdateReactions()
     {
-        while (stream.IncomingReactions.TryDequeue(out _))
+        while (stream.IncomingReactions.TryDequeue(
+                   out var incomingReaction))
         {
-            activeReactions.Add(new InWorldReaction(DateTime.UtcNow, (float)(reactionRandom.NextDouble() * 0.3 - 0.15)));
+            // Existing in-world reaction.
+            activeReactions.Add(
+                new InWorldReaction(
+                    DateTime.UtcNow,
+                    (float)(
+                        reactionRandom.NextDouble() *
+                        0.3 -
+                        0.15)));
+
+// Mirror the same received reaction into the
+// chronological Watch Party activity feed.
+//
+// Preserve the authenticated Alpha Channel account ID
+// so the feed can resolve the sender's avatar locally.
+mainWindow.AddPartyReactionToFeed(
+    incomingReaction.UserId,
+    incomingReaction.DisplayName,
+    incomingReaction.Glyph);
         }
 
-        activeReactions.RemoveAll(reaction => DateTime.UtcNow - reaction.SpawnedAt >= ReactionLifetime);
+        activeReactions.RemoveAll(
+            reaction =>
+                DateTime.UtcNow -
+                reaction.SpawnedAt >=
+                ReactionLifetime);
 
-        var particles = new List<ReactionParticle>(activeReactions.Count);
-        var now = DateTime.UtcNow;
+        var particles =
+            new List<ReactionParticle>(
+                activeReactions.Count);
+
+        var now =
+            DateTime.UtcNow;
+
         foreach (var reaction in activeReactions)
         {
-            var progress = Math.Clamp((float)(now - reaction.SpawnedAt).TotalSeconds /
-                (float)ReactionLifetime.TotalSeconds, 0f, 1f);
-            var x = Math.Clamp(0.5f + reaction.XJitter, 0.05f, 0.95f);
-            var y = 0.85f - progress * 0.7f;
-            var alpha = 1f - progress;
-            particles.Add(new ReactionParticle(x, y, alpha, 0.05f, ReactionColor.R, ReactionColor.G, ReactionColor.B));
+            var progress =
+                Math.Clamp(
+                    (float)(
+                        now -
+                        reaction.SpawnedAt)
+                    .TotalSeconds /
+                    (float)
+                    ReactionLifetime.TotalSeconds,
+                    0f,
+                    1f);
+
+            var x =
+                Math.Clamp(
+                    0.5f +
+                    reaction.XJitter,
+                    0.05f,
+                    0.95f);
+
+            var y =
+                0.85f -
+                progress *
+                0.7f;
+
+            var alpha =
+                1f -
+                progress;
+
+            particles.Add(
+                new ReactionParticle(
+                    x,
+                    y,
+                    alpha,
+                    0.05f,
+                    ReactionColor.R,
+                    ReactionColor.G,
+                    ReactionColor.B));
         }
 
-        video.SetReactions(particles);
+        video.SetReactions(
+            particles);
     }
 
     private readonly Random reactionRandom = new();
@@ -647,9 +767,13 @@ public sealed class Plugin : IDalamudPlugin
     // just records the latest message and OnFrameworkUpdate applies it on the next tick instead.
     private void OnRemoteState(AlphaChannel.Contracts.StreamControl message)
     {
-        AepLog.Warning(
-            $"[WatchParty] Queued remote state URL={message.Url ?? "NULL"}");
+        if (message.Url == lastReceivedRemoteUrl)
+        {
+            pendingRemoteState = message;
+            return;
+        }
 
+        lastReceivedRemoteUrl = message.Url;
         pendingRemoteState = message;
     }
 

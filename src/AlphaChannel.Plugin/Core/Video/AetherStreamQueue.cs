@@ -48,13 +48,51 @@ internal sealed class AetherStreamQueue
     public AetherStreamQueue(VideoPlayer video)
     {
         this.video = video;
-        var persisted = Plugin.Cfg.VideoQueue;
-        for (var recordIndex = 0; recordIndex < persisted.Count; recordIndex++)
+
+        LoadEntries(Plugin.Cfg.VideoQueue);
+    }
+
+    public AetherStreamQueue(VideoPlayer video, IEnumerable<VideoQueueRecord> records)
+    {
+        this.video = video;
+
+        LoadEntries(records);
+    }
+
+    private void LoadEntries(IEnumerable<VideoQueueRecord> records)
+    {
+        foreach (var record in records)
         {
-            var record = persisted[recordIndex];
-            entries.Add(new VideoQueueEntry(record.Url, record.Title, record.Source,
-                record.DurationSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null, record.ThumbnailUrl));
+            entries.Add(new VideoQueueEntry(
+                record.Url,
+                record.Title,
+                record.Source,
+                record.DurationSeconds is { } seconds
+                    ? TimeSpan.FromSeconds(seconds)
+                    : null,
+                record.ThumbnailUrl));
         }
+    }
+
+    public void ReplaceEntries(IEnumerable<VideoQueueRecord> records)
+    {
+        entries.Clear();
+
+        foreach (var record in records)
+        {
+            entries.Add(new VideoQueueEntry(
+                record.Url,
+                record.Title,
+                record.Source,
+                record.DurationSeconds is { } seconds
+                    ? TimeSpan.FromSeconds(seconds)
+                    : null,
+                record.ThumbnailUrl));
+        }
+
+        Current = null;
+
+        Persist();
     }
 
     public IReadOnlyList<VideoQueueEntry> Entries => entries;
@@ -124,6 +162,25 @@ internal sealed class AetherStreamQueue
         Persist();
     }
 
+    public List<VideoQueueRecord> ExportEntries()
+    {
+        var records = new List<VideoQueueRecord>(entries.Count);
+
+        foreach (var entry in entries)
+        {
+            records.Add(new VideoQueueRecord
+            {
+                Url = entry.Url,
+                Title = entry.Title,
+                Source = entry.Source,
+                DurationSeconds = entry.Duration?.TotalSeconds,
+                ThumbnailUrl = entry.ThumbnailUrl,
+            });
+        }
+
+        return records;
+    }
+
     private void Persist()
     {
         var records = new List<VideoQueueRecord>(entries.Count);
@@ -146,8 +203,19 @@ internal sealed class AetherStreamQueue
 
     // Plays the next queued entry now, whether or not something was already playing - used both
     // for the user's own "skip" action and for auto-advance on natural end.
-    public void Advance()
+    public void Advance(bool showSnesWarning = true)
     {
+        if (video.IsPlayingSnes)
+        {
+            if (showSnesWarning)
+            {
+                Plugin.ChatGui.Print(
+                    "[AlphaChannel] Exit the SNES game before using video playback.");
+            }
+
+            return;
+        }
+
         if (entries.Count == 0)
         {
             // Deliberately does NOT call video.Stop() - that deactivates the in-world screen
@@ -163,10 +231,17 @@ internal sealed class AetherStreamQueue
 
         Current = entries[0];
         entries.RemoveAt(0);
+
         autoAdvanceArmed = false;
+
         EnrichIfYouTube(Current);
+
         video.Play(Current.Url);
-        video.SetOverlayTitle(Current.Title, Current.Source);
+
+        video.SetOverlayTitle(
+            Current.Title,
+            Current.Source);
+
         Persist();
     }
 
@@ -226,21 +301,27 @@ internal sealed class AetherStreamQueue
             autoAdvanceArmed = false;
         }
         else if (idle &&
-                 !wasIdle &&
-                 autoAdvanceArmed &&
-                 Current is not null)
+            !wasIdle &&
+            autoAdvanceArmed &&
+            Current is not null)
         {
             autoAdvanceArmed = false;
-            Advance();
+            Advance(false);
         }
 
-        // Autoplay: if something got queued (Add) while nothing was already playing, start it
-        // rather than leaving it sitting there until the player manually presses something -
-        // matches what "Play now" already does immediately, just for the Add-to-queue path too.
-        if (Current is null && entries.Count > 0)
-        {
-            Advance();
-        }
+        //
+        // Do NOT automatically start a queue merely because it contains
+        // entries.
+        //
+        // This is important after a plugin reload: persisted queue entries
+        // are restored into `entries`, but there is no active Current item.
+        // Those restored entries must remain paused until the user explicitly
+        // resumes the queue.
+        //
+        // Automatic queue advancement is handled above and only occurs after
+        // an existing Current item has actually been playing and then reaches
+        // its natural end.
+        //
 
         wasIdle = idle;
     }

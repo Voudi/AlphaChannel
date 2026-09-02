@@ -8,6 +8,31 @@ internal sealed partial class MainWindow
 {
     private string djStreamUrl = string.Empty;
 
+
+    //
+    // Radio UI
+    //
+
+    private string djStationNameInput = string.Empty;
+    private string djStationUrlInput = string.Empty;
+
+    private readonly List<DjSavedStation> djSavedStations = [];
+
+    private sealed class DjSavedStation
+    {
+        internal string Name { get; }
+        internal string Url { get; }
+
+        internal DjSavedStation(
+            string name,
+            string url)
+        {
+            Name = name;
+            Url = url;
+        }
+    }
+
+
     private bool djSimpleGuideOpen;
     private bool djAdvancedGuideOpen;
 
@@ -20,239 +45,417 @@ internal sealed partial class MainWindow
 
     private void DrawDJLive()
     {
-        ImGui.SetWindowFontScale(1.15f);
+        //
+        // Page heading
+        //
+
+        ImGui.SetWindowFontScale(
+            1.15f);
 
         ImGui.TextColored(
             Vector4.One,
             "Music / DJ");
 
-        ImGui.SetWindowFontScale(1f);
+        ImGui.SetWindowFontScale(
+            1f);
 
         ImGui.Dummy(
-            new Vector2(0f, 4f));
+            new Vector2(
+                0f,
+                3f));
 
-        ImGui.SetWindowFontScale(0.82f);
+        ImGui.SetWindowFontScale(
+            0.82f);
 
         ImGui.TextColored(
             MutedText,
             "Play music or broadcast a live DJ set to your Alpha Channel watch party.");
 
-        ImGui.SetWindowFontScale(1f);
+        ImGui.SetWindowFontScale(
+            1f);
 
         ImGui.Dummy(
-            new Vector2(0f, 18f));
+            new Vector2(
+                0f,
+                8f));
 
-        // -----------------------------------------------------
-        // Direct stream
-        // -----------------------------------------------------
 
-        DrawDjStreamBox();
+        //
+        // =====================================================
+        // Main Music / Radio dashboard
+        // =====================================================
+        //
+
+        DrawDjMediaDashboard();
+
 
         ImGui.Dummy(
-            new Vector2(0f, 24f));
+     new Vector2(
+         0f,
+         12f));
 
-        DrawDjDivider();
+
+        //
+        // =====================================================
+        // Help / broadcast setup
+        // =====================================================
+        //
+
+        ImGui.Separator();
 
         ImGui.Dummy(
-            new Vector2(0f, 24f));
+            new Vector2(
+                0f,
+                12f));
 
-        // -----------------------------------------------------
-        // Setup choices
-        // -----------------------------------------------------
 
-        ImGui.SetWindowFontScale(1.05f);
+        ImGui.SetWindowFontScale(
+            1.05f);
 
         ImGui.TextColored(
             Vector4.One,
-            "Need help getting your music online?");
+            "Need help broadcasting your own music stream?");
 
-        ImGui.SetWindowFontScale(1f);
+        ImGui.SetWindowFontScale(
+            1f);
 
         ImGui.Dummy(
-            new Vector2(0f, 4f));
+            new Vector2(
+                0f,
+                2f));
 
-        ImGui.SetWindowFontScale(0.82f);
+        ImGui.SetWindowFontScale(
+            0.82f);
 
         ImGui.TextColored(
             MutedText,
             "Choose the setup that best matches how you want to broadcast.");
 
-        ImGui.SetWindowFontScale(1f);
+        ImGui.SetWindowFontScale(
+            1f);
 
         ImGui.Dummy(
-            new Vector2(0f, 14f));
+            new Vector2(
+                0f,
+                10f));
+
 
         DrawDjSetupCards();
+
+
+        //
+        // Existing setup-guide modals.
+        //
 
         DrawDjSimpleGuide();
         DrawDjAdvancedGuide();
     }
 
+
     // ---------------------------------------------------------
-    // Direct URL box
+    // Main Music / Radio dashboard
     // ---------------------------------------------------------
 
-    private void DrawDjStreamBox()
+    private void DrawDjMediaDashboard()
     {
-        using (ImRaii.PushColor(
-            ImGuiCol.ChildBg,
-            new Vector4(
-                0.035f,
-                0.045f,
-                0.075f,
-                1f)))
-        using (var box =
-            ImRaii.Child(
-                "##djStreamBox",
+        const float gap =
+            16f;
+
+        const float baseDashboardHeight =
+     440f;
+
+        // A rendered saved-station row is 44px, but ImGui's
+        // item/cursor spacing means its real layout cost is higher.
+        // Give each station enough room that the add form never
+        // gets pushed into the bottom edge of the dashboard.
+        const float savedStationHeight =
+            68f;
+
+        var dashboardHeight =
+            baseDashboardHeight +
+            djSavedStations.Count *
+            savedStationHeight;
+
+        var separatorHeight =
+            dashboardHeight -
+            34f;
+
+
+        using (
+                ImRaii.PushStyle(
+                    ImGuiStyleVar.WindowPadding,
                 new Vector2(
-                    -1f,
-                    185f),
-                false,
-                ImGuiWindowFlags.NoScrollbar))
+                    16f,
+                    16f)))
+        using (
+            ImRaii.PushStyle(
+                ImGuiStyleVar.ChildRounding,
+                12f))
+        using (
+            ImRaii.PushColor(
+                ImGuiCol.ChildBg,
+                CardBg))
+        using (
+            ImRaii.PushColor(
+                ImGuiCol.Border,
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.28f)))
+        using (
+var dashboard =
+    ImRaii.Child(
+        "##djMediaDashboard",
+        new Vector2(
+            -1f,
+            dashboardHeight),
+        true,
+                    ImGuiWindowFlags.NoScrollbar |
+                    ImGuiWindowFlags.NoScrollWithMouse))
         {
-            if (!box)
+            if (!dashboard)
             {
                 return;
             }
 
-            ImGui.SetCursorPos(
-                new Vector2(
-                    16f,
-                    14f));
 
-            ImGui.SetWindowFontScale(1.02f);
+            //
+            // Calculate the columns from the actual usable width
+            // inside the padded dashboard.
+            //
 
-            ImGui.TextColored(
-                Vector4.One,
-                "Have an MP3 or live audio stream link?");
+            var availableWidth =
+                ImGui.GetContentRegionAvail().X;
 
-            ImGui.SetWindowFontScale(1f);
-
-            ImGui.SetCursorPosX(16f);
-
-            ImGui.SetWindowFontScale(0.80f);
-
-            ImGui.TextColored(
-                MutedText,
-                "Paste a direct audio URL below to start playing it on your TV.");
-
-            ImGui.SetWindowFontScale(1f);
-
-            ImGui.Dummy(
-                new Vector2(0f, 10f));
-
-            ImGui.SetCursorPosX(16f);
-
-            var inputWidth =
-                ImGui.GetContentRegionAvail().X -
-                82f;
-
-            ImGui.SetNextItemWidth(
+            var leftWidth =
                 MathF.Max(
-                    120f,
-                    inputWidth));
+                    300f,
+                    availableWidth * 0.46f);
 
-            using (ImRaii.PushStyle(
-                ImGuiStyleVar.FrameRounding,
-                8f)
-                .Push(
-                    ImGuiStyleVar.FramePadding,
-                    new Vector2(
-                        12f,
-                        9f)))
-            using (ImRaii.PushColor(
-                ImGuiCol.FrameBg,
-                new Vector4(
-                    0.045f,
-                    0.06f,
-                    0.105f,
-                    1f))
-                .Push(
-                    ImGuiCol.FrameBgHovered,
-                    new Vector4(
-                        0.065f,
-                        0.085f,
-                        0.14f,
-                        1f))
-                .Push(
-                    ImGuiCol.FrameBgActive,
-                    new Vector4(
-                        0.065f,
-                        0.085f,
-                        0.14f,
-                        1f)))
-            {
-                ImGui.InputTextWithHint(
-                    "##djStreamUrl",
-                    "https://example.com/live.mp3",
-                    ref djStreamUrl,
-                    2000);
-            }
+            var rightWidth =
+              MathF.Max(
+                  300f,
+                  availableWidth -
+                  leftWidth -
+                  gap * 2f -
+                  1f);
+
+
+            //
+            // Left column
+            //
+
+            DrawDjDirectAudioPanel(
+                leftWidth);
+
 
             ImGui.SameLine(
                 0f,
-                8f);
+                gap);
 
-            using (ImRaii.PushStyle(
-                ImGuiStyleVar.FrameRounding,
-                8f)
-                .Push(
-                    ImGuiStyleVar.FramePadding,
-                    new Vector2(
-                        12f,
-                        9f)))
-            using (ImRaii.PushColor(
-                ImGuiCol.Button,
-                new Vector4(
-                    0.055f,
-                    0.07f,
-                    0.115f,
-                    1f))
-                .Push(
-                    ImGuiCol.ButtonHovered,
-                    new Vector4(
-                        0.075f,
-                        0.095f,
-                        0.15f,
-                        1f))
-                .Push(
-                    ImGuiCol.ButtonActive,
-                    new Vector4(
-                        0.075f,
-                        0.095f,
-                        0.15f,
-                        1f)))
-            using (ImRaii.PushFont(
-                UiBuilder.IconFont))
-            {
-                if (ImGui.Button(
-                    FontAwesomeIcon.Clipboard
-                        .ToIconString()))
-                {
-                    var clipboard =
-                        ImGui.GetClipboardText();
 
-                    if (!string.IsNullOrWhiteSpace(
-                            clipboard))
-                    {
-                        djStreamUrl =
-                            clipboard.Trim();
-                    }
-                }
-            }
+            //
+            // Vertical separator
+            //
+
+            var separatorOrigin =
+                ImGui.GetCursorScreenPos();
+
+            var drawList =
+                ImGui.GetWindowDrawList();
+
+            drawList.AddLine(
+          separatorOrigin +
+          new Vector2(
+              0f,
+              2f),
+          separatorOrigin +
+          new Vector2(
+              0f,
+              separatorHeight),
+          ImGui.GetColorU32(
+              new Vector4(
+                  MutedText.X,
+                  MutedText.Y,
+                  MutedText.Z,
+                  0.16f)),
+          1f);
+
 
             ImGui.Dummy(
-                new Vector2(0f, 10f));
+                new Vector2(
+                    1f,
+                    separatorHeight));
 
-            ImGui.SetCursorPosX(16f);
 
-            using (ImRaii.Disabled(
-                string.IsNullOrWhiteSpace(
-                    djStreamUrl)))
-            using (ImRaii.PushStyle(
+            ImGui.SameLine(
+                0f,
+                gap);
+
+
+            //
+            // Right column
+            //
+
+            DrawDjRadioPanel(
+                rightWidth);
+        }
+    }
+
+
+    // ---------------------------------------------------------
+    // Direct audio
+    // ---------------------------------------------------------
+
+    private void DrawDjDirectAudioPanel(
+        float width)
+    {
+        using var group =
+            ImRaii.Group();
+
+        ImGui.SetWindowFontScale(
+            1.05f);
+
+        ImGui.TextColored(
+            Vector4.One,
+            "Direct Audio");
+
+        ImGui.SetWindowFontScale(
+            1f);
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                3f));
+
+        ImGui.SetWindowFontScale(
+            0.82f);
+
+        ImGui.TextColored(
+            MutedText,
+            "Play an MP3 file or live audio stream by URL.");
+
+        ImGui.SetWindowFontScale(
+            1f);
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                16f));
+
+
+        //
+        // URL field + paste
+        //
+
+        var pasteWidth =
+            42f;
+
+        var inputWidth =
+            MathF.Max(
+                120f,
+                width -
+                pasteWidth -
+                12f);
+
+
+        ImGui.SetNextItemWidth(
+            inputWidth);
+
+        using (
+            ImRaii.PushStyle(
                 ImGuiStyleVar.FrameRounding,
                 8f))
-            using (ImRaii.PushColor(
+        using (
+            ImRaii.PushStyle(
+                ImGuiStyleVar.FramePadding,
+                new Vector2(
+                    12f,
+                    9f)))
+        using (
+            ImRaii.PushColor(
+                ImGuiCol.FrameBg,
+                FrameBg)
+                .Push(
+                    ImGuiCol.FrameBgHovered,
+                    FrameBgHover)
+                .Push(
+                    ImGuiCol.FrameBgActive,
+                    FrameBgHover))
+        {
+            ImGui.InputTextWithHint(
+                "##djStreamUrl",
+                "https://example.com/live.mp3",
+                ref djStreamUrl,
+                2000);
+        }
+
+
+        ImGui.SameLine(
+            0f,
+            8f);
+
+
+        using (
+            ImRaii.PushStyle(
+                ImGuiStyleVar.FrameRounding,
+                8f))
+        using (
+            ImRaii.PushColor(
+                ImGuiCol.Button,
+                FrameBg)
+                .Push(
+                    ImGuiCol.ButtonHovered,
+                    FrameBgHover)
+                .Push(
+                    ImGuiCol.ButtonActive,
+                    FrameBgHover))
+        using (
+            ImRaii.PushFont(
+                UiBuilder.IconFont))
+        {
+            if (ImGui.Button(
+                    FontAwesomeIcon.Clipboard
+                        .ToIconString(),
+                    new Vector2(
+                        pasteWidth,
+                        36f)))
+            {
+                var clipboard =
+                    ImGui.GetClipboardText();
+
+                if (!string.IsNullOrWhiteSpace(
+                        clipboard))
+                {
+                    djStreamUrl =
+                        clipboard.Trim();
+                }
+            }
+        }
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                14f));
+
+
+        //
+        // Play button
+        //
+
+        using (
+            ImRaii.Disabled(
+                string.IsNullOrWhiteSpace(
+                    djStreamUrl)))
+        using (
+            ImRaii.PushStyle(
+                ImGuiStyleVar.FrameRounding,
+                8f))
+        using (
+            ImRaii.PushColor(
                 ImGuiCol.Button,
                 Accent)
                 .Push(
@@ -261,31 +464,831 @@ internal sealed partial class MainWindow
                 .Push(
                     ImGuiCol.ButtonActive,
                     AccentActive))
-            {
-                var buttonPos =
-                    ImGui.GetCursorScreenPos();
+        {
+            var buttonPos =
+                ImGui.GetCursorScreenPos();
 
-                var buttonSize =
-                    new Vector2(
-                        170f,
-                        38f);
+            var buttonSize =
+                new Vector2(
+                    MathF.Min(
+                        230f,
+                        width),
+                    38f);
 
-                if (ImGui.Button(
+            if (ImGui.Button(
                     "##playDjStream",
                     buttonSize))
-                {
-                    PlayDjStream();
-                }
-
-                DrawPlayerActionButtonContent(
-                    buttonPos,
-                    buttonSize,
-                    FontAwesomeIcon.Play,
-                    "Play on TV",
-                    Vector4.One);
+            {
+                PlayDjStream();
             }
+
+            DrawPlayerActionButtonContent(
+                buttonPos,
+                buttonSize,
+                FontAwesomeIcon.Play,
+                "Play on TV",
+                Vector4.One);
+        }
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                18f));
+
+
+        //
+        // Supported-format information box
+        //
+
+        DrawDjSupportedFormatsBox(
+            width);
+
+        ImGui.Dummy(
+    new Vector2(
+        0f,
+        10f));
+
+        ImGui.SetWindowFontScale(
+            0.74f);
+
+        ImGui.TextColored(
+            MutedText,
+            "Direct audio links can also be shared through Watch Party.");
+
+        ImGui.SetWindowFontScale(
+            1f);
+    }
+
+
+    private void DrawDjSupportedFormatsBox(
+        float width)
+    {
+        const float height =
+            72f;
+
+        using (
+            ImRaii.PushStyle(
+                ImGuiStyleVar.ChildRounding,
+                9f))
+        using (
+            ImRaii.PushColor(
+                ImGuiCol.ChildBg,
+                new Vector4(
+                    Accent.X * 0.14f,
+                    Accent.Y * 0.12f,
+                    Accent.Z * 0.20f,
+                    0.92f)))
+        using (
+            ImRaii.PushColor(
+                ImGuiCol.Border,
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.22f)))
+        using (
+            var box =
+                ImRaii.Child(
+                    "##djSupportedFormats",
+                    new Vector2(
+                        width,
+                        height),
+                    true,
+                    ImGuiWindowFlags.NoScrollbar |
+                    ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            if (!box)
+            {
+                return;
+            }
+
+            var start =
+                ImGui.GetCursorScreenPos();
+
+            var drawList =
+                ImGui.GetWindowDrawList();
+
+
+            //
+            // Icon
+            //
+
+            var iconCenter =
+                start +
+                new Vector2(
+                    22f,
+                    36f);
+
+            drawList.AddCircleFilled(
+                iconCenter,
+                14f,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        0.18f)),
+                24);
+
+            using (
+                ImRaii.PushFont(
+                    UiBuilder.IconFont))
+            {
+                var glyph =
+                    FontAwesomeIcon.Lightbulb
+                        .ToIconString();
+
+                var glyphSize =
+                    ImGui.CalcTextSize(
+                        glyph);
+
+                drawList.AddText(
+                    iconCenter -
+                    glyphSize / 2f,
+                    ImGui.GetColorU32(
+                        Accent),
+                    glyph);
+            }
+
+
+            //
+            // Copy
+            //
+
+            ImGui.SetCursorPos(
+               new Vector2(
+                   48f,
+                   10f));
+
+            ImGui.SetWindowFontScale(
+                0.86f);
+
+            ImGui.TextColored(
+                Vector4.One,
+                "Supported formats");
+
+            ImGui.SetWindowFontScale(
+                1f);
+
+
+            ImGui.SetCursorPos(
+        new Vector2(
+            48f,
+            34f));
+
+            ImGui.SetWindowFontScale(
+                0.78f);
+
+            ImGui.TextColored(
+                MutedText,
+                "MP3, AAC, OGG, M4A, WAV and most live audio streams.");
+
+            ImGui.SetWindowFontScale(
+                1f);
         }
     }
+
+
+    // ---------------------------------------------------------
+    // Radio stations
+    // ---------------------------------------------------------
+
+    private void DrawDjRadioPanel(
+        float width)
+    {
+        using var group =
+            ImRaii.Group();
+
+        ImGui.SetWindowFontScale(
+            1.05f);
+
+        ImGui.TextColored(
+            Vector4.One,
+            "Radio Stations");
+
+        ImGui.SetWindowFontScale(
+            1f);
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                3f));
+
+        ImGui.SetWindowFontScale(
+            0.82f);
+
+        ImGui.TextColored(
+            MutedText,
+            "Choose a station below or add your own stream.");
+
+        ImGui.SetWindowFontScale(
+            1f);
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                6f));
+
+
+        ImGui.SetWindowFontScale(
+            0.78f);
+
+        ImGui.TextColored(
+            MutedText,
+            "FEATURED STATIONS");
+
+        ImGui.SetWindowFontScale(
+            1f);
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                3f));
+
+
+        //
+        // Featured placeholders.
+        //
+
+        DrawDjFeaturedStation(
+            "##djFeaturedXiv",
+            FontAwesomeIcon.BroadcastTower,
+            "XIV Radio",
+            "FFXIV music, talk & community",
+            width);
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                3f));
+
+        DrawDjFeaturedStation(
+            "##djFeaturedLofi",
+            FontAwesomeIcon.Headphones,
+            "Lofi Beats",
+            "Chill beats and background music",
+            width);
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                3f));
+
+        DrawDjFeaturedStation(
+            "##djFeaturedRetro",
+            FontAwesomeIcon.Gamepad,
+            "Retro Game Radio",
+            "Classic gaming music",
+            width);
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                4f));
+
+
+        //
+        // Saved station section
+        //
+
+        ImGui.SetWindowFontScale(
+            0.78f);
+
+        ImGui.TextColored(
+            MutedText,
+            "YOUR STATIONS");
+
+        ImGui.SetWindowFontScale(
+            1f);
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                3f));
+
+
+        //
+        // Display custom stations.
+        //
+
+        for (var index = 0;
+             index < djSavedStations.Count;
+             index++)
+        {
+            var station =
+                djSavedStations[index];
+
+            DrawDjSavedStation(
+                station,
+                index,
+                width);
+
+            ImGui.Dummy(
+                new Vector2(
+                    0f,
+                    4f));
+        }
+
+
+        //
+        // Add station form
+        //
+
+        var addButtonWidth =
+            105f;
+
+        const float fieldGap =
+            8f;
+
+        var remainingForFields =
+            width -
+            addButtonWidth -
+            fieldGap * 2f;
+
+        var nameWidth =
+            MathF.Max(
+                100f,
+                remainingForFields * 0.40f);
+
+        var urlWidth =
+            MathF.Max(
+                140f,
+                remainingForFields -
+                nameWidth);
+
+
+        ImGui.SetNextItemWidth(
+            nameWidth);
+
+        using (
+            ImRaii.PushStyle(
+                ImGuiStyleVar.FrameRounding,
+                8f))
+        using (
+            ImRaii.PushColor(
+                ImGuiCol.FrameBg,
+                FrameBg)
+                .Push(
+                    ImGuiCol.FrameBgHovered,
+                    FrameBgHover)
+                .Push(
+                    ImGuiCol.FrameBgActive,
+                    FrameBgHover))
+        {
+            ImGui.InputTextWithHint(
+                "##djStationName",
+                "Station name",
+                ref djStationNameInput,
+                100);
+        }
+
+
+        ImGui.SameLine(
+            0f,
+            fieldGap);
+
+
+        ImGui.SetNextItemWidth(
+            urlWidth);
+
+        using (
+            ImRaii.PushStyle(
+                ImGuiStyleVar.FrameRounding,
+                8f))
+        using (
+            ImRaii.PushColor(
+                ImGuiCol.FrameBg,
+                FrameBg)
+                .Push(
+                    ImGuiCol.FrameBgHovered,
+                    FrameBgHover)
+                .Push(
+                    ImGuiCol.FrameBgActive,
+                    FrameBgHover))
+        {
+            ImGui.InputTextWithHint(
+                "##djStationUrl",
+                "Stream URL",
+                ref djStationUrlInput,
+                2000);
+        }
+
+
+        ImGui.SameLine(
+            0f,
+            fieldGap);
+
+
+        var canAdd =
+            !string.IsNullOrWhiteSpace(
+                djStationNameInput) &&
+            !string.IsNullOrWhiteSpace(
+                djStationUrlInput);
+
+
+        using (
+            ImRaii.Disabled(
+                !canAdd))
+        using (
+            ImRaii.PushStyle(
+                ImGuiStyleVar.FrameRounding,
+                8f))
+        using (
+            ImRaii.PushColor(
+                ImGuiCol.Button,
+                Accent)
+                .Push(
+                    ImGuiCol.ButtonHovered,
+                    AccentHover)
+                .Push(
+                    ImGuiCol.ButtonActive,
+                    AccentActive))
+        {
+            var buttonPos =
+                ImGui.GetCursorScreenPos();
+
+            var buttonSize =
+                new Vector2(
+                    addButtonWidth,
+                    30f);
+
+            if (ImGui.Button(
+                    "##addDjStation",
+                    buttonSize))
+            {
+                AddDjStation();
+            }
+
+            DrawPlayerActionButtonContent(
+                buttonPos,
+                buttonSize,
+                FontAwesomeIcon.Plus,
+                "Add Station",
+                Vector4.One);
+        }
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                4f));
+
+
+        ImGui.SetWindowFontScale(
+            0.72f);
+
+        ImGui.TextColored(
+            MutedText,
+            djSavedStations.Count == 0
+                ? "Your saved stations will appear here."
+                : $"{djSavedStations.Count} saved station{(djSavedStations.Count == 1 ? string.Empty : "s")}.");
+
+        ImGui.SetWindowFontScale(
+            1f);
+    }
+
+
+    private void DrawDjFeaturedStation(
+        string id,
+        FontAwesomeIcon icon,
+        string name,
+        string description,
+        float width)
+    {
+        const float height =
+       42f;
+
+        var origin =
+            ImGui.GetCursorScreenPos();
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        var min =
+            origin;
+
+        var max =
+            origin +
+            new Vector2(
+                width,
+                height);
+
+
+        drawList.AddRectFilled(
+            min,
+            max,
+            ImGui.GetColorU32(
+                FrameBg),
+            8f);
+
+        drawList.AddRect(
+            min,
+            max,
+            ImGui.GetColorU32(
+                BorderSubtle),
+            8f);
+
+
+        //
+        // Icon tile
+        //
+
+        var tileMin =
+            min +
+            new Vector2(
+                5f,
+                5f);
+
+        var tileMax =
+            tileMin +
+            new Vector2(
+                32f,
+                32f);
+
+
+        drawList.AddRectFilled(
+            tileMin,
+            tileMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.22f)),
+            7f);
+
+
+        using (
+            ImRaii.PushFont(
+                UiBuilder.IconFont))
+        {
+            var glyph =
+                icon.ToIconString();
+
+            var glyphSize =
+                ImGui.CalcTextSize(
+                    glyph);
+
+            drawList.AddText(
+                tileMin +
+                (tileMax - tileMin) /
+                2f -
+                glyphSize /
+                2f,
+                ImGui.GetColorU32(
+                    Accent),
+                glyph);
+        }
+
+
+        //
+        // Station name
+        //
+
+        drawList.AddText(
+            min +
+            new Vector2(
+                45f,
+                5f),
+                    ImGui.GetColorU32(
+                Vector4.One),
+            name);
+
+
+        //
+        // Description
+        //
+
+        drawList.AddText(
+            min +
+            new Vector2(
+                45f,
+                23f),
+                    ImGui.GetColorU32(
+                MutedText),
+            description);
+
+
+        //
+        // Play button placeholder.
+        //
+        // We don't have real station URLs yet.
+        //
+
+        const float playWidth =
+            58f;
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                max.X -
+                playWidth -
+                6f,
+                min.Y + 6f));
+
+        using (
+            ImRaii.Disabled())
+        using (
+            ImRaii.PushStyle(
+                ImGuiStyleVar.FrameRounding,
+                7f))
+        {
+            ImGui.Button(
+                $"Play{id}",
+                new Vector2(
+                    playWidth,
+                    29f));
+        }
+
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                min.X,
+                max.Y));
+
+        ImGui.Dummy(
+            new Vector2(
+                width,
+                1f));
+    }
+
+
+    private void DrawDjSavedStation(
+        DjSavedStation station,
+        int index,
+        float width)
+    {
+        const float height =
+            44f;
+
+        var origin =
+            ImGui.GetCursorScreenPos();
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        var min =
+            origin;
+
+        var max =
+            origin +
+            new Vector2(
+                width,
+                height);
+
+
+        drawList.AddRectFilled(
+            min,
+            max,
+            ImGui.GetColorU32(
+                FrameBg),
+            8f);
+
+        drawList.AddRect(
+            min,
+            max,
+            ImGui.GetColorU32(
+                BorderSubtle),
+            8f);
+
+
+        //
+        // Status dot
+        //
+
+        drawList.AddCircleFilled(
+            min +
+            new Vector2(
+                14f,
+                height / 2f),
+            4f,
+            ImGui.GetColorU32(
+                Good),
+            16);
+
+
+        //
+        // Station title
+        //
+
+        drawList.AddText(
+            min +
+            new Vector2(
+                27f,
+                8f),
+            ImGui.GetColorU32(
+                Vector4.One),
+            station.Name);
+
+
+        drawList.AddText(
+            min +
+            new Vector2(
+                27f,
+                25f),
+            ImGui.GetColorU32(
+                MutedText),
+            "Saved station");
+
+
+        //
+        // Play button
+        //
+
+        const float playWidth =
+            62f;
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                max.X -
+                playWidth -
+                7f,
+                min.Y + 7f));
+
+
+        using (
+            ImRaii.PushStyle(
+                ImGuiStyleVar.FrameRounding,
+                7f))
+        using (
+            ImRaii.PushColor(
+                ImGuiCol.Button,
+                FrameBgHover)
+                .Push(
+                    ImGuiCol.ButtonHovered,
+                    Accent)
+                .Push(
+                    ImGuiCol.ButtonActive,
+                    AccentActive))
+        {
+            if (ImGui.Button(
+                    $"Play##djStation_{index}",
+                    new Vector2(
+                        playWidth,
+                        30f)))
+            {
+                PlayDjStation(
+                    station);
+            }
+        }
+
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                min.X,
+                max.Y));
+
+        ImGui.Dummy(
+            new Vector2(
+                width,
+                1f));
+    }
+
+
+    private void AddDjStation()
+    {
+        var name =
+            djStationNameInput.Trim();
+
+        var url =
+            djStationUrlInput.Trim();
+
+        if (name.Length == 0 ||
+            url.Length == 0)
+        {
+            return;
+        }
+
+        djSavedStations.Add(
+            new DjSavedStation(
+                name,
+                url));
+
+        djStationNameInput =
+            string.Empty;
+
+        djStationUrlInput =
+            string.Empty;
+    }
+
+
+    private void PlayDjStation(
+        DjSavedStation station)
+    {
+        PlayDjUrl(
+            station.Url,
+            station.Name,
+            "Radio");
+    }
+
+
+    // ---------------------------------------------------------
+    // Shared audio playback
+    // ---------------------------------------------------------
 
     private void PlayDjStream()
     {
@@ -298,20 +1301,39 @@ internal sealed partial class MainWindow
             return;
         }
 
-        queue.PlayNow(
-            new Video.VideoQueueEntry(
-                url,
-                "Live music stream",
-                "Music / DJ",
-                null,
-                null));
+        PlayDjUrl(
+            url,
+            "Live music stream",
+            "Music / DJ");
 
         djStreamUrl =
             string.Empty;
+    }
+
+
+    private void PlayDjUrl(
+        string url,
+        string title,
+        string source)
+    {
+        if (string.IsNullOrWhiteSpace(
+                url))
+        {
+            return;
+        }
+
+        queue.PlayNow(
+            new Video.VideoQueueEntry(
+                url,
+                title,
+                source,
+                null,
+                null));
 
         activePlayerDrawer =
             PlayerDrawer.Player;
     }
+
 
     // ---------------------------------------------------------
     // Setup cards
@@ -322,38 +1344,38 @@ internal sealed partial class MainWindow
         var availableWidth =
             ImGui.GetContentRegionAvail().X;
 
-        const float gap = 12f;
+        const float gap =
+            12f;
 
         var cardWidth =
             (availableWidth - gap) /
             2f;
 
-        DrawDjSetupCard(
+
+        DrawDjSetupCompactCard(
             "##simpleDjSetup",
             cardWidth,
             FontAwesomeIcon.Music,
             "Simple",
             "Play music or talk on mic",
-            "Use Caster.fm's broadcaster to get your audio online without needing DJ software.",
-            "Simple Setup Guide",
             () =>
             {
                 djSimpleGuideStep = 0;
                 djSimpleGuideOpen = true;
             });
 
+
         ImGui.SameLine(
             0f,
             gap);
 
-        DrawDjSetupCard(
+
+        DrawDjSetupCompactCard(
             "##advancedDjSetup",
             cardWidth,
             FontAwesomeIcon.Headphones,
             "Advanced / DJ",
-            "Mix, DJ and broadcast live",
-            "Use Mixxx with an internet radio host for playlists, decks, transitions and microphone control.",
-            "DJ Setup Guide",
+            "Mix DJ sets and broadcast live",
             () =>
             {
                 djAdvancedGuideStep = 0;
@@ -361,206 +1383,154 @@ internal sealed partial class MainWindow
             });
     }
 
-    private void DrawDjSetupCard(
+
+    private void DrawDjSetupCompactCard(
         string id,
         float width,
         FontAwesomeIcon icon,
         string title,
         string subtitle,
-        string description,
-        string buttonLabel,
         Action onClick)
     {
-        using (ImRaii.PushColor(
-            ImGuiCol.ChildBg,
-            new Vector4(
-                0.035f,
-                0.045f,
-                0.075f,
-                1f)))
-        using (var card =
-            ImRaii.Child(
-                id,
-                new Vector2(
-                    width,
-                    205f),
-                false,
-                ImGuiWindowFlags.NoScrollbar))
-        {
-            if (!card)
-            {
-                return;
-            }
-
-            ImGui.SetCursorPos(
-                new Vector2(
-                    16f,
-                    16f));
-
-            using (ImRaii.PushFont(
-                UiBuilder.IconFont))
-            {
-                ImGui.TextColored(
-                    AccentHover,
-                    icon.ToIconString());
-            }
-
-            ImGui.SameLine(
-                0f,
-                9f);
-
-            ImGui.SetWindowFontScale(
-                1.05f);
-
-            ImGui.TextColored(
-                Vector4.One,
-                title);
-
-            ImGui.SetWindowFontScale(
-                1f);
-
-            ImGui.SetCursorPosX(
-                16f);
-
-            ImGui.SetWindowFontScale(
-                0.82f);
-
-            ImGui.TextColored(
-                Gold,
-                subtitle);
-
-            ImGui.SetWindowFontScale(
-                1f);
-
-            ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    8f));
-
-            ImGui.SetCursorPosX(
-                16f);
-
-            ImGui.PushTextWrapPos(
-                width - 16f);
-
-            ImGui.SetWindowFontScale(
-                0.82f);
-
-            ImGui.TextColored(
-                MutedText,
-                description);
-
-            ImGui.SetWindowFontScale(
-                1f);
-
-            ImGui.PopTextWrapPos();
-
-            ImGui.SetCursorPos(
-                new Vector2(
-                    16f,
-                    151f));
-
-            using (ImRaii.PushStyle(
-                ImGuiStyleVar.FrameRounding,
-                8f))
-            using (ImRaii.PushColor(
-                ImGuiCol.Button,
-                Accent)
-                .Push(
-                    ImGuiCol.ButtonHovered,
-                    AccentHover)
-                .Push(
-                    ImGuiCol.ButtonActive,
-                    AccentActive))
-            {
-                var buttonPos =
-                    ImGui.GetCursorScreenPos();
-
-                var buttonSize =
-                    new Vector2(
-                        MathF.Min(
-                            180f,
-                            width - 32f),
-                        36f);
-
-                if (ImGui.Button(
-                    id + "_button",
-                    buttonSize))
-                {
-                    onClick();
-                }
-
-                DrawPlayerActionButtonContent(
-                    buttonPos,
-                    buttonSize,
-                    FontAwesomeIcon.BookOpen,
-                    buttonLabel,
-                    Vector4.One);
-            }
-        }
-    }
-
-    private void DrawDjDivider()
-    {
-        var width =
-            ImGui.GetContentRegionAvail().X;
+        const float height =
+            62f;
 
         var origin =
             ImGui.GetCursorScreenPos();
 
+        var clicked =
+            ImGui.InvisibleButton(
+                id,
+                new Vector2(
+                    width,
+                    height));
+
+        var hovered =
+            ImGui.IsItemHovered();
+
+        if (clicked)
+        {
+            onClick();
+        }
+
+
         var drawList =
             ImGui.GetWindowDrawList();
 
-        var text =
-            "OR";
+        var min =
+            origin;
 
-        var textSize =
-            ImGui.CalcTextSize(
-                text);
-
-        var middle =
-            origin.X +
-            width * 0.5f;
-
-        var lineColor =
-            ImGui.GetColorU32(
-                new Vector4(
-                    MutedText.X,
-                    MutedText.Y,
-                    MutedText.Z,
-                    0.20f));
-
-        drawList.AddLine(
-            new Vector2(
-                origin.X,
-                origin.Y + 7f),
-            new Vector2(
-                middle - 28f,
-                origin.Y + 7f),
-            lineColor);
-
-        drawList.AddLine(
-            new Vector2(
-                middle + 28f,
-                origin.Y + 7f),
-            new Vector2(
-                origin.X + width,
-                origin.Y + 7f),
-            lineColor);
-
-        drawList.AddText(
-            new Vector2(
-                middle -
-                textSize.X * 0.5f,
-                origin.Y),
-            ImGui.GetColorU32(
-                MutedText),
-            text);
-
-        ImGui.Dummy(
+        var max =
+            origin +
             new Vector2(
                 width,
-                14f));
+                height);
+
+
+        drawList.AddRectFilled(
+            min,
+            max,
+            ImGui.GetColorU32(
+                hovered
+                    ? CardBgHover
+                    : CardBg),
+            9f);
+
+        drawList.AddRect(
+            min,
+            max,
+            ImGui.GetColorU32(
+                hovered
+                    ? new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        0.50f)
+                    : BorderSubtle),
+            9f,
+            ImDrawFlags.None,
+            1f);
+
+
+        //
+        // Icon
+        //
+
+        using (
+            ImRaii.PushFont(
+                UiBuilder.IconFont))
+        {
+            var glyph =
+                icon.ToIconString();
+
+            var glyphSize =
+                ImGui.CalcTextSize(
+                    glyph);
+
+            drawList.AddText(
+                min +
+                new Vector2(
+                    17f,
+                    (height -
+                     glyphSize.Y) /
+                    2f),
+                ImGui.GetColorU32(
+                    Accent),
+                glyph);
+        }
+
+
+        //
+        // Text
+        //
+
+        drawList.AddText(
+            min +
+            new Vector2(
+                49f,
+                12f),
+            ImGui.GetColorU32(
+                Vector4.One),
+            title);
+
+        drawList.AddText(
+            min +
+            new Vector2(
+                49f,
+                34f),
+            ImGui.GetColorU32(
+                MutedText),
+            subtitle);
+
+
+        //
+        // Chevron
+        //
+
+        using (
+            ImRaii.PushFont(
+                UiBuilder.IconFont))
+        {
+            var chevron =
+                FontAwesomeIcon.ChevronRight
+                    .ToIconString();
+
+            var chevronSize =
+                ImGui.CalcTextSize(
+                    chevron);
+
+            drawList.AddText(
+                max -
+                new Vector2(
+                    chevronSize.X +
+                    15f,
+                    height / 2f +
+                    chevronSize.Y /
+                    2f),
+                ImGui.GetColorU32(
+                    MutedText),
+                chevron);
+        }
     }
 
     // ---------------------------------------------------------
@@ -970,7 +1940,7 @@ internal sealed partial class MainWindow
         ImGui.Dummy(
             new Vector2(
                 0f,
-                4f));
+                3f));
 
         ImGui.SetWindowFontScale(
             0.82f);

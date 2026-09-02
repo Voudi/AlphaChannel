@@ -801,6 +801,15 @@ internal sealed partial class MainWindow
                                 friend.DisplayName);
                         }
 
+                        if (UserRoles.IsDeveloper(friend.DisplayName))
+                        {
+                            ImGui.SameLine(
+                                0f,
+                                6f);
+
+                            DrawDeveloperBadge();
+                        }
+
                         var detail =
                             friend.StatusMessage is { Length: > 0 } status
                                 ? status
@@ -983,6 +992,69 @@ internal sealed partial class MainWindow
                 ImGui.PopID();
             }
         }
+    }
+
+    private static void DrawDeveloperBadge()
+    {
+        const string badgeText =
+            "Developer";
+
+        var textSize =
+            ImGui.CalcTextSize(
+                badgeText);
+
+        const float padX = 7f;
+        const float padY = 3f;
+
+        var min =
+            ImGui.GetCursorScreenPos();
+
+        var size =
+            new Vector2(
+                textSize.X + padX * 2f,
+                textSize.Y + padY * 2f);
+
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+
+        drawList.AddRectFilled(
+            min,
+            min + size,
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.55f,
+                    0.30f,
+                    1f,
+                    0.28f)),
+            6f);
+
+
+        drawList.AddRect(
+            min,
+            min + size,
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.65f,
+                    0.45f,
+                    1f,
+                    0.55f)),
+            6f);
+
+
+        drawList.AddText(
+            min +
+            new Vector2(
+                padX,
+                padY - 1f),
+            ImGui.GetColorU32(
+                Vector4.One),
+            badgeText);
+
+
+        ImGui.Dummy(
+            size);
     }
 
     private void RequestFriendSearch(CharacterSession session, string query)

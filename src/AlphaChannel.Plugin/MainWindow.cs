@@ -93,6 +93,7 @@ internal sealed partial class MainWindow : Window, IDisposable
     {
         Home,
         Player,
+        PlaySnes,
         VideoGrid,
         Screen,
         WatchAlong,
@@ -180,6 +181,11 @@ internal sealed partial class MainWindow : Window, IDisposable
     private bool namePromptPending;
     private bool namePromptActive;
     private string namePromptInput = string.Empty;
+
+    private bool createQueuePopupOpen;
+    private int creatingQueueIndex = -1;
+    private string newQueueName = string.Empty;
+
     private Action<string>? onNameConfirmed;
 
     //Scrollbar inactivity timer
@@ -400,6 +406,8 @@ internal sealed partial class MainWindow : Window, IDisposable
         proximityJoined = false;
         joinedHostDisplayName = null;
         _ = stream.LeaveAsync();
+        gameplayStreamOfferDismissed =
+    false;
     }
     private void StopPlayback()
     {
@@ -1206,6 +1214,28 @@ introText);
         }
     }
 
+    private static void DrawRoleBadge(
+    AlphaRole role)
+    {
+        if (role != AlphaRole.Developer)
+        {
+            return;
+        }
+
+
+        using (ImRaii.PushColor(
+            ImGuiCol.Text,
+            Accent))
+        {
+            ImGui.TextUnformatted(
+                "[Developer]");
+        }
+
+        ImGui.SameLine(
+            0f,
+            6f);
+    }
+
     private void HandleHomeDragScroll()
     {
         // Mouse wheel scrolling is handled natively by ImGui.
@@ -1450,9 +1480,13 @@ introText);
 
                     DrawCustomContentScrollbar();
 
-                    if (playbackActive)
+                    if (playbackActive &&
+    ShouldShowBottomPlaybackBar)
                     {
-                        ImGui.Dummy(new Vector2(0, BottomBarHeight));
+                        ImGui.Dummy(
+                            new Vector2(
+                                0,
+                                BottomBarHeight));
                     }
 
                     if (currentPage == HomePage.Home)
@@ -1466,26 +1500,39 @@ introText);
 
 
             var showingPlaybackBar =
-          playbackActive ||
-            (ImGui.GetTime() - playbackStoppedAt) < 0.35f;
+                ShouldShowBottomPlaybackBar &&
+                (
+                    playbackActive ||
+                    (ImGui.GetTime() - playbackStoppedAt) < 0.35f
+                );
 
             if (showingPlaybackBar)
             {
-                var playbackWindowPos = ImGui.GetWindowPos();
-                var playbackWindowSize = ImGui.GetWindowSize();
+                var playbackWindowPos =
+                    ImGui.GetWindowPos();
+
+                var playbackWindowSize =
+                    ImGui.GetWindowSize();
 
                 ImGui.SetCursorScreenPos(
-                    playbackWindowPos + new Vector2(
+                    playbackWindowPos +
+                    new Vector2(
                         SidebarWidth,
-                        playbackWindowSize.Y - BottomBarHeight));
+                        playbackWindowSize.Y -
+                        BottomBarHeight));
 
-                DrawBottomBar(playbackActive);
+                DrawBottomBar(
+                    playbackActive);
             }
 
             // Overlay last — its own ImGui window so clicks aren't eaten by the content/rail children.
             DrawWindowControlsStrip();
 
             DrawPlaybackErrorToast();
+
+            // Watch-party viewer media decisions must be drawn globally.
+            // A request can originate from Home, Add Media, Browse Videos, etc.
+            DrawViewerMediaActionPopup();
 
             if (!showingFirstLaunch)
             {
@@ -1719,7 +1766,9 @@ introText);
                 DrawHome();
                 break;
             case HomePage.Player:
-                PageTitle("Browse", "Find something to watch.");
+                PageTitle(
+                    "Add Media",
+                    "Choose what you want to put on the TV.");
                 DrawPlayerPage();
                 break;
             case HomePage.VideoGrid:
@@ -1727,6 +1776,12 @@ introText);
                     "Browse Videos",
                     "Discover the latest videos from your topics.");
                 DrawVideoGrid();
+                break;
+            case HomePage.PlaySnes:
+                PageTitle(
+                    "Play Games",
+                    "Play classic games locally on your in-game screen.");
+                DrawPlaySnesPage();
                 break;
             case HomePage.WatchAlong:
                 PageTitle(
@@ -1830,185 +1885,375 @@ introText);
 
     private void DrawSidebar()
     {
-        // Compact brand: accent mark + wordmark (tagline lives on Home).
-        var brandOrigin = ImGui.GetCursorScreenPos();
-        var sidebarWidth = ImGui.GetContentRegionAvail().X;
-        var drawList = ImGui.GetWindowDrawList();
+        //
+        // =========================================================
+        // FIXED SIDEBAR BRANDING
+        // =========================================================
+        //
+        // The Alpha Channel logo and wordmark always remain visible
+        // at the top of the sidebar.
+        //
+
+        var brandOrigin =
+            ImGui.GetCursorScreenPos();
+
+        var sidebarWidth =
+            ImGui.GetContentRegionAvail().X;
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
         const float mark = 42f;
+
 
         EnsureAlphaIconLoaded();
 
-        var centeredLogo = brandOrigin + new Vector2((sidebarWidth - mark) * 0.5f, 0);
 
-        var alphaWrap = alphaIconImage?.GetWrapOrDefault();
+        var centeredLogo =
+            brandOrigin +
+            new Vector2(
+                (sidebarWidth - mark) * 0.5f,
+                0f);
+
+
+        var alphaWrap =
+            alphaIconImage?
+                .GetWrapOrDefault();
+
 
         if (alphaWrap is not null)
         {
             drawList.AddImage(
                 alphaWrap.Handle,
                 centeredLogo,
-                centeredLogo + new Vector2(mark, mark),
+                centeredLogo +
+                new Vector2(
+                    mark,
+                    mark),
                 Vector2.Zero,
                 Vector2.One,
-ImGui.GetColorU32(Vector4.One));
+                ImGui.GetColorU32(
+                    Vector4.One));
         }
 
-        ImGui.Dummy(new Vector2(0, mark));
 
-        var brandText = "ALPHA CHANNEL";
-        var textWidth = ImGui.CalcTextSize(brandText).X;
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                mark));
+
+
+        var brandText =
+            "ALPHA CHANNEL";
+
+        var textWidth =
+            ImGui.CalcTextSize(
+                brandText)
+            .X;
+
 
         ImGui.SetCursorPosX(
-            (sidebarWidth - textWidth) * 0.5f);
+            (sidebarWidth - textWidth) *
+            0.5f);
 
-        ImGui.SetWindowFontScale(1.25f);
-        ImGui.TextUnformatted(brandText);
-        ImGui.SetWindowFontScale(1f);
 
-        ImGui.Dummy(new Vector2(0, 6));
+        ImGui.SetWindowFontScale(
+            1.25f);
 
-        if (CurrentSession is { } sidebarSession && friendsDirty && !friendsLoading)
+        ImGui.TextUnformatted(
+            brandText);
+
+        ImGui.SetWindowFontScale(
+            1f);
+
+
+        //
+        // Keep the existing heading-hide threshold based on the
+        // OUTER sidebar height.
+        //
+        // DrawNavGroup() will run inside the scrolling child below,
+        // so it must not use that smaller child's height.
+        //
+
+        const float hideHeadingsBelowHeight = 690f;
+
+        var compactSidebar =
+            ImGui.GetWindowHeight() <=
+            hideHeadingsBelowHeight;
+
+
+        //
+        // Refresh sidebar data before entering the scrolling child.
+        //
+
+        if (CurrentSession is { } sidebarSession &&
+            friendsDirty &&
+            !friendsLoading)
         {
-            RefreshFriends(sidebarSession.Token);
+            RefreshFriends(
+                sidebarSession.Token);
         }
 
-        DrawNavGroup("Discover");
 
-        DrawNavItem(
-            HomePage.Home,
-            FontAwesomeIcon.Home,
-            "Home");
+        //
+        // =========================================================
+        // SCROLLABLE NAVIGATION AREA
+        // =========================================================
+        //
+        // Everything between the fixed logo and fixed support row
+        // lives inside this child.
+        //
+        // NoScrollbar hides the scrollbar chrome.
+        //
+        // We intentionally DO NOT use NoScrollWithMouse here, so
+        // the mouse wheel can scroll this region whenever its
+        // contents are taller than the available height.
+        //
 
-        var playerLabel =
-            queue.Entries.Count > 0
-                ? $"Player ({queue.Entries.Count})"
-                : "Player";
-
-        DrawNavItem(
-            HomePage.Player,
-            FontAwesomeIcon.Play,
-            playerLabel);
-
-        DrawNavItem(
-            HomePage.VideoGrid,
-            FontAwesomeIcon.ThLarge,
-            "Browse Videos");
+        const float supportFooterHeight = 34f;
 
 
-        DrawNavGroup("Social");
-
-        DrawNavItem(
-            HomePage.WatchAlong,
-            FontAwesomeIcon.Users,
-            "Watch Party");
-
-        DrawNavItem(
-            HomePage.Friends,
-            FontAwesomeIcon.UserFriends,
-            "Friends",
-            friendRequests.Incoming.Length);
-
-        DrawNavItem(
-            HomePage.Venues,
-            FontAwesomeIcon.MapMarker,
-            "Venues");
+        var availableMiddleHeight =
+            ImGui.GetContentRegionAvail().Y;
 
 
-        DrawNavGroup("Tools");
-
-        DrawNavItem(
-            HomePage.Screen,
-            FontAwesomeIcon.Desktop,
-            "Screen");
-
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
+        var navigationHeight =
+            MathF.Max(
+                1f,
+                availableMiddleHeight -
+                supportFooterHeight);
 
 
-        DrawNavItem(
-            HomePage.Settings,
-            FontAwesomeIcon.Cog,
-            "Settings");
+        const ImGuiWindowFlags navigationFlags =
+            ImGuiWindowFlags.AlwaysUseWindowPadding |
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoSavedSettings;
 
-        if (CurrentSession is { } dmSidebarSession
-            && currentPage == HomePage.Messages
-            && conversationsDirty
-            && !conversationsLoading)
+
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.WindowPadding,
+            Vector2.Zero))
+        using (var navigation = ImRaii.Child(
+            "##sidebarNavigation",
+            new Vector2(
+                -1f,
+                navigationHeight),
+            false,
+            navigationFlags))
         {
-            RefreshConversations(dmSidebarSession.Token);
-        }
-
-        // Footer pinned above the content-region bottom. Theme ItemSpacing was eating the
-        // version line (Dummy gap + spacing pushed it under the clip), so zero it here and
-        // keep a little explicit slack under the version.
-        // Rotate the ask ↔ "Donate on Ko-fi" every 30s; height fits the taller copy so the
-        // footer doesn't jump when the label flips.
-        var donateLabel = DonateLabels[((int)(ImGui.GetTime() / DonateRotateSeconds)) % DonateLabels.Length];
-        var footerWidth = MathF.Max(40f, ImGui.GetContentRegionAvail().X);
-        var wrapWidth = MathF.Max(40f, footerWidth - 16f);
-        var donateH = 40f;
-        foreach (var candidate in DonateLabels)
-        {
-            donateH = MathF.Max(donateH, ImGui.CalcTextSize(candidate, false, wrapWidth).Y + 14f);
-        }
-
-        const float footerGap = 8f;
-        const float bottomSlack = 10f;
-        var versionH = ImGui.GetTextLineHeightWithSpacing();
-        var footerH = 205f;
-
-        using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, Vector2.Zero))
-        {
-            var footerStartY = ImGui.GetWindowContentRegionMax().Y - footerH;
-            if (footerStartY > ImGui.GetCursorPosY())
+            if (navigation)
             {
-                ImGui.SetCursorPosY(footerStartY);
+                DrawNavGroup(
+                    "Discover",
+                    compactSidebar);
+
+
+                DrawNavItem(
+                    HomePage.Home,
+                    FontAwesomeIcon.Home,
+                    "Home");
+
+
+                var playerLabel =
+                    queue.Entries.Count > 0
+                        ? $"Media Player ({queue.Entries.Count})"
+                        : "Media Player";
+
+
+                DrawNavItem(
+                    HomePage.Player,
+                    FontAwesomeIcon.Play,
+                    playerLabel);
+
+
+                DrawNavItem(
+                    HomePage.VideoGrid,
+                    FontAwesomeIcon.ThLarge,
+                    "Browse Videos");
+
+
+                DrawNavItem(
+                    HomePage.PlaySnes,
+                    FontAwesomeIcon.Gamepad,
+                    "Play Games");
+
+
+                DrawNavGroup(
+                    "Social",
+                    compactSidebar);
+
+
+                DrawNavItem(
+                    HomePage.WatchAlong,
+                    FontAwesomeIcon.Users,
+                    "Watch Party");
+
+
+                DrawNavItem(
+                    HomePage.Friends,
+                    FontAwesomeIcon.UserFriends,
+                    "Friends",
+                    friendRequests.Incoming.Length);
+
+
+                DrawNavItem(
+                    HomePage.Venues,
+                    FontAwesomeIcon.MapMarker,
+                    "Venues");
+
+
+                DrawNavGroup(
+                    "Tools",
+                    compactSidebar);
+
+
+                DrawNavItem(
+                    HomePage.Screen,
+                    FontAwesomeIcon.Desktop,
+                    "Screen");
+
+
+                DrawNavItem(
+                    HomePage.Settings,
+                    FontAwesomeIcon.Cog,
+                    "Settings");
+
+
+                if (CurrentSession is { } dmSidebarSession &&
+                    currentPage == HomePage.Messages &&
+                    conversationsDirty &&
+                    !conversationsLoading)
+                {
+                    RefreshConversations(
+                        dmSidebarSession.Token);
+                }
             }
-
-            var footerOrigin = ImGui.GetCursorScreenPos();
-            var panelWidth = ImGui.GetContentRegionAvail().X;
-            var footerHeight = 160f;
-
-           
-
-            ImGui.Dummy(new Vector2(0, 8));
-
-
-
-            DrawSupportLink(
-     "♥  Join on Patreon",
-     32f,
-     PatreonOrange,
-     PatreonOrangeHover,
-     "https://www.patreon.com/alphachannel");
-
-            ImGui.Dummy(new Vector2(0, 6));
-
-            DrawDonateLink("♥  Donate on Ko-fi", 32f);
-
-            ImGui.Dummy(new Vector2(0, 10));
-
-            DrawSidebarProfile();
-
-            ImGui.Dummy(new Vector2(0, 4));
-
-            DrawVersionFooter();
         }
+
+
+        //
+        // =========================================================
+        // FIXED SUPPORT FOOTER
+        // =========================================================
+        //
+        // Patreon and Discord are outside the scrolling child.
+        //
+        // They therefore remain anchored at the bottom regardless
+        // of where the navigation list has been scrolled.
+        //
+
+        //
+        // Small breathing room above the fixed support row.
+        //
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                2f));
+
+
+        var supportRowWidth =
+            ImGui.GetContentRegionAvail().X;
+
+
+        const float supportGap = 5f;
+
+
+        var supportButtonWidth =
+            (supportRowWidth - supportGap) *
+            0.5f;
+
+
+        DrawCompactSupportLink(
+            "♥ Patreon",
+            supportButtonWidth,
+            28f,
+            PatreonOrange,
+            PatreonOrangeHover,
+            "https://www.patreon.com/alphachannel");
+
+
+        ImGui.SameLine(
+            0f,
+            supportGap);
+
+
+        DrawCompactSupportLink(
+            "● Discord",
+            supportButtonWidth,
+            28f,
+            new Vector4(
+                0.42f,
+                0.52f,
+                1.00f,
+                1f),
+            new Vector4(
+                0.58f,
+                0.66f,
+                1.00f,
+                1f),
+            "https://discord.gg/YOUR_INVITE_HERE");
+
+        //
+        // Keep the support buttons just off the bottom edge.
+        //
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                3f));
     }
 
-    private static void DrawNavGroup(string label)
+    private static void DrawNavGroup(
+     string label,
+     bool compactSidebar)
     {
-        ImGui.Dummy(new Vector2(0, 4));
+        //
+        // ---------------------------------------------------------
+        // Compact-height sidebar groups
+        // ---------------------------------------------------------
+        //
+        // The caller measures the OUTER sidebar height before
+        // entering the scrollable navigation child.
+        //
+        // This preserves the existing 650px sidebar threshold even
+        // though these headings now live inside another child.
+        //
 
-        ImGui.SetWindowFontScale(0.85f);
+        if (compactSidebar)
+        {
+            ImGui.Dummy(
+                new Vector2(
+                    0f,
+                    6f));
+
+            return;
+        }
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                4f));
+
+
+        ImGui.SetWindowFontScale(
+            0.85f);
+
+
         ImGui.TextColored(
             MutedText,
             label);
-        ImGui.SetWindowFontScale(1f);
 
-        ImGui.Dummy(new Vector2(0, 1));
+
+        ImGui.SetWindowFontScale(
+            1f);
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                1f));
     }
 
     // forceActive keeps Apps highlighted while you're inside an app (Chat / Hub / Tweeter).
@@ -2214,55 +2459,105 @@ ImGui.GetColorU32(Vector4.One));
             (height - textSize.Y) * 0.5f);
 
         drawList.AddText(
+      textPos,
+      ImGui.GetColorU32(hovered ? hoverColor : color),
+      label);
+    }
+
+
+    // ---------------------------------------------------------
+    // Compact support link
+    // ---------------------------------------------------------
+    //
+    // Unlike DrawSupportLink(), this one accepts an explicit
+    // width so several support links can share one row.
+    //
+
+    private static void DrawCompactSupportLink(
+        string label,
+        float width,
+        float height,
+        Vector4 color,
+        Vector4 hoverColor,
+        string url)
+    {
+        var buttonOrigin =
+            ImGui.GetCursorScreenPos();
+
+        var size =
+            new Vector2(
+                width,
+                height);
+
+
+        ImGui.SetCursorScreenPos(
+            buttonOrigin);
+
+
+        if (ImGui.InvisibleButton(
+                $"##support_{label}",
+                size))
+        {
+            try
+            {
+                Process.Start(
+                    new ProcessStartInfo(
+                        url)
+                    {
+                        UseShellExecute = true
+                    });
+            }
+            catch (Exception exception)
+            {
+                AepLog.Warning(
+                    $"[Support] Failed to open browser: {exception.Message}");
+            }
+        }
+
+
+        var hovered =
+            ImGui.IsItemHovered();
+
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+
+        drawList.AddRect(
+            buttonOrigin,
+            buttonOrigin + size,
+            ImGui.GetColorU32(
+                hovered
+                    ? hoverColor
+                    : color),
+            8f,
+            ImDrawFlags.None,
+            1f);
+
+
+        var textSize =
+            ImGui.CalcTextSize(
+                label);
+
+
+        var textPos =
+            buttonOrigin +
+            new Vector2(
+                (width - textSize.X) * 0.5f,
+                (height - textSize.Y) * 0.5f);
+
+
+        drawList.AddText(
             textPos,
-            ImGui.GetColorU32(hovered ? hoverColor : color),
+            ImGui.GetColorU32(
+                hovered
+                    ? hoverColor
+                    : color),
             label);
     }
 
-    private void DrawSidebarProfile()
-    {
-        var origin = ImGui.GetCursorScreenPos();
 
-        var session = CurrentSession;
-
-        DrawAvatarChip(
-            session?.AvatarIcon,
-            session?.AvatarColorHex,
-            42,
-            session?.AvatarImageUrl);
-
-        ImGui.SetCursorScreenPos(
-            origin + new Vector2(55, 5));
-
-        if (!string.IsNullOrEmpty(session?.DisplayName))
-        {
-            ImGui.TextUnformatted(session.DisplayName);
-        }
-        else
-        {
-            ImGui.TextUnformatted("Unknown");
-        }
-
-        ImGui.SetCursorScreenPos(
-            origin + new Vector2(55, 23));
-
-        ImGui.TextColored(
-    Good,
-    "● Online");
-
-        ImGui.SetCursorScreenPos(
-            origin + new Vector2(55, 41));
-
-        var friendsOnline = friends.Count(f => f.Online);
-
-        ImGui.SetWindowFontScale(0.9f);
-
-        ImGui.TextColored(
-            MutedText,
-            $"{friendsOnline} friends online");
-
-        ImGui.SetWindowFontScale(1f);
-    }
+  
 
     private void DrawDonateLink(string label, float height)
     {
@@ -2280,59 +2575,333 @@ ImGui.GetColorU32(Vector4.One));
 
        
 
-    private static string? cachedVersionText;
-
-    private static void DrawVersionFooter()
-    {
-        cachedVersionText ??= typeof(MainWindow).Assembly.GetName().Version?.ToString() ?? "dev";
-        var text = $"AlphaChannel v{cachedVersionText}";
-        var textWidth = ImGui.CalcTextSize(text).X;
-        var avail = ImGui.GetContentRegionAvail().X;
-        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0f, (avail - textWidth) * 0.5f));
-        ImGui.SetWindowFontScale(0.70f);
-        ImGui.TextColored(MutedText, text);
-        ImGui.SetWindowFontScale(1f);
-    }
+  
 
     // Every non-Home page starts with back + title + a one-line purpose so each Channel reads as
     // its own place, not a clone of every other tab with a different header string.
     private void PageTitle(string text, string purpose) => PageTitleBack(text, purpose, HomePage.Home);
 
-    private void PageTitleBack(string text, string purpose, HomePage backPage)
+    private void PageTitleBack(
+     string text,
+     string purpose,
+     HomePage backPage)
     {
-        using (ImRaii.PushColor(ImGuiCol.Button, new Vector4(Accent.X, Accent.Y, Accent.Z, 0.12f))
-                   .Push(ImGuiCol.ButtonHovered, new Vector4(Accent.X, Accent.Y, Accent.Z, 0.22f))
-                   .Push(ImGuiCol.ButtonActive, new Vector4(Accent.X, Accent.Y, Accent.Z, 0.30f))
-                   .Push(ImGuiCol.Text, AccentHover))
+        //
+        // ---------------------------------------------------------
+        // Shared non-Home page header
+        // ---------------------------------------------------------
+        //
+
+        var headerStartX =
+            ImGui.GetCursorPosX();
+
+        var headerY =
+            ImGui.GetCursorPosY();
+
+        var headerWidth =
+            ImGui.GetContentRegionAvail().X;
+
+
+        //
+        // ---------------------------------------------------------
+        // Left: Back button + page title
+        // ---------------------------------------------------------
+        //
+
+        using (ImRaii.PushColor(
+                   ImGuiCol.Button,
+                   new Vector4(
+                       Accent.X,
+                       Accent.Y,
+                       Accent.Z,
+                       0.12f))
+               .Push(
+                   ImGuiCol.ButtonHovered,
+                   new Vector4(
+                       Accent.X,
+                       Accent.Y,
+                       Accent.Z,
+                       0.22f))
+               .Push(
+                   ImGuiCol.ButtonActive,
+                   new Vector4(
+                       Accent.X,
+                       Accent.Y,
+                       Accent.Z,
+                       0.30f))
+               .Push(
+                   ImGuiCol.Text,
+                   AccentHover))
         {
-            using (ImRaii.PushFont(UiBuilder.IconFont))
+            using (ImRaii.PushFont(
+                       UiBuilder.IconFont))
             {
-                if (ImGui.Button($"{FontAwesomeIcon.ArrowLeft.ToIconString()}##backPage", new Vector2(34, 30)))
+                if (ImGui.Button(
+                        $"{FontAwesomeIcon.ArrowLeft.ToIconString()}##backPage",
+                        new Vector2(
+                            34f,
+                            30f)))
                 {
-                    currentPage = backPage;
+                    currentPage =
+                        backPage;
                 }
             }
         }
 
+
         if (ImGui.IsItemHovered())
         {
-            ImGui.SetTooltip(backPage == HomePage.Home ? "Back to Home" : "Back to Apps");
+            ImGui.SetTooltip(
+                backPage == HomePage.Home
+                    ? "Back to Home"
+                    : "Back to Apps");
         }
 
-        ImGui.SameLine(0, 12);
+
+        ImGui.SameLine(
+            0f,
+            12f);
+
+
         ImGui.BeginGroup();
-        ImGui.SetWindowFontScale(1.35f);
-        ImGui.TextUnformatted(text);
-        ImGui.SetWindowFontScale(1f);
-        ImGui.TextColored(MutedText, purpose);
+
+
+        ImGui.SetWindowFontScale(
+            1.35f);
+
+        ImGui.TextUnformatted(
+            text);
+
+        ImGui.SetWindowFontScale(
+            1f);
+
+
+        ImGui.TextColored(
+            MutedText,
+            purpose);
+
+
         ImGui.EndGroup();
 
-        ImGui.Dummy(new Vector2(0, 8));
-        var origin = ImGui.GetCursorScreenPos();
-        var width = ImGui.GetContentRegionAvail().X;
-        ImGui.GetWindowDrawList().AddRectFilled(origin, origin + new Vector2(width, 1f),
-            ImGui.GetColorU32(BorderSubtle));
-        ImGui.Dummy(new Vector2(width, 18f));
+
+        //
+        // ---------------------------------------------------------
+        // Right: profile + social status
+        // ---------------------------------------------------------
+        //
+        // Match the Home profile block visually.
+        //
+        // Unlike Home, this shared non-Home version has its own
+        // responsive threshold and stays visible until the available
+        // header width drops below 450px.
+        //
+
+        if (headerWidth >= 450f)
+        {
+            var session =
+                CurrentSession;
+
+
+            var friendsOnline =
+                friends.Count(
+                    friend => friend.Online);
+
+
+            var displayName =
+                !string.IsNullOrWhiteSpace(
+                    session?.DisplayName)
+                    ? session.DisplayName
+                    : "Unknown";
+
+
+            var friendsText =
+                friendsOnline == 1
+                    ? "1 friend online"
+                    : $"{friendsOnline} friends online";
+
+
+            var watchersText =
+                usersOnlineCount == 1
+                    ? "1 watcher online"
+                    : $"{usersOnlineCount} watchers online";
+
+
+            //
+            // Same dimensions as Home.
+            //
+
+            const float avatarSize =
+                38f;
+
+            const float profileWidth =
+                185f;
+
+
+            //
+            // Same 10px right inset as Home.
+            //
+
+            var profileX =
+                headerStartX +
+                headerWidth -
+                profileWidth -
+                10f;
+
+
+            //
+            // Same vertical offset as Home.
+            //
+
+            var profileY =
+                headerY - 2f;
+
+
+            var profileOrigin =
+                new Vector2(
+                    profileX,
+                    profileY);
+
+
+            //
+            // Avatar
+            //
+
+            ImGui.SetCursorPos(
+                profileOrigin);
+
+
+            DrawAvatarChip(
+                session?.AvatarIcon,
+                session?.AvatarColorHex,
+                avatarSize,
+                session?.AvatarImageUrl);
+
+
+            //
+            // Text starts just to the right of the avatar.
+            //
+
+            var textX =
+                profileX +
+                avatarSize +
+                10f;
+
+
+            //
+            // First row:
+            //
+            // ● Kodie
+            //
+
+            ImGui.SetCursorPos(
+                new Vector2(
+                    textX,
+                    profileY + 1f));
+
+
+            ImGui.TextColored(
+                Good,
+                "●");
+
+
+            ImGui.SameLine(
+                0f,
+                5f);
+
+
+            ImGui.TextUnformatted(
+                displayName);
+
+
+            //
+            // Second row:
+            //
+            // 1 friend online
+            //
+
+            ImGui.SetCursorPos(
+                new Vector2(
+                    textX,
+                    profileY + 17f));
+
+
+            ImGui.SetWindowFontScale(
+                0.84f);
+
+
+            ImGui.TextColored(
+                MutedText,
+                friendsText);
+
+
+            //
+            // Third row:
+            //
+            // 2 watchers online
+            //
+
+            ImGui.SetCursorPos(
+                new Vector2(
+                    textX,
+                    profileY + 35f));
+
+
+            ImGui.SetWindowFontScale(
+                1.02f);
+
+
+            ImGui.TextColored(
+                Good,
+                watchersText);
+
+
+            ImGui.SetWindowFontScale(
+                1f);
+        }
+
+
+        //
+        // ---------------------------------------------------------
+        // Header divider
+        // ---------------------------------------------------------
+        //
+        // Explicitly restore the cursor below the header because the
+        // profile above uses absolute cursor positioning.
+        //
+
+        ImGui.SetCursorPos(
+            new Vector2(
+                headerStartX,
+                headerY + 54f));
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                8f));
+
+
+        var origin =
+            ImGui.GetCursorScreenPos();
+
+        var width =
+            ImGui.GetContentRegionAvail().X;
+
+
+        ImGui.GetWindowDrawList().AddRectFilled(
+            origin,
+            origin +
+            new Vector2(
+                width,
+                1f),
+            ImGui.GetColorU32(
+                BorderSubtle));
+
+
+        ImGui.Dummy(
+            new Vector2(
+                width,
+                18f));
     }
 
     // Consistent accent-colored sub-headers within a page — same weight on every Channel.
@@ -2340,8 +2909,6 @@ ImGui.GetColorU32(Vector4.One));
     {
         ImGui.TextColored(Accent, text);
         ImGui.Dummy(new Vector2(0, 0));
-
-        DrawVersionFooter();
     }
 
     // Soft panel for content that needs grouping. Height must be >0 — Child size.y=0 means
@@ -2659,44 +3226,29 @@ ImGui.GetColorU32(Vector4.One));
         ImGui.End();
     }
 
-    private void DrawRoster(string label, bool allowPromote)
+    private void DrawRoster(
+     string label,
+     bool allowPromote)
     {
-
-      
-
-        // ---------------------------------------------------------
-        // UI PREVIEW
-        // ---------------------------------------------------------
-
-        const bool showPreviewViewer = true;
-
         var realCount =
             stream.Roster.Length;
 
-        var displayCount =
-            realCount +
-            (showPreviewViewer ? 1 : 0);
-
-        var openParen =
-            label.LastIndexOf('(');
-
-        var displayLabel =
-            openParen >= 0
-                ? $"{label[..openParen]}({displayCount})"
-                : label;
-
-        ImGui.SetWindowFontScale(1.08f);
+        ImGui.SetWindowFontScale(
+            1.08f);
 
         ImGui.TextColored(
             Vector4.One,
-            displayLabel);
+            label);
 
-        ImGui.SetWindowFontScale(1f);
+        ImGui.SetWindowFontScale(
+            1f);
 
-        ImGui.Dummy(new Vector2(0f, 8f));
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                8f));
 
-        if (realCount == 0 &&
-            !showPreviewViewer)
+        if (realCount == 0)
         {
             ImGui.TextColored(
                 MutedText,
@@ -2705,19 +3257,14 @@ ImGui.GetColorU32(Vector4.One));
             return;
         }
 
-        if (realCount > 0)
-        {
-            DrawAvatarStack(
-                stream.Roster,
-                maxShown: 12);
+        DrawAvatarStack(
+            stream.Roster,
+            maxShown: 12);
 
-            ImGui.Dummy(
-                new Vector2(0f, 10f));
-        }
-
-        // ---------------------------------------------------------
-        // Real participants
-        // ---------------------------------------------------------
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                10f));
 
         for (var index = 0;
              index < realCount;
@@ -2726,41 +3273,27 @@ ImGui.GetColorU32(Vector4.One));
             var participant =
                 stream.Roster[index];
 
-            ImGui.PushID(index);
+            ImGui.PushID(
+                participant.UserId);
 
             DrawPartyRosterRow(
                 participant.DisplayName,
                 allowPromote,
                 canUseActions: true,
-                onPromote: () =>
-                    _ = stream.TransferHostAsync(
-                        participant.UserId));
+                onPromote:
+                    () =>
+                    {
+                        _ =
+                            stream.TransferHostAsync(
+                                participant.UserId);
+                    });
 
             ImGui.PopID();
 
             ImGui.Dummy(
-                new Vector2(0f, 6f));
-        }
-
-        // ---------------------------------------------------------
-        // Temporary example viewer
-        // ---------------------------------------------------------
-
-        if (showPreviewViewer)
-        {
-            ImGui.PushID(
-                "##previewPartyViewer");
-
-            DrawPartyRosterRow(
-                "Example Viewer",
-                allowPromote,
-                canUseActions: false,
-                onPromote: null);
-
-            ImGui.PopID();
-
-            ImGui.Dummy(
-                new Vector2(0f, 6f));
+                new Vector2(
+                    0f,
+                    6f));
         }
     }
 

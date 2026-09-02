@@ -27,6 +27,12 @@ internal sealed class VideoPlayer : IDisposable
     public string? LastError { get; private set; }
     public int PlaybackAttemptId { get; private set; }
 
+    public bool IsPlayingSnes =>
+        engine.IsPlayingSnes;
+
+    public bool IsPlayingLocalVideo =>
+        engine.IsPlayingLocalVideo;
+
     public bool HardwareDecoding
     {
         get => engine.HardwareDecoding;
@@ -91,16 +97,52 @@ internal sealed class VideoPlayer : IDisposable
             return;
         }
 
+
+        //
+        // VideoEngine may currently be handling the first MPV failure
+        // by running WebMediaUrlResolver and preparing a second attempt.
+        //
+        // During that period the original MPV failure is NOT the final
+        // playback result.
+        //
+        // Do not call StopVideo() here, because that would kill the
+        // resolver while it is still working.
+        //
+
+        if (engine.WebResolverFallbackRunning)
+        {
+            State =
+                VideoPlaybackState.Loading;
+
+            return;
+        }
+
+
+        //
+        // No final playback error yet.
+        //
+
         if (engine.LastError is not { } error)
         {
             return;
         }
 
-        State = VideoPlaybackState.Failed;
-        LastError = error;
+
+        //
+        // Both chances are now finished and playback genuinely failed.
+        //
+
+        State =
+            VideoPlaybackState.Failed;
+
+
+        LastError =
+            error;
+
 
         AepLog.Warning(
             $"[Video] Playback failed; resetting player: {error}");
+
 
         try
         {
@@ -120,20 +162,111 @@ internal sealed class VideoPlayer : IDisposable
     // enrichment (title/duration/thumbnail), not for the playback URL itself.
     public void Play(string url)
     {
+        if (engine.IsPlayingSnes)
+        {
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] Exit the SNES game before using video playback.");
+
+            return;
+        }
+
+        if (engine.IsPlayingLocalVideo)
+        {
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] Stop the local video before using other media playback.");
+
+            return;
+        }
+
         try
         {
             PlaybackAttemptId++;
 
             LastError = null;
             State = VideoPlaybackState.Loading;
+
             engine.PlayVideo(url);
+
             State = VideoPlaybackState.Playing;
         }
         catch (Exception exception)
         {
             State = VideoPlaybackState.Failed;
             LastError = exception.Message;
-            AepLog.Warning($"[Video] Failed to start playback: {exception.Message}");
+
+            AepLog.Warning(
+                $"[Video] Failed to start playback: {exception.Message}");
+        }
+    }
+
+
+    public bool PlayLocalVideo(
+        string path)
+    {
+        if (engine.IsPlayingSnes)
+        {
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] Exit the SNES game before playing a local video.");
+
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(path) ||
+            !File.Exists(path))
+        {
+            LastError =
+                "The selected local video file could not be found.";
+
+            State =
+                VideoPlaybackState.Failed;
+
+            return false;
+        }
+
+        try
+        {
+            PlaybackAttemptId++;
+
+            LastError =
+                null;
+
+            State =
+                VideoPlaybackState.Loading;
+
+            engine.PlayVideo(
+                path,
+                allowWebResolverFallback: false,
+                isLocalVideo: true);
+
+            if (!engine.IsPlayingLocalVideo)
+            {
+                State =
+                    VideoPlaybackState.Failed;
+
+                LastError ??=
+                    engine.LastError ??
+                    "Local video playback could not be started.";
+
+                return false;
+            }
+
+            State =
+                VideoPlaybackState.Playing;
+
+            return true;
+        }
+        catch (Exception exception)
+        {
+            State =
+                VideoPlaybackState.Failed;
+
+            LastError =
+                exception.Message;
+
+            AepLog.Warning(
+                $"[LocalVideo] Failed to start playback: {exception.Message}");
+
+            return false;
         }
     }
 

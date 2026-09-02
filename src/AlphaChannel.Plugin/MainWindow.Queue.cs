@@ -1,3 +1,4 @@
+using AlphaChannel.Plugin.Video;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Utility.Raii;
@@ -8,9 +9,274 @@ internal sealed partial class MainWindow
 {
     private const float QueueThumbnailHeight = 40f;
 
+    private void DrawSavedQueueSlots()
+    {
+        ImGui.SetWindowFontScale(0.95f);
+
+        ImGui.TextColored(
+            Vector4.One,
+            "QUEUE SLOTS");
+
+        ImGui.SameLine();
+
+        using (ImRaii.PushColor(
+            ImGuiCol.Text,
+            MutedText))
+        {
+            ImGui.Text("(?)");
+        }
+
+        ImGui.TextColored(
+            MutedText,
+            "Switch between your queues. The active queue is what plays on the TV.");
+
+        ImGui.Dummy(new Vector2(0f, 8f));
+
+
+        for (var i = 0; i < 3; i++)
+        {
+            ImGui.PushID($"queueSlot_{i}");
+
+            var profile = Plugin.Cfg.SavedQueueProfiles[i];
+
+            if (i > 0)
+            {
+                ImGui.SameLine();
+            }
+
+
+            using (ImRaii.PushStyle(
+                ImGuiStyleVar.ChildRounding,
+                8f))
+            using (ImRaii.PushColor(
+                ImGuiCol.ChildBg,
+                new Vector4(0.045f, 0.06f, 0.10f, 1f)))
+            {
+                if (ImGui.BeginChild(
+                    "queueCard",
+                    new Vector2(230f, 115f),
+                    true))
+                {
+                    if (profile is null)
+                    {
+                        ImGui.Text("+");
+
+                        ImGui.TextColored(
+                            Vector4.One,
+                            "Empty Queue Slot");
+
+                        ImGui.SetWindowFontScale(0.8f);
+
+                        ImGui.TextColored(
+                            MutedText,
+                            "Create a new queue");
+
+                        ImGui.SetWindowFontScale(1f);
+
+                        if (ImGui.IsWindowHovered() &&
+                            ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                        {
+                            creatingQueueIndex = i;
+                            newQueueName = string.Empty;
+                            createQueuePopupOpen = true;
+                        }
+                    }
+                    else
+                    {
+                        var cardStart = ImGui.GetCursorScreenPos();
+
+                        // Icon box
+                        ImGui.GetWindowDrawList().AddRectFilled(
+                            cardStart + new Vector2(10f, 10f),
+                            cardStart + new Vector2(50f, 50f),
+                            ImGui.GetColorU32(
+                                new Vector4(0.12f, 0.08f, 0.18f, 1f)),
+                            8f);
+
+                        ImGui.SetCursorScreenPos(
+                            cardStart + new Vector2(22f, 18f));
+
+                        ImGui.Text(profile.Icon);
+
+
+                        // Name
+                        ImGui.SetCursorScreenPos(
+                            cardStart + new Vector2(62f, 12f));
+
+                        ImGui.TextColored(
+                            Vector4.One,
+                            profile.Name);
+
+
+                        // Count
+                        ImGui.SetCursorScreenPos(
+                            cardStart + new Vector2(62f, 32f));
+
+                        ImGui.SetWindowFontScale(0.8f);
+
+                        ImGui.TextColored(
+                            MutedText,
+                            $"{profile.Entries.Count} videos");
+
+                        ImGui.SetWindowFontScale(1f);
+
+
+                        // Bottom action
+
+                        if (Plugin.Cfg.ActiveQueueSlot == i)
+                        {
+                            var badgePos =
+                                cardStart + new Vector2(145f, 10f);
+
+                            var badgeSize =
+                                new Vector2(65f, 20f);
+
+                            var drawList =
+                                ImGui.GetWindowDrawList();
+
+                            drawList.AddRectFilled(
+                                badgePos,
+                                badgePos + badgeSize,
+                                ImGui.GetColorU32(Accent),
+                                6f);
+
+                            var text = "ACTIVE";
+
+                            var textSize =
+                                ImGui.CalcTextSize(text);
+
+                            drawList.AddText(
+                                badgePos +
+                                new Vector2(
+                                    (badgeSize.X - textSize.X) * 0.5f,
+                                    (badgeSize.Y - textSize.Y) * 0.5f),
+                                ImGui.GetColorU32(Vector4.One),
+                                text);
+                        }
+                        else
+                        {
+                            ImGui.SetCursorScreenPos(
+                                cardStart + new Vector2(10f, 72f));
+
+                            if (ImGui.Button(
+                                "Activate",
+                                new Vector2(190f, 24f)))
+                            {
+                                var currentSlot =
+                                    Plugin.Cfg.ActiveQueueSlot;
+
+                                var currentProfile =
+                                    Plugin.Cfg.SavedQueueProfiles[currentSlot];
+
+                                Plugin.Cfg.SavedQueueProfiles[currentSlot] =
+                                    new SavedQueueProfile
+                                    {
+                                        Name = currentProfile?.Name ?? $"Queue {currentSlot + 1}",
+                                        Icon = currentProfile?.Icon ?? "📺",
+                                        Entries = queue.ExportEntries()
+                                    };
+
+                                Plugin.Cfg.ActiveQueueSlot = i;
+
+                                queue.ReplaceEntries(profile.Entries);
+
+                                Plugin.Cfg.Save();
+                            }
+                        }
+                    }
+
+                    ImGui.EndChild();
+                }
+            }
+
+            ImGui.PopID();
+        }
+
+        ImGui.Dummy(new Vector2(0f, 12f));
+
+        ImGui.SetWindowFontScale(1f);
+    }
+
     private void DrawQueue()
     {
+        DrawSavedQueueSlots();
+        DrawCreateQueuePopup();
+
         var count = queue.Entries.Count;
+
+        // ---------------------------------------------------------
+        // Resume queue
+        // ---------------------------------------------------------
+
+        var canResumeQueue =
+            count > 0 &&
+            queue.Current is null;
+
+        const float resumeButtonHeight = 38f;
+
+        var resumeButtonSize =
+            new Vector2(
+                ImGui.GetContentRegionAvail().X,
+                resumeButtonHeight);
+
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.FrameRounding,
+                   8f))
+        using (ImRaii.PushColor(
+                   ImGuiCol.Button,
+                   canResumeQueue
+                       ? Accent
+                       : new Vector4(
+                           0.055f,
+                           0.065f,
+                           0.09f,
+                           1f))
+               .Push(
+                   ImGuiCol.ButtonHovered,
+                   canResumeQueue
+                       ? AccentHover
+                       : new Vector4(
+                           0.055f,
+                           0.065f,
+                           0.09f,
+                           1f))
+               .Push(
+                   ImGuiCol.ButtonActive,
+                   canResumeQueue
+                       ? AccentActive
+                       : new Vector4(
+                           0.055f,
+                           0.065f,
+                           0.09f,
+                           1f))
+               .Push(
+                   ImGuiCol.Text,
+                   canResumeQueue
+                       ? Vector4.One
+                       : MutedText))
+        {
+            if (!canResumeQueue)
+            {
+                ImGui.BeginDisabled();
+            }
+
+            if (ImGui.Button(
+                    "Resume playing queue",
+                    resumeButtonSize))
+            {
+                queue.Advance();
+            }
+
+            if (!canResumeQueue)
+            {
+                ImGui.EndDisabled();
+            }
+        }
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                14f));
 
         // ---------------------------------------------------------
         // Header
@@ -410,6 +676,55 @@ internal sealed partial class MainWindow
 
             ImGui.Dummy(
                 new Vector2(0f, 8f));
+        }
+    }
+
+    private void DrawCreateQueuePopup()
+    {
+        if (!createQueuePopupOpen)
+        {
+            return;
+        }
+
+        ImGui.OpenPopup("Create Queue");
+
+        if (ImGui.BeginPopupModal(
+                "Create Queue",
+                ref createQueuePopupOpen))
+        {
+            ImGui.Text("Queue name");
+
+            ImGui.InputText(
+                "##queueName",
+                ref newQueueName,
+                64);
+
+            if (ImGui.Button("Create"))
+            {
+                if (!string.IsNullOrWhiteSpace(newQueueName))
+                {
+                    Plugin.Cfg.SavedQueueProfiles[creatingQueueIndex] =
+                        new SavedQueueProfile
+                        {
+                            Name = newQueueName,
+                            Icon = "📺",
+                            Entries = new List<VideoQueueRecord>()
+                        };
+
+                    Plugin.Cfg.Save();
+
+                    createQueuePopupOpen = false;
+                }
+            }
+
+            ImGui.SameLine();
+
+            if (ImGui.Button("Cancel"))
+            {
+                createQueuePopupOpen = false;
+            }
+
+            ImGui.EndPopup();
         }
     }
 

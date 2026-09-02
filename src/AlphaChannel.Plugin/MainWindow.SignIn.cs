@@ -2,6 +2,7 @@ using AlphaChannel.Contracts;
 using AlphaChannel.Plugin.Auth;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
+using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Utility.Raii;
 
 namespace AlphaChannel.Plugin;
@@ -50,6 +51,9 @@ internal sealed partial class MainWindow
     private string profileAvatarPathInput = string.Empty;
     private string? profileAvatarError;
     private bool profileAvatarBusy;
+
+    private readonly FileDialogManager profileAvatarFileDialog =
+        new();
     private string profileBioInput = string.Empty;
     private string profileStatusInput = string.Empty;
     private bool profileSaving;
@@ -790,10 +794,26 @@ internal sealed partial class MainWindow
                             Hex(0x38BDF8),
                             width: actionWidth))
                         {
-                            ImGui.OpenPopup(
-                                "Upload picture##profileAvatarPath");
-                        }
+                            profileAvatarError = null;
 
+                            profileAvatarFileDialog.OpenFileDialog(
+                                "Select Profile Picture",
+                                ".png,.jpg,.jpeg,.webp",
+                                (success, path) =>
+                                {
+                                    if (!success ||
+                                        string.IsNullOrWhiteSpace(path))
+                                    {
+                                        return;
+                                    }
+
+                                    profileAvatarPathInput = path;
+
+                                    UploadProfileAvatar(
+                                        session,
+                                        path);
+                                });
+                        }
                         ImGui.SameLine(0f, actionGap);
 
                         if (DrawProfileActionButton(
@@ -812,7 +832,7 @@ internal sealed partial class MainWindow
                         }
                     }
 
-                    DrawProfileAvatarPathPopup(session);
+                    profileAvatarFileDialog.Draw();
 
                     ImGui.Dummy(new Vector2(0f, 14f));
 
@@ -1525,40 +1545,6 @@ internal sealed partial class MainWindow
                !disabled;
     }
 
-    private void DrawProfileAvatarPathPopup(CharacterSession session)
-    {
-        ImGui.SetNextWindowSize(new Vector2(420, 0));
-        if (!ImGui.BeginPopup("Upload picture##profileAvatarPath"))
-        {
-            return;
-        }
-
-        ImGui.TextColored(MutedText, "Path to a png / jpg / webp");
-        ImGui.SetNextItemWidth(-1);
-        ImGui.InputTextWithHint("##profileAvatarPathPopup", "/path/to/image.png", ref profileAvatarPathInput, 512);
-        ImGui.Spacing();
-        using (ImRaii.Disabled(profileAvatarBusy))
-        {
-            if (ImGui.Button("Upload", new Vector2(120, 0)))
-            {
-                UploadProfileAvatar(session, profileAvatarPathInput);
-                ImGui.CloseCurrentPopup();
-            }
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Cancel", new Vector2(120, 0)))
-        {
-            ImGui.CloseCurrentPopup();
-        }
-
-        if (profileAvatarError is { Length: > 0 } err)
-        {
-            ImGui.TextColored(Danger, err);
-        }
-
-        ImGui.EndPopup();
-    }
 
     private void ApplyAvatarSummary(CharacterSession session, AccountSummary updated)
     {

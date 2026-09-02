@@ -91,8 +91,10 @@
     <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="[2.1.7]" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.10" />
     <PackageReference Include="YoutubeExplode" Version="6.6.0" />
-    <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
-    <PackageReference Include="SharpDX.D3DCompiler" Version="4.2.0" />
-    <PackageReference Include="SharpCompress" Version="0.48.1" />
+	  <PackageReference Include="SharpDX" Version="4.2.0" />
+	  <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
+	  <PackageReference Include="SharpDX.D3DCompiler" Version="4.2.0" />
+	  <PackageReference Include="SharpDX.XAudio2" Version="4.2.0" />
+	  <PackageReference Include="SharpCompress" Version="0.48.1" />
   </ItemGroup>
 </Project>

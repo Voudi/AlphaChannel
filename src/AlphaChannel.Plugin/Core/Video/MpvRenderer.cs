@@ -52,11 +52,23 @@ namespace AlphaChannel.Plugin.Video
 		private bool _closed = true;
 		private Thread? _eventThread;
         private float _smoothedAudioLevel;
-        //Set by VideoEngine right after construction - the event loop below runs on its own
-        //background thread, so this is the only path an async mpv-side failure (a bad yt-dlp
-        //resolve, a codec/network error reported well after Play() already returned) has to reach
-        //VideoEngine.LastError. Fires from _eventThread, not the caller's own thread.
+        // MPV log warnings/errors.
+        //
+        // These are useful diagnostics, but they are NOT by themselves proof that
+        // playback has failed. MPV and yt-dlp can emit warnings during otherwise
+        // successful playback.
         internal Action<string>? OnError;
+
+
+        // Definitive terminal playback failure.
+        //
+        // This is fired from MPV_EVENT_END_FILE when mpv reports
+        // MPV_END_FILE_REASON_ERROR.
+        //
+        // VideoEngine uses this to decide whether the automatic webpage resolver
+        // should get its second chance.
+        internal Action<string>? OnPlaybackFailed;
+
 
         internal Action? OnFrameRendered;
         internal Action? OnMediaLoaded;
@@ -913,89 +925,312 @@ namespace AlphaChannel.Plugin.Video
         }
 
         private void EventLoop()
-		{
-			
-            AepLog.Verbose("[MPV] event loop started");
+        {
+            AepLog.Verbose(
+                "[MPV] event loop started");
+
+
             try
             {
                 while (!_closed)
                 {
-                    IntPtr ev = mpv_wait_event(_mpvCtx, 1);
-                    if (ev == IntPtr.Zero) {continue;}
+                    IntPtr ev =
+                        mpv_wait_event(
+                            _mpvCtx,
+                            1);
 
-                    int eventId = Marshal.ReadInt32(ev);
 
-                    
+                    if (ev == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+
+                    int eventId =
+                        Marshal.ReadInt32(
+                            ev);
+
+
                     switch (eventId)
                     {
-                        
-                        case 0: // MPV_EVENT_NONE (Timeout)
+                        //
+                        // =====================================================
+                        // Timeout
+                        // =====================================================
+                        //
+
+                        case 0:
                             continue;
 
-                        case 1: // MPV_EVENT_SHUTDOWN
-                            AepLog.Verbose("[MPV] SHUTDOWN");
+
+                        //
+                        // =====================================================
+                        // Shutdown
+                        // =====================================================
+                        //
+
+                        case 1:
+                            AepLog.Verbose(
+                                "[MPV] SHUTDOWN");
+
                             return;
 
-                        case 2: // MPV_EVENT_LOG_MESSAGE
+
+                        //
+                        // =====================================================
+                        // Log message
+                        // =====================================================
+                        //
+                        // Warnings and errors are recorded for diagnostics.
+                        //
+                        // They DO NOT automatically mean the media failed.
+                        // yt-dlp/mpv can emit warnings while still successfully
+                        // continuing playback.
+                        //
+
+                        case 2:
                             {
-                                IntPtr dataPtr2 = Marshal.ReadIntPtr(ev + 16);
-                                if (dataPtr2 != IntPtr.Zero && dataPtr2.ToInt64() > 65536)
+                                IntPtr dataPtr =
+                                    Marshal.ReadIntPtr(
+                                        ev + 16);
+
+
+                                if (dataPtr != IntPtr.Zero &&
+                                    dataPtr.ToInt64() > 65536)
                                 {
-									string? prefix = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr2));
-									string? level  = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr2 + 8));
-									string? text   = Marshal.PtrToStringAnsi(Marshal.ReadIntPtr(dataPtr2 + 16));
+                                    string? prefix =
+                                        Marshal.PtrToStringAnsi(
+                                            Marshal.ReadIntPtr(
+                                                dataPtr));
+
+
+                                    string? level =
+                                        Marshal.PtrToStringAnsi(
+                                            Marshal.ReadIntPtr(
+                                                dataPtr + 8));
+
+
+                                    string? text =
+                                        Marshal.PtrToStringAnsi(
+                                            Marshal.ReadIntPtr(
+                                                dataPtr + 16));
+
+
                                     if ((level == "error" ||
-     level == "warn") &&
-    text != null)
+                                         level == "warn") &&
+                                        text != null)
                                     {
-										// Every other mpv/ytdl error (bot-check, network stall, format
-										// unavailable, ...) used to only reach AepLog.Verbose below, which
-										// is filtered out of the visible log by default - a real failure
-										// looked identical to "still buffering" from the outside, forever.
-										AepLog.Warning($"[MPV/{prefix}/{level}] {text.Trim()}");
-										OnError?.Invoke(text.Trim());
-									}
-                                    AepLog.Verbose($"[MPV/{prefix}/{level}] {text?.Trim()}");
+                                        var message =
+                                            text.Trim();
+
+
+                                        AepLog.Warning(
+                                            $"[MPV/{prefix}/{level}] {message}");
+
+
+                                        OnError?.Invoke(
+                                            message);
+                                    }
+
+
+                                    AepLog.Verbose(
+                                        $"[MPV/{prefix}/{level}] {text?.Trim()}");
                                 }
+
+
                                 break;
                             }
 
-                        case 3:  AepLog.Verbose("[MPV] GET_PROPERTY_REPLY"); break;
-                        case 4:  AepLog.Verbose("[MPV] SET_PROPERTY_REPLY"); break;
-                        case 5:  AepLog.Verbose("[MPV] COMMAND_REPLY");      break;
-                        case 6:  AepLog.Verbose("[MPV] START_FILE");         break;
 
-                        case 7: // MPV_EVENT_END_FILE
-                            AepLog.Warning(
-                                "[MPV] END_FILE received.");
+                        case 3:
+                            AepLog.Verbose(
+                                "[MPV] GET_PROPERTY_REPLY");
+
                             break;
 
-                        case 8: // MPV_EVENT_FILE_LOADED
-                            AepLog.Verbose("[MPV] FILE_LOADED");
+
+                        case 4:
+                            AepLog.Verbose(
+                                "[MPV] SET_PROPERTY_REPLY");
+
+                            break;
+
+
+                        case 5:
+                            AepLog.Verbose(
+                                "[MPV] COMMAND_REPLY");
+
+                            break;
+
+
+                        //
+                        // =====================================================
+                        // Start file
+                        // =====================================================
+                        //
+
+                        case 6:
+                            AepLog.Verbose(
+                                "[MPV] START_FILE");
+
+                            break;
+
+
+                        //
+                        // =====================================================
+                        // End file
+                        // =====================================================
+                        //
+                        // mpv_event_end_file begins with:
+                        //
+                        // int reason;
+                        // int error;
+                        //
+                        // MPV_END_FILE_REASON_ERROR == 4.
+                        //
+                        // This is the authoritative signal that loading/playback
+                        // actually failed.
+                        //
+
+                        case 7:
+                            {
+                                const int MpvEndFileReasonError =
+                                    4;
+
+
+                                IntPtr dataPtr =
+                                    Marshal.ReadIntPtr(
+                                        ev + 16);
+
+
+                                if (dataPtr == IntPtr.Zero)
+                                {
+                                    AepLog.Warning(
+                                        "[MPV] END_FILE received without event data.");
+
+                                    break;
+                                }
+
+
+                                int reason =
+                                    Marshal.ReadInt32(
+                                        dataPtr);
+
+
+                                int error =
+                                    Marshal.ReadInt32(
+                                        dataPtr + 4);
+
+
+                                AepLog.Warning(
+                                    $"[MPV] END_FILE received. " +
+                                    $"reason={reason}, error={error}");
+
+
+                                if (reason ==
+                                    MpvEndFileReasonError)
+                                {
+                                    var message =
+                                        $"MPV playback failed " +
+                                        $"(END_FILE error {error}).";
+
+
+                                    AepLog.Warning(
+                                        $"[MPV] Definitive playback failure: {message}");
+
+
+                                    OnPlaybackFailed?.Invoke(
+                                        message);
+                                }
+
+
+                                break;
+                            }
+
+
+                        //
+                        // =====================================================
+                        // File loaded
+                        // =====================================================
+                        //
+
+                        case 8:
+                            AepLog.Verbose(
+                                "[MPV] FILE_LOADED");
+
+
                             OnMediaLoaded?.Invoke();
+
+
                             break;
-                        case 14: AepLog.Verbose("[MPV] CLIENT_MESSAGE");   break;
-                        case 15: AepLog.Verbose("[MPV] VIDEO_RECONFIG");   break;
-                        case 16: AepLog.Verbose("[MPV] AUDIO_RECONFIG");   break;
-                        case 17: AepLog.Verbose("[MPV] SEEK");             break;
-                        case 18: AepLog.Verbose("[MPV] PLAYBACK_RESTART"); break;
-                        case 19: AepLog.Verbose("[MPV] PROPERTY_CHANGE");  break;
-                        case 22: AepLog.Verbose("[MPV] HOOK");             break;
+
+
+                        case 14:
+                            AepLog.Verbose(
+                                "[MPV] CLIENT_MESSAGE");
+
+                            break;
+
+
+                        case 15:
+                            AepLog.Verbose(
+                                "[MPV] VIDEO_RECONFIG");
+
+                            break;
+
+
+                        case 16:
+                            AepLog.Verbose(
+                                "[MPV] AUDIO_RECONFIG");
+
+                            break;
+
+
+                        case 17:
+                            AepLog.Verbose(
+                                "[MPV] SEEK");
+
+                            break;
+
+
+                        case 18:
+                            AepLog.Verbose(
+                                "[MPV] PLAYBACK_RESTART");
+
+                            break;
+
+
+                        case 19:
+                            AepLog.Verbose(
+                                "[MPV] PROPERTY_CHANGE");
+
+                            break;
+
+
+                        case 22:
+                            AepLog.Verbose(
+                                "[MPV] HOOK");
+
+                            break;
+
 
                         default:
                             break;
                     }
                 }
             }
-            catch (Exception e)
+            catch (Exception exception)
             {
-                AepLog.Verbose($"[MPV] event loop crashed: {e.Message}\n{e.StackTrace}");
+                AepLog.Warning(
+                    $"[MPV] event loop crashed: " +
+                    $"{exception.Message}\n" +
+                    $"{exception.StackTrace}");
             }
             finally
             {
-                AepLog.Verbose("[MPV] event loop ended");
+                AepLog.Verbose(
+                    "[MPV] event loop ended");
             }
-            
-		}
-	}
+        }
+    }
 }

@@ -284,7 +284,10 @@ internal sealed partial class MainWindow
                 ImGui.GetStyle().ItemSpacing.X,
                 ImGui.GetStyle().ItemSpacing.Y));
 
-        var searchWidth = 430f;
+        var searchWidth =
+    ImGui.GetContentRegionAvail().X < 600f
+        ? 330f
+        : 430f;
 
         if (!homeYouTubeRequested)
         {
@@ -574,7 +577,7 @@ internal sealed partial class MainWindow
         var headerY = ImGui.GetCursorPosY();
 
         var showWelcome = contentWidth >= 900f;
-        var showWatchers = contentWidth >= 800f;
+        var showWatchers = contentWidth >= 500f;
 
 
         // ---------------------------------------------------------
@@ -616,13 +619,29 @@ internal sealed partial class MainWindow
         // Centre: Search bar
         // ---------------------------------------------------------
 
+        //
+        // At full width, keep the search bar centered.
+        //
+        // When "Welcome to Alpha Channel" disappears, move the
+        // search bar left into the space that Welcome was using.
+        //
+
+        var searchX =
+            showWelcome
+                ? startX +
+                  (contentWidth - searchWidth) *
+                  0.5f
+                : startX + 25f;
+
+
         ImGui.SetCursorPos(
             new Vector2(
-                startX + (contentWidth - searchWidth) * 0.5f,
+                searchX,
                 headerY));
 
 
-        ImGui.SetNextItemWidth(searchWidth);
+        ImGui.SetNextItemWidth(
+            searchWidth);
 
 
 
@@ -699,31 +718,203 @@ internal sealed partial class MainWindow
 
 
         // ---------------------------------------------------------
-        // Right: watchers
+        // Right: profile + social status
         // ---------------------------------------------------------
+        //
+        // This replaces the old standalone "Watchers Online" text.
+        //
+        // Keep this tied to the existing showWatchers responsive rule.
+        // When the Home window becomes narrow enough that watchers used
+        // to disappear, this entire Home profile block disappears too.
+        //
+        // The non-Home header version will be added separately later and
+        // will NOT use this responsive hiding rule.
+        //
+
         if (showWatchers)
         {
-            var watcherText =
-            $"● {usersOnlineCount} Watchers Online";
+            var session =
+                CurrentSession;
 
-            var watcherWidth =
-                ImGui.CalcTextSize(watcherText).X;
+
+            var friendsOnline =
+                friends.Count(
+                    friend => friend.Online);
+
+
+            var displayName =
+                !string.IsNullOrWhiteSpace(
+                    session?.DisplayName)
+                    ? session.DisplayName
+                    : "Unknown";
+
+
+            var friendsText =
+                friendsOnline == 1
+                    ? "1 friend online"
+                    : $"{friendsOnline} friends online";
+
+
+            var watchersText =
+                usersOnlineCount == 1
+                    ? "1 watcher online"
+                    : $"{usersOnlineCount} watchers online";
+
+
+            //
+            // Compact three-line layout:
+            //
+            // [avatar]  ● Kodie
+            //           1 friend online
+            //           2 watchers online
+            //
+
+            const float avatarSize = 38f;
+            const float profileWidth = 185f;
+
+
+            var profileX =
+                startX +
+                contentWidth -
+                profileWidth -
+                10f;
+
+
+            var profileY =
+                headerY - 2f;
+
+
+            var profileOrigin =
+                new Vector2(
+                    profileX,
+                    profileY);
+
+
+            //
+            // Avatar
+            //
+
+            ImGui.SetCursorPos(
+                profileOrigin);
+
+
+            DrawAvatarChip(
+                session?.AvatarIcon,
+                session?.AvatarColorHex,
+                avatarSize,
+                session?.AvatarImageUrl);
+
+
+            //
+            // Text starts just to the right of the avatar.
+            //
+
+            var textX =
+                profileX +
+                avatarSize +
+                10f;
+
+
+            //
+            // First row:
+            //
+            // ● Kodie
+            //
 
             ImGui.SetCursorPos(
                 new Vector2(
-                    startX + contentWidth - watcherWidth - 55f,
-                    headerY + 6f));
+                    textX,
+                    profileY + 1f));
+
 
             ImGui.TextColored(
                 Good,
-                watcherText);
+                "●");
+
+
+            ImGui.SameLine(
+                0f,
+                5f);
+
+
+            ImGui.TextUnformatted(
+                displayName);
+
+
+            //
+            // Second row:
+            //
+            // 1 friend online
+            //
+
+            ImGui.SetCursorPos(
+                new Vector2(
+                    textX,
+                    profileY + 17f));
+
+
+            //
+            // Friends are deliberately the quieter secondary status.
+            //
+
+            ImGui.SetWindowFontScale(
+                0.84f);
+
+
+            ImGui.TextColored(
+                MutedText,
+                friendsText);
+
+
+            //
+            // Third row:
+            //
+            // 2 watchers online
+            //
+            // Give this slightly more visual weight than the friends
+            // count because it describes Alpha Channel activity.
+            //
+
+            ImGui.SetCursorPos(
+            new Vector2(
+                textX,
+                profileY + 35f));
+
+
+            //
+            // Watcher activity is the strongest secondary status in this
+            // profile block, so give it a little more size and live color.
+            //
+
+            ImGui.SetWindowFontScale(
+                1.02f);
+
+
+            ImGui.TextColored(
+                Good,
+                watchersText);
+
+
+            ImGui.SetWindowFontScale(
+                1f);
         }
 
         ImGui.SetWindowFontScale(1f);
         ImGui.Dummy(new Vector2(0f, 2f));
 
+        //
+        // Subtitle becomes more compact shortly before the search bar
+        // itself switches to its narrower layout.
+        //
+        // Search bar shrinks at 600f.
+        // Subtitle shortens slightly earlier at 670f.
+        //
+
         var subtitle =
-      "Your shared video space in FFXIV — watch together, anywhere in Eorzea.";
+            contentWidth < 670f
+                ? "Your shared media hub in FFXIV"
+                : "Your shared media hub in FFXIV — Watch, play and listen together, anywhere in Eorzea";
+
 
         var icon =
             FontAwesomeIcon.PlayCircle.ToIconString();
@@ -2248,7 +2439,7 @@ internal sealed partial class MainWindow
                 {
                     actionClicked = true;
 
-                    queue.PlayNow(
+                    HandlePlayNow(
                         new VideoQueueEntry(
                             result.Url,
                             result.Title,
@@ -2262,7 +2453,7 @@ internal sealed partial class MainWindow
                 {
                     actionClicked = true;
 
-                    queue.Add(
+                    HandleAddToQueue(
                         new VideoQueueEntry(
                             result.Url,
                             result.Title,
@@ -2270,8 +2461,11 @@ internal sealed partial class MainWindow
                             result.Duration,
                             result.ThumbnailUrl));
 
-                    queueAddedFeedbackUntil =
-                        ImGui.GetTime() + 2.0;
+                    if (!ShouldUseViewerMediaActions)
+                    {
+                        queueAddedFeedbackUntil =
+                            ImGui.GetTime() + 2.0;
+                    }
                 }
             }
         }
@@ -2299,7 +2493,7 @@ internal sealed partial class MainWindow
             if (mouse.Y < actionAreaTop ||
                 mouse.Y > origin.Y + thumbnailHeight)
             {
-                queue.PlayNow(
+                HandlePlayNow(
                     new VideoQueueEntry(
                         result.Url,
                         result.Title,
@@ -5576,9 +5770,31 @@ Hex(0x38BDF8),
             return;
         }
 
+        var engine =
+            screenController.Engine;
+
+        if (engine.IsPlayingSnes ||
+            engine.IsPlayingGameBoy)
+        {
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] End gameplay before joining a Watch Party.");
+
+            joinError =
+                "End gameplay before joining a Watch Party.";
+
+            return;
+        }
+
         queue.Clear();
-        joinedHostDisplayName = hostName.Trim();
-        _ = stream.JoinAsync(hostName.Trim());
+
+        joinedHostDisplayName =
+            hostName.Trim();
+
+        gameplayStreamOfferDismissed =
+    false;
+
+        _ = stream.JoinAsync(
+            hostName.Trim());
     }
 
     private static string ActivityLabel(ActivityEventDto item) => item.Type switch

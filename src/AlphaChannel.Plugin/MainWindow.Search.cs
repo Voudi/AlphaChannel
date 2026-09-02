@@ -343,7 +343,7 @@ internal sealed partial class MainWindow
                             $"##play_{index}",
                             playSize))
                         {
-                            queue.PlayNow(
+                            HandlePlayNow(
                                 new VideoQueueEntry(
                                     result.Url,
                                     result.Title,
@@ -403,7 +403,7 @@ internal sealed partial class MainWindow
                             $"##add_{index}",
                             addSize))
                         {
-                            queue.Add(
+                            HandleAddToQueue(
                                 new VideoQueueEntry(
                                     result.Url,
                                     result.Title,
@@ -411,10 +411,12 @@ internal sealed partial class MainWindow
                                     result.Duration,
                                     result.ThumbnailUrl));
 
-                            queueAddedFeedbackUntil =
-                                ImGui.GetTime() + 2.0;
+                            if (!ShouldUseViewerMediaActions)
+                            {
+                                queueAddedFeedbackUntil =
+                                    ImGui.GetTime() + 2.0;
+                            }
                         }
-
                         ImGui.GetWindowDrawList().AddRect(
                             buttonPos,
                             buttonPos + addSize,
@@ -662,20 +664,20 @@ internal sealed partial class MainWindow
                         var buttonPos =
                             ImGui.GetCursorScreenPos();
 
-                        if (ImGui.Button(
-                            $"##dmPlay_{index}",
-                            playSize))
-                        {
-                            queue.PlayNow(
-                                new VideoQueueEntry(
-                                    result.Url,
-                                    result.Title,
-                                    result.ChannelName,
-                                    result.Duration,
-                                    result.ThumbnailUrl));
-                        }
+                                if (ImGui.Button(
+                                    $"##dmPlay_{index}",
+                                    playSize))
+                                {
+                                    HandlePlayNow(
+                                        new VideoQueueEntry(
+                                            result.Url,
+                                            result.Title,
+                                            result.ChannelName,
+                                            result.Duration,
+                                            result.ThumbnailUrl));
+                                }
 
-                        DrawPlayerActionButtonContent(
+                                DrawPlayerActionButtonContent(
                             buttonPos,
                             playSize,
                             FontAwesomeIcon.Play,
@@ -723,23 +725,26 @@ internal sealed partial class MainWindow
                         var buttonPos =
                             ImGui.GetCursorScreenPos();
 
-                        if (ImGui.Button(
-                            $"##dmAdd_{index}",
-                            addSize))
-                        {
-                            queue.Add(
-                                new VideoQueueEntry(
-                                    result.Url,
-                                    result.Title,
-                                    result.ChannelName,
-                                    result.Duration,
-                                    result.ThumbnailUrl));
+                                if (ImGui.Button(
+                                    $"##dmAdd_{index}",
+                                    addSize))
+                                {
+                                    HandleAddToQueue(
+                                        new VideoQueueEntry(
+                                            result.Url,
+                                            result.Title,
+                                            result.ChannelName,
+                                            result.Duration,
+                                            result.ThumbnailUrl));
 
-                            queueAddedFeedbackUntil =
-                                ImGui.GetTime() + 2.0;
-                        }
+                                    if (!ShouldUseViewerMediaActions)
+                                    {
+                                        queueAddedFeedbackUntil =
+                                            ImGui.GetTime() + 2.0;
+                                    }
+                                }
 
-                        ImGui.GetWindowDrawList().AddRect(
+                                ImGui.GetWindowDrawList().AddRect(
                             buttonPos,
                             buttonPos + addSize,
                             ImGui.GetColorU32(
@@ -1689,7 +1694,7 @@ internal sealed partial class MainWindow
                             $"##trendingPlay_{stream.ChannelName}",
                             playSize))
                         {
-                            queue.PlayNow(
+                            HandlePlayNow(
                                 new VideoQueueEntry(
                                     stream.Url,
                                     stream.Title,
@@ -1968,7 +1973,7 @@ ImGui.SetWindowFontScale(1f);
                             "##twitchPlay",
                             playSize))
                         {
-                            queue.PlayNow(
+                            HandlePlayNow(
                                 new VideoQueueEntry(
                                     stream.Url,
                                     stream.Title,
@@ -2025,10 +2030,10 @@ ImGui.SetWindowFontScale(1f);
                             ImGui.GetCursorScreenPos();
 
                         if (ImGui.Button(
-                            "##twitchAdd",
-                            addSize))
+                "##twitchAdd",
+                addSize))
                         {
-                            queue.Add(
+                            HandleAddToQueue(
                                 new VideoQueueEntry(
                                     stream.Url,
                                     stream.Title,
@@ -2036,8 +2041,11 @@ ImGui.SetWindowFontScale(1f);
                                     null,
                                     stream.ThumbnailUrl));
 
-                            queueAddedFeedbackUntil =
-                                ImGui.GetTime() + 2.0;
+                            if (!ShouldUseViewerMediaActions)
+                            {
+                                queueAddedFeedbackUntil =
+                                    ImGui.GetTime() + 2.0;
+                            }
                         }
 
                         ImGui.GetWindowDrawList().AddRect(

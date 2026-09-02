@@ -7,6 +7,328 @@ namespace AlphaChannel.Plugin;
 
 internal sealed partial class MainWindow
 {
+    // TEMP: development/testing helper.
+    // This does not change the real StreamMode. It only lets media-action
+    // UI behave as though this client were a watch-party viewer.
+    private bool sandboxActAsViewer;
+
+    private bool ShouldUseViewerMediaActions =>
+        stream.Mode == StreamMode.Viewing ||
+        sandboxActAsViewer;
+
+
+    // =========================================================
+    // Watch Party media-action interception
+    // =========================================================
+
+    private VideoQueueEntry? pendingViewerMediaEntry;
+
+    private bool pendingViewerMediaWasPlayNow;
+
+    private bool openViewerMediaActionPopup;
+
+
+    // Route Play Now actions through here.
+    //
+    // Hosts / normal local playback continue exactly as before.
+    // Watch-party viewers are instead asked whether they want to
+    // request the video from the host or save it locally for later.
+    //
+    private void HandlePlayNow(
+     VideoQueueEntry entry)
+    {
+        //
+        // Local Video exclusively owns the TV.
+        //
+        // Block here BEFORE queue.PlayNow() can change Current,
+        // reorder anything, or cause the rest of the UI to believe
+        // another media item owns the active MPV session.
+        //
+
+        if (video.IsPlayingLocalVideo)
+        {
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] Stop the local video before playing other media.");
+
+            return;
+        }
+
+
+        if (!ShouldUseViewerMediaActions)
+        {
+            queue.PlayNow(entry);
+            return;
+        }
+
+        pendingViewerMediaEntry =
+            entry;
+
+        pendingViewerMediaWasPlayNow =
+            true;
+
+        openViewerMediaActionPopup =
+            true;
+    }
+
+
+    // Route Add to Queue actions through here.
+    //
+    // Outside a viewed watch party this behaves exactly like the
+    // existing queue.Add call.
+    //
+    // Viewers are asked whether they want to request the media from
+    // the host or add it to their own private/local queue.
+    //
+    private void HandleAddToQueue(
+    VideoQueueEntry entry)
+    {
+        //
+        // Keep Local Video completely isolated from normal media.
+        //
+        // While it owns the TV we don't even allow the normal queue
+        // to be edited through media actions.
+        //
+
+        if (video.IsPlayingLocalVideo)
+        {
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] Stop the local video before adding other media to the queue.");
+
+            return;
+        }
+
+
+        if (!ShouldUseViewerMediaActions)
+        {
+            queue.Add(entry);
+
+            queueAddedFeedbackUntil =
+                ImGui.GetTime() + 2.0;
+
+            return;
+        }
+
+        pendingViewerMediaEntry =
+            entry;
+
+        pendingViewerMediaWasPlayNow =
+            false;
+
+        openViewerMediaActionPopup =
+            true;
+    }
+
+
+    // Draw this once per MainWindow frame.
+    //
+    // For now "Request this video" deliberately does not send
+    // anything over the network. We will connect that after the
+    // interception path has been tested.
+    //
+    private void DrawViewerMediaActionPopup()
+    {
+        if (openViewerMediaActionPopup)
+        {
+            ImGui.OpenPopup(
+                "Watch Party##viewerMediaAction");
+
+            openViewerMediaActionPopup =
+                false;
+        }
+
+        ImGui.SetNextWindowSize(
+            new Vector2(
+                460f,
+                0f),
+            ImGuiCond.Always);
+
+        if (!ImGui.BeginPopupModal(
+                "Watch Party##viewerMediaAction",
+                ImGuiWindowFlags.AlwaysAutoResize |
+                ImGuiWindowFlags.NoSavedSettings))
+        {
+            return;
+        }
+
+        var entry =
+            pendingViewerMediaEntry;
+
+        if (entry is null)
+        {
+            ImGui.CloseCurrentPopup();
+            ImGui.EndPopup();
+            return;
+        }
+
+
+        ImGui.SetWindowFontScale(
+            1.10f);
+
+        ImGui.TextColored(
+            Vector4.One,
+            "You're currently in a watch party.");
+
+        ImGui.SetWindowFontScale(
+            1f);
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                4f));
+
+        ImGui.TextColored(
+            MutedText,
+            pendingViewerMediaWasPlayNow
+                ? "You can't replace the host's current video directly."
+                : "The host controls the shared playback queue.");
+
+        ImGui.TextColored(
+            MutedText,
+            "What would you like to do with this video?");
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                12f));
+
+        ImGui.Separator();
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                12f));
+
+
+        //
+        // Media details
+        //
+
+        var displayTitle =
+            string.IsNullOrWhiteSpace(entry.Title)
+                ? entry.Url
+                : entry.Title;
+
+        ImGui.SetWindowFontScale(
+            1.08f);
+
+        ImGui.TextWrapped(
+            displayTitle);
+
+        ImGui.SetWindowFontScale(
+            1f);
+
+
+        if (!string.IsNullOrWhiteSpace(
+                entry.Source))
+        {
+            ImGui.Dummy(
+                new Vector2(
+                    0f,
+                    2f));
+
+            ImGui.TextColored(
+                MutedText,
+                entry.Source);
+        }
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                16f));
+
+
+        //
+        // Request from host
+        //
+        // Transport is intentionally added in the next stage.
+        //
+
+        using (ImRaii.PushColor(
+            ImGuiCol.Button,
+            Accent)
+            .Push(
+                ImGuiCol.ButtonHovered,
+                AccentHover)
+            .Push(
+                ImGuiCol.ButtonActive,
+                AccentActive))
+        {
+            if (ImGui.Button(
+                    "Request this video",
+                    new Vector2(
+                        -1f,
+                        38f)))
+            {
+                _ = stream.SendMediaRequestAsync(
+                    entry.Url,
+                    entry.Title,
+                    entry.Source,
+                    entry.Duration,
+                    entry.ThumbnailUrl);
+
+                pendingViewerMediaEntry =
+                    null;
+
+                ImGui.CloseCurrentPopup();
+            }
+        }
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                6f));
+
+
+        //
+        // Personal/local queue
+        //
+
+        if (ImGui.Button(
+                "Add to my personal queue",
+                new Vector2(
+                    -1f,
+                    38f)))
+        {
+            queue.Add(entry);
+
+            queueAddedFeedbackUntil =
+                ImGui.GetTime() + 2.0;
+
+            pendingViewerMediaEntry =
+                null;
+
+            ImGui.CloseCurrentPopup();
+        }
+
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                6f));
+
+
+        //
+        // Cancel
+        //
+
+        if (ImGui.Button(
+                "Cancel",
+                new Vector2(
+                    -1f,
+                    34f)))
+        {
+            pendingViewerMediaEntry =
+                null;
+
+            ImGui.CloseCurrentPopup();
+        }
+
+
+        ImGui.EndPopup();
+    }
 
     private void DrawWatchPartyPage()
     {
@@ -933,12 +1255,48 @@ joinMin + new Vector2(
 }
     private async void CreateEmptyWatchParty()
     {
+        gameplayStreamOfferDismissed =
+    false;
+
         screenController.Engine.ShowWaitingScreen();
 
         await stream.PublishStateAsync(
             null,
             0,
             true,
+            screenController.Engine.ScreenPosition,
+            screenController.Engine.ScreenYaw,
+            screenController.Engine.ScreenScale);
+    }
+
+
+    // =========================================================
+    // Gameplay Watch Party
+    // =========================================================
+    //
+    // Publishes the public HLS viewer URL to the Watch Party
+    // without changing the host's local playback queue.
+    //
+    // The host continues rendering the emulator locally.
+    // Viewers receive the HLS stream through normal Watch Party
+    // synchronization.
+    //
+    // IMPORTANT:
+    // This must only ever receive the public HLS URL.
+    // Never pass the RTMP publish URL or stream key here.
+    //
+    private async Task PublishGameplayWatchPartyAsync(
+        string hlsUrl)
+    {
+        if (string.IsNullOrWhiteSpace(hlsUrl))
+        {
+            return;
+        }
+
+        await stream.PublishStateAsync(
+            hlsUrl,
+            0,
+            false,
             screenController.Engine.ScreenPosition,
             screenController.Engine.ScreenYaw,
             screenController.Engine.ScreenScale);
