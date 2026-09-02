@@ -26,5 +26,10 @@ internal static class ModerationAdminEndpoints
             await moderation.UnbanAsync(accountId, ct);
             return Results.Ok();
         });
+
+        group.MapPatch("/accounts/{accountId:guid}", async (Guid accountId, AdminPatchAccountRequest request, ModerationAdminService moderation, CancellationToken ct) =>
+            await moderation.PatchAccountAsync(accountId, request.PatreonTier, request.IsDeveloper, ct)
+                ? Results.Ok()
+                : Results.NotFound());
     }
 }

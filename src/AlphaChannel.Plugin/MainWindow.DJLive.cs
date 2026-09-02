@@ -329,6 +329,33 @@ var dashboard =
                 0f,
                 3f));
 
+        if (ImGui.Button("Use AlphaChannel radio", new Vector2(MathF.Min(230f, width), 32f)))
+        {
+            IssueAlphaChannelRadio();
+        }
+
+        if (radioError is { } radioIssue)
+        {
+            ImGui.TextColored(Danger, radioIssue);
+        }
+
+        if (radioCredentials is { } radio)
+        {
+            ImGui.TextColored(MutedText, $"Mount {radio.Mount}");
+            ImGui.TextWrapped($"Server {radio.SourceHost}  Port {radio.SourcePort}  User {radio.SourceUser}");
+            if (!string.IsNullOrEmpty(radio.SourcePassword))
+            {
+                ImGui.TextWrapped($"Source password {radio.SourcePassword}");
+            }
+
+            ImGui.TextWrapped(radio.ListenUrl);
+        }
+
+        ImGui.Dummy(
+            new Vector2(
+                0f,
+                8f));
+
         ImGui.SetWindowFontScale(
             0.82f);
 
@@ -1289,6 +1316,30 @@ var dashboard =
     // ---------------------------------------------------------
     // Shared audio playback
     // ---------------------------------------------------------
+
+    private void IssueAlphaChannelRadio()
+    {
+        var token = CurrentSession?.Token;
+        if (string.IsNullOrEmpty(token))
+        {
+            radioError = "Sign in to get a radio mount.";
+            return;
+        }
+
+        radioError = null;
+        _ = Task.Run(async () =>
+        {
+            var issued = await radioClient.IssueAsync(token).ConfigureAwait(false);
+            if (issued is null)
+            {
+                radioError = "Couldn't issue radio credentials.";
+                return;
+            }
+
+            radioCredentials = issued;
+            djStreamUrl = issued.ListenUrl;
+        });
+    }
 
     private void PlayDjStream()
     {

@@ -1,5 +1,6 @@
 using AlphaChannel.Plugin.Auth;
 using AlphaChannel.Plugin.Video;
+using AlphaChannel.Contracts;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Textures;
@@ -124,6 +125,8 @@ internal sealed partial class MainWindow : Window, IDisposable
     private readonly PluginHubClient pluginHubClient;
     private readonly VenuesClient venuesClient;
     private readonly LiveClient liveClient;
+    private readonly RoomsClient roomsClient;
+    private readonly RadioClient radioClient;
     private readonly TwitchClient twitchClient;
     private readonly Crypto.KeyVault keyVault;
     private readonly Whispers.WhisperMirror whisperMirror;
@@ -134,6 +137,95 @@ internal sealed partial class MainWindow : Window, IDisposable
     private readonly Action<CharacterSession?> onSessionChanged;
     // Wide media-hub layout: left navigation + spacious content + social rail + compact player bar.
     private static readonly Vector2 WindowSize = new(1220, 840);
+    private static readonly Vector2 MaxWindowSize = new(3840, 2160);
+    private const float LayoutScaleMin = 0.85f;
+    private const float LayoutScaleMax = 3840f / 1220f;
+
+    private float layoutScale = 1f;
+    private bool windowSizeSavePending;
+
+    private void RefreshLayoutScale(Vector2 windowSize)
+    {
+        if (windowMinimized)
+        {
+            layoutScale = 1f;
+            return;
+        }
+
+        var sx = windowSize.X / WindowSize.X;
+        var sy = windowSize.Y / WindowSize.Y;
+        layoutScale = Math.Clamp(MathF.Min(sx, sy), LayoutScaleMin, LayoutScaleMax);
+    }
+
+    private float Ui(float px) => px * layoutScale;
+
+    private Vector2 UiVec(float x, float y) => new(x * layoutScale, y * layoutScale);
+
+    private static Vector2 NamedWindowSize(UiWindowSizePreset preset) => preset switch
+    {
+        UiWindowSizePreset.FullHd => new Vector2(1920f, 1080f),
+        UiWindowSizePreset.Qhd => new Vector2(2560f, 1440f),
+        UiWindowSizePreset.Uhd => new Vector2(3840f, 2160f),
+        _ => WindowSize,
+    };
+
+    private Vector2 ViewportMaxSize()
+    {
+        var work = ImGui.GetMainViewport().WorkSize;
+        var maxX = MaxWindowSize.X;
+        var maxY = MaxWindowSize.Y;
+        if (work.X > 1f && work.Y > 1f)
+        {
+            maxX = MathF.Min(maxX, work.X);
+            maxY = MathF.Min(maxY, work.Y);
+        }
+
+        return new Vector2(maxX, maxY);
+    }
+
+    private Vector2 ClampWindowSize(Vector2 size)
+    {
+        var max = ViewportMaxSize();
+        return new(
+            Math.Clamp(size.X, MinimizedSize.X, MathF.Max(MinimizedSize.X, max.X)),
+            Math.Clamp(size.Y, MinimizedSize.Y, MathF.Max(MinimizedSize.Y, max.Y)));
+    }
+
+    private void LoadWindowSizeFromConfig()
+    {
+        var cfg = Plugin.Cfg;
+        if (cfg.WindowSizePreset == UiWindowSizePreset.Custom &&
+            cfg.WindowWidth >= MinimizedSize.X &&
+            cfg.WindowHeight >= MinimizedSize.Y)
+        {
+            userWindowSize = ClampWindowSize(new Vector2(cfg.WindowWidth, cfg.WindowHeight));
+        }
+        else if (cfg.WindowSizePreset is UiWindowSizePreset.FullHd or UiWindowSizePreset.Qhd or UiWindowSizePreset.Uhd)
+        {
+            userWindowSize = ClampWindowSize(NamedWindowSize(cfg.WindowSizePreset));
+        }
+        else
+        {
+            cfg.WindowSizePreset = UiWindowSizePreset.Design;
+            userWindowSize = ClampWindowSize(WindowSize);
+        }
+
+        userResized = true;
+    }
+
+    private void ApplyWindowSizePreset(UiWindowSizePreset preset)
+    {
+        var cfg = Plugin.Cfg;
+        cfg.WindowSizePreset = preset;
+        var size = preset == UiWindowSizePreset.Custom
+            ? ClampWindowSize(userWindowSize)
+            : ClampWindowSize(NamedWindowSize(preset));
+        userWindowSize = size;
+        cfg.WindowWidth = size.X;
+        cfg.WindowHeight = size.Y;
+        userResized = true;
+        cfg.Save();
+    }
     // Compact capsule chrome while tucked away - wide enough for brand + expand + close.
     private static readonly Vector2 MinimizedSize = new(276, 40);
     // Wider capsule when "Watching First Last" is showing (viewer-only join).
@@ -161,9 +253,27 @@ internal sealed partial class MainWindow : Window, IDisposable
     private double pageTransitionStartedAt = -1d;
 
     private string joinHostNameInput = string.Empty;
+    private string joinPasswordInput = string.Empty;
     private string? joinError;
+    private string createRoomDescription = string.Empty;
+    private string createRoomLocation = string.Empty;
+    private int createRoomKindIndex;
+    private string createRoomPassword = string.Empty;
+    private string roomBrowsePassword = string.Empty;
+    private string? roomBrowseTitle;
+    private RoomDirectoryDto[] roomBrowseList = [];
+    private bool roomBrowseLoading;
+    private RoomDirectoryDto[] homeWatchPartyRooms = [];
+    private double homeWatchPartyFetchedAt = -999;
+    private bool homeWatchPartyLoading;
+    private bool roomBrowseFriendsOnly;
+    private bool clearQueueWhenJoined;
+    private bool joinClearQueuePending;
+    private RadioCredentialsDto? radioCredentials;
+    private string? radioError;
 
-    private const float SidebarWidth = 185f;
+    private const float DesignSidebarWidth = 210f;
+    private float SidebarWidth => Ui(DesignSidebarWidth);
     private const float BottomBarHeight = 96f;
 
     // Borderless Child windows ignore WindowPadding in this ImGui build unless AlwaysUseWindowPadding
@@ -235,6 +345,7 @@ internal sealed partial class MainWindow : Window, IDisposable
         StreamClient stream, Action requestRename, AuthClient authClient, SignInFlow signInFlow,
         FriendsClient friendsClient, ActivityClient activityClient, DmClient dmClient, ReportClient reportClient,
         TweeterClient tweeterClient, PluginHubClient pluginHubClient, VenuesClient venuesClient, LiveClient liveClient,
+        RoomsClient roomsClient, RadioClient radioClient,
         TwitchClient twitchClient, Crypto.KeyVault keyVault, Whispers.WhisperMirror whisperMirror,
         Action<CharacterSession?> onSessionChanged)
         : base("AlphaChannel###AlphaChannelMain")
@@ -254,6 +365,8 @@ internal sealed partial class MainWindow : Window, IDisposable
         this.pluginHubClient = pluginHubClient;
         this.venuesClient = venuesClient;
         this.liveClient = liveClient;
+        this.roomsClient = roomsClient;
+        this.radioClient = radioClient;
         this.twitchClient = twitchClient;
         this.keyVault = keyVault;
         this.whisperMirror = whisperMirror;
@@ -275,14 +388,25 @@ internal sealed partial class MainWindow : Window, IDisposable
         // enough to allow both (NoResize already blocks the player from dragging it anywhere else).
         Flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse
                 | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
-        SizeCondition = ImGuiCond.Always;
+        SizeCondition = ImGuiCond.FirstUseEver;
+        Size = WindowSize;
         SizeConstraints = new WindowSizeConstraints
         {
             MinimumSize = MinimizedSize,
-            MaximumSize = new Vector2(2000, 1200),
+            MaximumSize = MaxWindowSize,
         };
 
-        stream.OnJoined += () => joinError = null;
+        LoadWindowSizeFromConfig();
+
+        stream.OnJoined += () =>
+        {
+            joinError = null;
+            if (clearQueueWhenJoined)
+            {
+                joinClearQueuePending = true;
+                clearQueueWhenJoined = false;
+            }
+        };
         stream.OnDeclined += reason =>
         {
             joinError = string.IsNullOrEmpty(reason) ? "Could not find that host." : reason;
@@ -303,7 +427,7 @@ internal sealed partial class MainWindow : Window, IDisposable
         maximizedPosition = Plugin.Cfg.MaximizedPosition;
         minimizedPosition = Plugin.Cfg.MinimizedPosition;
 
-        if (true)
+        if (!Plugin.Cfg.HasCompletedFirstLaunch)
         {
             _ = BeginFirstLaunchAsync();
         }
@@ -376,6 +500,7 @@ internal sealed partial class MainWindow : Window, IDisposable
 
         proximityJoined = true;
         viewerMode = true;
+        clearQueueWhenJoined = false;
         // Do not touch playerSourceTab / queue — probes must not yank the YouTube search box.
         joinedHostDisplayName = hostDisplayName.Trim();
         _ = stream.JoinAsync(hostDisplayName.Trim());
@@ -408,6 +533,17 @@ internal sealed partial class MainWindow : Window, IDisposable
         _ = stream.LeaveAsync();
         gameplayStreamOfferDismissed =
     false;
+    }
+
+    internal void ApplyPendingJoinQueueClear()
+    {
+        if (!joinClearQueuePending)
+        {
+            return;
+        }
+
+        joinClearQueuePending = false;
+        queue.Clear();
     }
     private void StopPlayback()
     {
@@ -1134,18 +1270,24 @@ introText);
     {
         if (windowMinimized)
         {
+            SizeCondition = ImGuiCond.Always;
             Size = viewerMode
                 ? MinimizedViewerSize
                 : MinimizedSize;
+            return;
         }
-        else if (userResized)
+
+        userWindowSize = ClampWindowSize(userWindowSize);
+        var viewportMax = ViewportMaxSize();
+        SizeConstraints = new WindowSizeConstraints
         {
-            Size = userWindowSize;
-        }
-        else
-        {
-            Size = WindowSize;
-        }
+            MinimumSize = MinimizedSize,
+            MaximumSize = new Vector2(
+                MathF.Max(MinimizedSize.X, viewportMax.X),
+                MathF.Max(MinimizedSize.Y, viewportMax.Y)),
+        };
+        SizeCondition = ImGuiCond.Always;
+        Size = userWindowSize;
     }
 
     private void OpenPlayerSearch(int tab, string value)
@@ -1285,16 +1427,32 @@ introText);
         customBackgroundActive = Plugin.Cfg.UiBackground == UiBackground.Custom && customBackground is not null;
         EnsureSubscriptionVideosLoaded();
 
-        using var theme = new ThemeScope();
+        RefreshLayoutScale(ImGui.GetWindowSize());
+        using var theme = new ThemeScope(layoutScale);
         CaptureCurrentPosition();
         if (!windowMinimized)
         {
             var currentSize = ImGui.GetWindowSize();
+            var sizeDelta = currentSize - userWindowSize;
+            var sizeChanged = MathF.Abs(sizeDelta.X) > 1f || MathF.Abs(sizeDelta.Y) > 1f;
+            var userDraggingResize =
+                ImGui.IsMouseDragging(ImGuiMouseButton.Left, 1f) &&
+                !ImGui.IsAnyItemActive();
 
-            if (currentSize != userWindowSize)
+            if (userDraggingResize && sizeChanged)
             {
                 userResized = true;
-                userWindowSize = currentSize;
+                userWindowSize = ClampWindowSize(currentSize);
+                Plugin.Cfg.WindowSizePreset = UiWindowSizePreset.Custom;
+                Plugin.Cfg.WindowWidth = userWindowSize.X;
+                Plugin.Cfg.WindowHeight = userWindowSize.Y;
+                windowSizeSavePending = true;
+            }
+
+            if (windowSizeSavePending && !ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+            {
+                Plugin.Cfg.Save();
+                windowSizeSavePending = false;
             }
         }
 
@@ -1369,10 +1527,10 @@ introText);
 
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(24, 18)))
+                UiVec(24, 18)))
 
             using (ImRaii.PushColor(ImGuiCol.ChildBg, SidebarBg))
-            using (ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, new Vector2(16, 18)))
+            using (ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, UiVec(16, 18)))
             using (var sidebar = ImRaii.Child(
                 "##sidebar",
                 new Vector2(SidebarWidth, topHeight),
@@ -1407,7 +1565,7 @@ introText);
             ImGui.SameLine(0, 0);
 
 
-            using (ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, new Vector2(12, 18)))
+            using (ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, UiVec(12, 18)))
             using (var content = ImRaii.Child(
                 "##content",
                 new Vector2(centerWidth, topHeight),
@@ -1903,7 +2061,7 @@ introText);
         var drawList =
             ImGui.GetWindowDrawList();
 
-        const float mark = 42f;
+        var mark = Ui(42f);
 
 
         EnsureAlphaIconLoaded();
@@ -1946,25 +2104,21 @@ introText);
         var brandText =
             "ALPHA CHANNEL";
 
-        var textWidth =
-            ImGui.CalcTextSize(
-                brandText)
-            .X;
-
+        var brandScale = 1.25f;
+        ImGui.SetWindowFontScale(brandScale);
+        var textWidth = ImGui.CalcTextSize(brandText).X;
+        if (textWidth > sidebarWidth && textWidth > 1f)
+        {
+            brandScale *= sidebarWidth / textWidth;
+            ImGui.SetWindowFontScale(brandScale);
+            textWidth = ImGui.CalcTextSize(brandText).X;
+        }
 
         ImGui.SetCursorPosX(
-            (sidebarWidth - textWidth) *
-            0.5f);
+            MathF.Max(0f, (sidebarWidth - textWidth) * 0.5f));
 
-
-        ImGui.SetWindowFontScale(
-            1.25f);
-
-        ImGui.TextUnformatted(
-            brandText);
-
-        ImGui.SetWindowFontScale(
-            1f);
+        ImGui.TextUnformatted(brandText);
+        ImGui.SetWindowFontScale(1f);
 
 
         //
@@ -1975,7 +2129,7 @@ introText);
         // so it must not use that smaller child's height.
         //
 
-        const float hideHeadingsBelowHeight = 690f;
+        var hideHeadingsBelowHeight = Ui(690f);
 
         var compactSidebar =
             ImGui.GetWindowHeight() <=
@@ -2010,7 +2164,7 @@ introText);
         // contents are taller than the available height.
         //
 
-        const float supportFooterHeight = 34f;
+        var supportFooterHeight = Ui(34f);
 
 
         var availableMiddleHeight =
@@ -2264,7 +2418,7 @@ introText);
         ImGui.PushID((int)page);
 
         var rowStart = ImGui.GetCursorScreenPos();
-        var rowSize = new Vector2(ImGui.GetContentRegionAvail().X, 38f);
+        var rowSize = new Vector2(ImGui.GetContentRegionAvail().X, Ui(38f));
         var drawList = ImGui.GetWindowDrawList();
 
         var clicked = ImGui.InvisibleButton("##navrow", rowSize);
@@ -2272,17 +2426,17 @@ introText);
 
         if (active)
         {
-            drawList.AddRectFilled(rowStart, rowStart + rowSize, ImGui.GetColorU32(Accent), 10f);
+            drawList.AddRectFilled(rowStart, rowStart + rowSize, ImGui.GetColorU32(Accent), Ui(10f));
         }
         else if (hovered)
         {
-            drawList.AddRectFilled(rowStart, rowStart + rowSize, ImGui.GetColorU32(CardBgHover), 10f);
+            drawList.AddRectFilled(rowStart, rowStart + rowSize, ImGui.GetColorU32(CardBgHover), Ui(10f));
         }
 
         var textColor = active ? Vector4.One : MutedText;
-        drawList.AddText(UiBuilder.IconFont, ImGui.GetFontSize(), rowStart + new Vector2(12, 9),
+        drawList.AddText(UiBuilder.IconFont, ImGui.GetFontSize(), rowStart + UiVec(12, 9),
             ImGui.GetColorU32(textColor), icon.ToIconString());using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, Vector2.Zero))
-        drawList.AddText(rowStart + new Vector2(38, 9), ImGui.GetColorU32(textColor), label);
+        drawList.AddText(rowStart + UiVec(38, 9), ImGui.GetColorU32(textColor), label);
 
         if (badgeCount > 0)
         {
@@ -3303,7 +3457,7 @@ introText);
     bool canUseActions,
     Action? onPromote)
     {
-        const float rowHeight = 52f;
+        var rowHeight = Ui(52f);
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.ChildRounding,
@@ -3483,7 +3637,7 @@ introText);
         private const int ColorCount = 10;
         private const int StyleCount = 7;
 
-        public ThemeScope()
+        public ThemeScope(float scale)
         {
             ImGui.PushStyleColor(ImGuiCol.WindowBg, WindowBg);
             ImGui.PushStyleColor(ImGuiCol.ChildBg, WindowBg);
@@ -3493,15 +3647,17 @@ introText);
             ImGui.PushStyleColor(ImGuiCol.ButtonActive, AccentActive);
             ImGui.PushStyleColor(ImGuiCol.FrameBg, FrameBg);
             ImGui.PushStyleColor(ImGuiCol.FrameBgHovered, FrameBgHover);
-            ImGui.PushStyleColor(ImGuiCol.SliderGrab, Accent); var footerH = 190f;
+            ImGui.PushStyleColor(ImGuiCol.SliderGrab, Accent);
             ImGui.PushStyleColor(ImGuiCol.SliderGrabActive, AccentActive);
-            ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 12f);
-            ImGui.PushStyleVar(ImGuiStyleVar.GrabRounding, 12f);
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 12f * scale);
+            ImGui.PushStyleVar(ImGuiStyleVar.GrabRounding, 12f * scale);
             ImGui.PushStyleVar(ImGuiStyleVar.ChildRounding, 0f);
             ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0f);
-            ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(12, 10));
-            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(12, 8));
-            ImGui.PushStyleVar(ImGuiStyleVar.ItemInnerSpacing, new Vector2(8, 6));
+            // Padding stays in design units. Dalamud already scales widgets with GlobalUiScale;
+            // multiplying again made every unscaled Child clip its contents.
+            ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(12f, 10f));
+            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(12f, 8f));
+            ImGui.PushStyleVar(ImGuiStyleVar.ItemInnerSpacing, new Vector2(8f, 6f));
         }
 
         public void Dispose()

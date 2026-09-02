@@ -36,6 +36,9 @@ internal sealed class StreamClient : IDisposable
     // desync self-identity checks (e.g. the host-transfer comparison in Dispatch) from what the
     // server actually authenticated this socket as.
     private string? myAccountId;
+    private StreamControl? lastHostState;
+    private string? pendingJoinHost;
+    private string? pendingJoinPassword;
 
     internal StreamMode Mode { get; private set; } = StreamMode.None;
     internal string? HostId { get; private set; }
@@ -131,6 +134,8 @@ internal sealed class StreamClient : IDisposable
                 {
                     await SendHelloAsync(name).ConfigureAwait(false);
                 }
+
+                await FlushPendingAsync(token).ConfigureAwait(false);
 
                 await ReceiveLoopAsync(ws, token).ConfigureAwait(false);
             }
@@ -235,6 +240,8 @@ internal sealed class StreamClient : IDisposable
                 break;
             case SignalType.StreamDeclined:
                 Mode = StreamMode.None;
+                pendingJoinHost = null;
+                pendingJoinPassword = null;
                 OnDeclined?.Invoke(message.Reason);
                 break;
             case SignalType.StreamRoster:
@@ -243,6 +250,9 @@ internal sealed class StreamClient : IDisposable
             case SignalType.StreamEnded:
                 Mode = StreamMode.None;
                 HostId = null;
+                lastHostState = null;
+                pendingJoinHost = null;
+                pendingJoinPassword = null;
 
                 IncomingChat.Clear();
                 IncomingMediaRequests.Clear();
@@ -480,12 +490,18 @@ internal sealed class StreamClient : IDisposable
         SendAsync(new StreamControl { Type = SignalType.StreamHello, DisplayName = displayName });
 
     internal bool IsPrivate { get; set; }
+    internal string? RoomDescription { get; set; }
+    internal string? RoomLocation { get; set; }
+    internal RoomKind RoomKind { get; set; } = RoomKind.Public;
+    internal string? RoomPassword { get; set; }
 
     internal Task PublishStateAsync(string? url, double positionSeconds, bool paused, Vector3? screenPosition,
         float? screenYaw, float? screenScale)
     {
         Mode = StreamMode.Hosting;
-        return SendAsync(new StreamControl
+        pendingJoinHost = null;
+        pendingJoinPassword = null;
+        lastHostState = new StreamControl
         {
             Type = SignalType.StreamState,
             HostId = myAccountId,
@@ -498,13 +514,26 @@ internal sealed class StreamClient : IDisposable
             ScreenYaw = screenYaw,
             ScreenScale = screenScale,
             IsPrivate = IsPrivate,
-        });
+            Description = RoomDescription ?? "",
+            Location = RoomLocation ?? "",
+            Kind = RoomKind,
+            Password = RoomKind == RoomKind.Locked ? RoomPassword : null,
+        };
+        return SendAsync(lastHostState);
     }
 
-    internal Task JoinAsync(string hostId)
+    internal Task JoinAsync(string hostId, string? password = null)
     {
         HostId = hostId;
-        return SendAsync(new StreamControl { Type = SignalType.StreamJoin, HostId = hostId });
+        pendingJoinHost = hostId;
+        pendingJoinPassword = string.IsNullOrWhiteSpace(password) ? null : password.Trim();
+        lastHostState = null;
+        return SendAsync(new StreamControl
+        {
+            Type = SignalType.StreamJoin,
+            HostId = hostId,
+            Password = pendingJoinPassword,
+        });
     }
 
     // targetUserId comes straight from Roster (ParticipantInfo.UserId) - the host already has real
@@ -584,9 +613,32 @@ internal sealed class StreamClient : IDisposable
         Mode = StreamMode.None;
         HostId = null;
         Roster = [];
+        lastHostState = null;
+        pendingJoinHost = null;
+        pendingJoinPassword = null;
 
         IncomingChat.Clear();
         IncomingMediaRequests.Clear();
+    }
+
+    private async Task FlushPendingAsync(CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (lastHostState is { } hostState)
+        {
+            await SendAsync(hostState with { HostId = myAccountId }).ConfigureAwait(false);
+            return;
+        }
+
+        if (pendingJoinHost is { Length: > 0 } host)
+        {
+            await SendAsync(new StreamControl
+            {
+                Type = SignalType.StreamJoin,
+                HostId = host,
+                Password = pendingJoinPassword,
+            }).ConfigureAwait(false);
+        }
     }
 
     private async Task SendAsync(StreamControl message)

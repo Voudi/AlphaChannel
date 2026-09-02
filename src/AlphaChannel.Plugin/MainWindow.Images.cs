@@ -110,7 +110,7 @@ internal sealed partial class MainWindow
                     "##imagesMainCard",
                     new Vector2(
                         -1f,
-                        600f),
+                        Ui(600f)),
                     true,
                     ImGuiWindowFlags.NoScrollbar |
                     ImGuiWindowFlags.NoScrollWithMouse))
@@ -1200,7 +1200,7 @@ internal sealed partial class MainWindow
                     "##slideshowSettings",
                     new Vector2(
                         -1f,
-                        235f),
+                        Ui(235f)),
                     true,
                     ImGuiWindowFlags.NoScrollbar |
                     ImGuiWindowFlags.NoScrollWithMouse))

@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<RoomManager>();
+builder.Services.AddSingleton<RoomDirectoryService>();
 builder.Services.AddSingleton<UserDirectory>();
 builder.Services.AddSingleton<PresenceService>();
 builder.Services.AddSingleton<ConnectionHandler>();
@@ -54,6 +55,7 @@ builder.Services.AddScoped<PluginHubService>();
 builder.Services.AddScoped<VenueService>();
 builder.Services.AddSingleton<LiveDirectory>();
 builder.Services.AddScoped<LiveService>();
+builder.Services.AddSingleton<RadioService>();
 builder.Services.AddScoped<MediaWebhookFilter>();
 
 builder.Services.AddSingleton(new TwitchOptions
@@ -98,6 +100,8 @@ app.MapAdminUiEndpoint();
 app.MapPluginHubEndpoints();
 app.MapVenueEndpoints();
 app.MapLiveEndpoints();
+app.MapRadioEndpoints();
+app.MapRoomEndpoints();
 app.MapTwitchEndpoints();
 
 app.Map("/rt", async (HttpContext context, ConnectionHandler handler, AccountService accounts) =>

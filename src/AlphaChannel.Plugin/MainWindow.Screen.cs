@@ -349,7 +349,7 @@ internal sealed partial class MainWindow
 
             ImGui.PushID(index);
 
-            const float cardHeight = 106f;
+            var cardHeight = Ui(106f);
 
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.ChildRounding,

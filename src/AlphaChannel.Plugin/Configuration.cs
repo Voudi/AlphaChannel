@@ -133,9 +133,14 @@ internal sealed class Configuration : IPluginConfiguration
     // age-restricted videos can play. Opt-in and empty by default.
     public string? YouTubeCookiesPath { get; set; }
 
+    // yt-dlp cookies-from-browser id: firefox, chrome, chromium, brave, edge.
+    public string? YouTubeCookiesBrowser { get; set; }
+
+    public string? YouTubeCookiesProfilePath { get; set; }
+
     // Alternative to YouTubeCookiesPath - reads cookies directly from a local Firefox profile
-    // instead of a manually-exported file. Best-effort: depends on yt-dlp being able to locate and
-    // read that profile from inside this process (see MpvRenderer's own note on the caveats).
+    // instead of a manually-exported file. Kept so older configs still load; new UI writes
+    // YouTubeCookiesBrowser instead.
     public bool UseFirefoxCookies { get; set; }
 
     // Keyed by IClientState.LocalContentId - the display name a player picked is tied to the FFXIV
@@ -180,6 +185,13 @@ internal sealed class Configuration : IPluginConfiguration
 
     // Window/sidebar/card surfaces — independent of accent color. Theme = use the accent pack's defaults.
     public UiBackground UiBackground { get; set; } = UiBackground.Theme;
+
+    // Plugin window size. Design is the original 1220×840 canvas; named presets clamp to the game viewport.
+    public UiWindowSizePreset WindowSizePreset { get; set; } = UiWindowSizePreset.Design;
+
+    public float WindowWidth { get; set; } = 1220f;
+
+    public float WindowHeight { get; set; } = 840f;
 
     // Copied under the plugin config folder when the player applies a custom image (png/jpg/webp).
     public string? CustomBackgroundPath { get; set; }

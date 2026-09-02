@@ -93,7 +93,7 @@ internal sealed partial class MainWindow
                 new Vector4(0.045f, 0.06f, 0.10f, 1f)))
             using (var accountCard = ImRaii.Child(
                 "##accountSettingsCard",
-                new Vector2(-1f, 238f),
+                new Vector2(-1f, Ui(238f)),
                 false,
                 ImGuiWindowFlags.NoScrollbar |
                 ImGuiWindowFlags.NoScrollWithMouse))
@@ -566,6 +566,14 @@ internal sealed partial class MainWindow
                 Danger,
                 failure);
         }
+
+        ImGui.Dummy(new Vector2(0f, 18f));
+        SettingsHairline();
+        ImGui.Dummy(new Vector2(0f, 14f));
+        SettingsSection(
+            "YouTube",
+            "Sign in so age-restricted videos can play.");
+        DrawYouTubeLoginSettings();
     }
 
     private void DrawProfileEditor(CharacterSession session)
@@ -954,7 +962,7 @@ internal sealed partial class MainWindow
                             BorderSubtle))
                     using (var iconChild = ImRaii.Child(
                         "##profileIconPicker",
-                        new Vector2(-1f, 178f),
+                        new Vector2(-1f, Ui(178f)),
                         true,
                         ImGuiWindowFlags.NoScrollbar |
                         ImGuiWindowFlags.NoScrollWithMouse))
@@ -997,7 +1005,7 @@ internal sealed partial class MainWindow
                             BorderSubtle))
                     using (var colorChild = ImRaii.Child(
                         "##profileColorPicker",
-                        new Vector2(-1f, 78f),
+                        new Vector2(-1f, Ui(78f)),
                         true,
                         ImGuiWindowFlags.NoScrollbar |
                         ImGuiWindowFlags.NoScrollWithMouse))
@@ -1032,7 +1040,7 @@ internal sealed partial class MainWindow
                 BorderSubtle))
         using (var aboutCard = ImRaii.Child(
             "##profileAboutCard",
-            new Vector2(-1f, 465f),
+            new Vector2(-1f, Ui(465f)),
             true,
             ImGuiWindowFlags.NoScrollbar |
             ImGuiWindowFlags.NoScrollWithMouse))
@@ -1185,7 +1193,7 @@ internal sealed partial class MainWindow
                         "##bio",
                         ref profileBioInput,
                         160,
-                        new Vector2(-1f, 145f));
+                        new Vector2(-1f, Ui(145f)));
                 }
 
                 ImGui.SetWindowFontScale(0.72f);
@@ -1557,6 +1565,8 @@ internal sealed partial class MainWindow
         session.AvatarImageUrl = updated.AvatarImageUrl;
         session.Bio = updated.Bio;
         session.StatusMessage = updated.StatusMessage;
+        session.PatreonTier = updated.PatreonTier;
+        session.IsDeveloper = updated.IsDeveloper;
         profileIconInput = updated.AvatarIcon;
         profileColorInput = updated.AvatarColorHex;
         profileImageUrl = updated.AvatarImageUrl;

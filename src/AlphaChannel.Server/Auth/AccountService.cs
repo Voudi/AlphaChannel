@@ -203,7 +203,9 @@ internal sealed class AccountService(
     internal static AccountSummary ToSummary(Account account) => new(
         account.Id.ToString(), account.Handle, account.DisplayName, account.InviteCode,
         account.AvatarIcon, account.AvatarColorHex, account.Bio, account.StatusMessage,
-        AvatarStorage.ToPublicUrl(account.AvatarImagePath));
+        AvatarStorage.ToPublicUrl(account.AvatarImagePath),
+        account.PatreonTier,
+        account.IsDeveloper);
 
     public async Task<UpdateProfileOutcome> SetAvatarImageAsync(
         Guid accountId, string fileName, CancellationToken cancellationToken)

@@ -1,3 +1,4 @@
+using AlphaChannel.Contracts;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Utility.Raii;
@@ -152,7 +153,8 @@ internal sealed partial class MainWindow
      Vector2 size)
     {
         var locked =
-            reaction.PatreonOnly;
+            reaction.PatreonOnly &&
+            CurrentSession?.PatreonTier is not (PatreonTier.Tier1 or PatreonTier.Tier2 or PatreonTier.Tier3);
 
         using (ImRaii.Disabled(
             locked))

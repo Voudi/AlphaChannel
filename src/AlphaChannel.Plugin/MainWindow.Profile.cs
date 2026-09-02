@@ -65,6 +65,16 @@ internal sealed partial class MainWindow
             ImGui.SameLine();
             ImGui.BeginGroup();
             ImGui.Text(profile.DisplayName);
+            if (profile.IsDeveloper)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(Accent, "Developer");
+            }
+
+            if (profile.PatreonTier is PatreonTier.Tier1 or PatreonTier.Tier2 or PatreonTier.Tier3)
+            {
+                ImGui.TextColored(Gold, $"Patreon {profile.PatreonTier}");
+            }
             if (profile.StatusMessage is { Length: > 0 } status)
             {
                 ImGui.TextColored(MutedText, status);

@@ -1,3 +1,5 @@
+using AlphaChannel.Contracts;
+
 namespace AlphaChannel.Server.Data;
 
 // The durable identity behind a connection. Public-facing (Handle/DisplayName) - the verified
@@ -68,6 +70,9 @@ internal sealed class Account
     // isn't a "social app" in this sense. ServerSettings.HideLalafellFromNonLalafell is a separate
     // admin-wide override that forces the hidden behavior for everyone regardless of this value.
     public bool WantsToSeeLalafellContent { get; set; } = true;
+
+    public PatreonTier PatreonTier { get; set; } = PatreonTier.None;
+    public bool IsDeveloper { get; set; }
 }
 
 internal enum LalafellSocialStatus

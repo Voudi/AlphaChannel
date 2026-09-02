@@ -126,7 +126,7 @@ internal sealed partial class MainWindow
 
         ImGui.Spacing();
 
-        using (var child = ImRaii.Child("##whisperThread", new Vector2(0, -68), false,
+        using (var child = ImRaii.Child("##whisperThread", new Vector2(0, -Ui(68f)), false,
                    ImGuiWindowFlags.NoScrollbar))
         {
             if (child)

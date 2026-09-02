@@ -92,6 +92,8 @@ internal sealed class SignInFlow(AuthClient authClient)
                         Bio = poll.Account.Bio,
                         StatusMessage = poll.Account.StatusMessage,
                         InviteCode = poll.Account.InviteCode,
+                        PatreonTier = poll.Account.PatreonTier,
+                        IsDeveloper = poll.Account.IsDeveloper,
                     }, null, poll.IsNewAccount);
 
                 case AuthPollStatus.Denied:

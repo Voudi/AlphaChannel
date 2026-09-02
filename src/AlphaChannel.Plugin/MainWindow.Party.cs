@@ -528,7 +528,7 @@ internal sealed partial class MainWindow
                 "##gameplayStreamOffer",
                 new Vector2(
                     -1f,
-                    105f),
+                    Ui(105f)),
                 false))
         {
             if (!card)
@@ -629,14 +629,14 @@ internal sealed partial class MainWindow
         var isPrivate =
             stream.IsPrivate;
 
-        const float cardHeight = 150f;
+        var cardHeight = Ui(150f);
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.ChildRounding,
             14f))
         using (ImRaii.PushStyle(
             ImGuiStyleVar.WindowPadding,
-            new Vector2(20f, 16f)))
+            UiVec(20f, 16f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(0.045f, 0.05f, 0.09f, 1f)))
@@ -685,12 +685,12 @@ internal sealed partial class MainWindow
             //
             // Leave button - always visible.
             //
-            const float leaveWidth = 132f;
+            var leaveWidth = Ui(132f);
 
             ImGui.SetCursorPos(
                 new Vector2(
-                    ImGui.GetWindowWidth() - leaveWidth - 18f,
-                    14f));
+                    ImGui.GetWindowWidth() - leaveWidth - Ui(18f),
+                    Ui(14f)));
 
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.FrameRounding,
@@ -1205,14 +1205,14 @@ internal sealed partial class MainWindow
             var height =
                 ImGui.GetContentRegionAvail().Y;
 
-            const float gap = 12f;
-            const float footerHeight = 50f;
+            var gap = Ui(12f);
+            var footerHeight = Ui(50f);
 
             // =========================================================
             // ROW 1 — NOW PLAYING
             // =========================================================
 
-            const float heroHeight = 225f;
+            var heroHeight = Ui(225f);
 
             ImGui.SetCursorPos(
                 Vector2.Zero);
@@ -1229,19 +1229,20 @@ internal sealed partial class MainWindow
             // ROW 2 — UP NEXT / YOUR TV
             // =========================================================
 
-            const float secondRowHeight = 156f;
+            var secondRowHeight = Ui(156f);
 
             var secondRowY =
                 heroHeight +
                 gap;
 
-            var secondLeftWidth =
+            const float leftRatio = 0.52f;
+            var leftWidth =
                 (width - gap) *
-                0.54f;
+                leftRatio;
 
-            var secondRightWidth =
+            var rightWidth =
                 width -
-                secondLeftWidth -
+                leftWidth -
                 gap;
 
             ImGui.SetCursorPos(
@@ -1250,39 +1251,30 @@ internal sealed partial class MainWindow
                     secondRowY));
 
             DrawPartyUpNextCard(
-                secondLeftWidth,
+                leftWidth,
                 secondRowHeight);
 
             ImGui.SetCursorPos(
                 new Vector2(
-                    secondLeftWidth +
+                    leftWidth +
                     gap,
                     secondRowY));
 
             DrawPartyTvCard(
                 current,
                 isPaused,
-                secondRightWidth,
+                rightWidth,
                 secondRowHeight);
 
             // =========================================================
             // ROW 3 — AUDIO / SCREEN PLACEMENT
             // =========================================================
 
-            const float thirdRowHeight = 148f;
+            var thirdRowHeight = Ui(148f);
 
             var thirdRowY =
                 secondRowY +
                 secondRowHeight +
-                gap;
-
-            var thirdLeftWidth =
-                (width - gap) *
-                0.50f;
-
-            var thirdRightWidth =
-                width -
-                thirdLeftWidth -
                 gap;
 
             ImGui.SetCursorPos(
@@ -1291,17 +1283,17 @@ internal sealed partial class MainWindow
                     thirdRowY));
 
             DrawPartyAudioCard(
-                thirdLeftWidth,
+                leftWidth,
                 thirdRowHeight);
 
             ImGui.SetCursorPos(
                 new Vector2(
-                    thirdLeftWidth +
+                    leftWidth +
                     gap,
                     thirdRowY));
 
             DrawPartyScreenPlacementCard(
-                thirdRightWidth,
+                rightWidth,
                 thirdRowHeight);
 
             // =========================================================
@@ -1364,12 +1356,12 @@ internal sealed partial class MainWindow
             var cardWidth =
                 ImGui.GetContentRegionAvail().X;
 
-            const float syncWidth = 220f;
-            const float dividerGap = 20f;
+            var syncWidth = Ui(220f);
+            var dividerGap = Ui(20f);
 
             var mediaWidth =
                 MathF.Max(
-                    400f,
+                    Ui(400f),
                     cardWidth -
                     syncWidth -
                     dividerGap);
@@ -1421,8 +1413,8 @@ internal sealed partial class MainWindow
                 var drawList =
                     ImGui.GetWindowDrawList();
 
-                const float thumbWidth = 205f;
-                const float thumbHeight = 115f;
+                var thumbWidth = Ui(205f);
+                var thumbHeight = Ui(115f);
 
                 var thumbMin =
                     origin;
@@ -1602,10 +1594,10 @@ internal sealed partial class MainWindow
                 var progressY =
                     origin.Y +
                     thumbHeight +
-                    43f;
+                    Ui(43f);
 
-                const float transportSize = 30f;
-                const float transportGap = 7f;
+                var transportSize = Ui(30f);
+                var transportGap = Ui(7f);
 
                 var controlsWidth =
                     transportSize * 3f +
@@ -2268,8 +2260,8 @@ internal sealed partial class MainWindow
             var drawList =
                 ImGui.GetWindowDrawList();
 
-            const float thumbWidth = 132f;
-            const float thumbHeight = 76f;
+            var thumbWidth = Ui(132f);
+            var thumbHeight = Ui(76f);
 
             var thumbMin =
                 origin;
@@ -2861,8 +2853,8 @@ internal sealed partial class MainWindow
         ref bool value,
         bool disabled)
     {
-        const float width = 38f;
-        const float height = 20f;
+        var width = Ui(38f);
+        var height = Ui(20f);
 
         var origin =
             ImGui.GetCursorScreenPos();
@@ -3106,8 +3098,8 @@ internal sealed partial class MainWindow
                 return;
             }
 
-            const float dockHeight = 68f;
-            const float gap = 8f;
+            var dockHeight = Ui(68f);
+            var gap = Ui(8f);
 
             var width =
                 ImGui.GetContentRegionAvail().X;
@@ -3346,10 +3338,10 @@ internal sealed partial class MainWindow
         bool showManagementActions,
         Action? onMakeHost)
     {
-        const float rowHeight = 64f;
-        const float avatarSize = 40f;
-        const float leftPadding = 12f;
-        const float contentGap = 12f;
+        var rowHeight = Ui(64f);
+        var avatarSize = Ui(40f);
+        var leftPadding = Ui(12f);
+        var contentGap = Ui(12f);
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.ChildRounding,
@@ -3894,7 +3886,7 @@ internal sealed partial class MainWindow
                 1f)))
         using (var panel = ImRaii.Child(
             id,
-            new Vector2(-1f, 410f),
+            new Vector2(-1f, Ui(410f)),
             false,
             ImGuiWindowFlags.NoScrollbar |
             ImGuiWindowFlags.NoScrollWithMouse))
@@ -4012,7 +4004,7 @@ internal sealed partial class MainWindow
                         new Vector4(0.045f, 0.06f, 0.10f, 1f)))
                     using (var statusCard = ImRaii.Child(
                         "##partyHosting",
-                        new Vector2(-1f, 154f),
+                        new Vector2(-1f, Ui(154f)),
                         false,
                         ImGuiWindowFlags.NoScrollbar |
                         ImGuiWindowFlags.NoScrollWithMouse))
@@ -4175,7 +4167,7 @@ internal sealed partial class MainWindow
                         new Vector4(0.045f, 0.06f, 0.10f, 1f)))
                     using (var statusCard = ImRaii.Child(
                         "##partyViewing",
-                        new Vector2(-1f, 104f),
+                        new Vector2(-1f, Ui(104f)),
                         false,
                         ImGuiWindowFlags.NoScrollbar |
                         ImGuiWindowFlags.NoScrollWithMouse))
@@ -4317,7 +4309,7 @@ internal sealed partial class MainWindow
                             "Join",
                             new Vector2(88f, 38f)))
                         {
-                            DoJoin(joinHostNameInput);
+                            DoJoin(joinHostNameInput, joinPasswordInput);
                         }
                     }
 
@@ -4394,9 +4386,9 @@ internal sealed partial class MainWindow
         {
             case PartyChatItemKind.Message:
                 {
-                    const float avatarSize = 42f;
-                    const float contentGap = 12f;
-                    const float bottomSpacing = 14f;
+                    var avatarSize = Ui(42f);
+                    var contentGap = Ui(12f);
+                    var bottomSpacing = Ui(14f);
 
                     var origin =
                         ImGui.GetCursorScreenPos();
@@ -4756,9 +4748,9 @@ internal sealed partial class MainWindow
                     var isHost =
                         stream.Mode == StreamMode.Hosting;
 
-                    const float thumbnailWidth = 180f;
-                    const float thumbnailHeight = 101f;
-                    const float cardHeight = 146f;
+                    var thumbnailWidth = Ui(180f);
+                    var thumbnailHeight = Ui(101f);
+                    var cardHeight = Ui(146f);
 
                     using (ImRaii.PushStyle(
                         ImGuiStyleVar.ChildRounding,
@@ -4916,8 +4908,8 @@ new Vector2(
                             // Right-side host controls
                             // -------------------------------------------------
 
-                            const float controlSize = 42f;
-                            const float controlGap = 10f;
+                            var controlSize = Ui(42f);
+                            var controlGap = Ui(10f);
 
                             var controlsWidth =
                                 isHost
@@ -5275,8 +5267,8 @@ new Vector2(
                 }
             case PartyChatItemKind.Reaction:
                 {
-                    const float avatarSize = 30f;
-                    const float rowHeight = 40f;
+                    var avatarSize = Ui(30f);
+                    var rowHeight = Ui(40f);
 
                     var origin =
                         ImGui.GetCursorScreenPos();
@@ -5480,8 +5472,8 @@ new Vector2(
         // WindowPadding, so physically inset the scrollable feed.
         // ---------------------------------------------------------
 
-        const float insetX = 18f;
-        const float insetY = 14f;
+        var insetX = Ui(18f);
+        var insetY = Ui(14f);
 
         var available =
             ImGui.GetContentRegionAvail();
@@ -5578,8 +5570,8 @@ new Vector2(
 
     private void DrawPartyChatComposer()
     {
-        const float dockHeight = 68f;
-        const float padding = 10f;
+        var dockHeight = Ui(68f);
+        var padding = Ui(10f);
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.ChildRounding,
@@ -5619,11 +5611,11 @@ new Vector2(
             var dockContentStart =
                 ImGui.GetCursorPos();
 
-            const float reactWidth = 300f;
-            const float sendWidth = 92f;
-            const float optionsWidth = 40f;
-            const float dividerGap = 14f;
-            const float inputHeight = 40f;
+            var reactWidth = Ui(300f);
+            var sendWidth = Ui(92f);
+            var optionsWidth = Ui(40f);
+            var dividerGap = Ui(14f);
+            var inputHeight = Ui(40f);
 
             var chatWidth =
                 MathF.Max(

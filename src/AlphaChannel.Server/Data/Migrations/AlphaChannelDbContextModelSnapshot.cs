@@ -71,6 +71,9 @@ namespace AlphaChannel.Server.Data.Migrations
                     b.Property<bool>("IsBanned")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsDeveloper")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsLalafell")
                         .HasColumnType("boolean");
 
@@ -82,6 +85,9 @@ namespace AlphaChannel.Server.Data.Migrations
 
                     b.Property<bool>("LodestoneRaceMismatch")
                         .HasColumnType("boolean");
+
+                    b.Property<int>("PatreonTier")
+                        .HasColumnType("integer");
 
                     b.Property<string>("SelfReportedRaces")
                         .HasColumnType("text");

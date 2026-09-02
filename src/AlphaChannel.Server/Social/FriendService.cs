@@ -96,7 +96,8 @@ internal sealed class FriendService(
 
     private static AccountProfileDto ToProfileDto(Account a, long? friendsSinceUnix) => new(
         a.Id.ToString(), a.Handle, a.DisplayName, a.AvatarIcon, a.AvatarColorHex, a.Bio, a.StatusMessage,
-        friendsSinceUnix, AvatarStorage.ToPublicUrl(a.AvatarImagePath));
+        friendsSinceUnix, AvatarStorage.ToPublicUrl(a.AvatarImagePath),
+        a.IsDeveloper, a.PatreonTier);
 
     public async Task<List<FriendDto>> GetFriendsAsync(Guid accountId, CancellationToken cancellationToken)
     {

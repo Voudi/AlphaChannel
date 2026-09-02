@@ -78,7 +78,8 @@ namespace AlphaChannel.Plugin.Video
 
 		public void Initialize(int width, int height, Texture2D? targetTexture, CancellationTokenSource cancelToken,
 			bool hardwareDecoding = false, int maxQualityHeight = 1080, bool allowInsecureDirectUrls = false,
-			int initialVolume = 60, string? cookiesPath = null, bool useFirefoxCookies = false)
+			int initialVolume = 60, string? cookiesPath = null, string? cookiesBrowser = null,
+			string? cookiesBrowserProfile = null)
 		{
 			_width = width;
 			_height = height;
@@ -116,21 +117,20 @@ namespace AlphaChannel.Plugin.Video
 			// PO-token-free progressive stream (itag 18, capped ~360p) confirmed against real
 			// videos end-to-end (resolve + actual curl fetch), so pin extraction to it.
 			var ytdlRawOptions = "hls-use-mpegts=,extractor-args=youtube:player_client=android";
-			if (useFirefoxCookies && FindFirefoxProfile() is { } firefoxProfile)
+			if (!string.IsNullOrWhiteSpace(cookiesBrowser))
 			{
-				// Best-effort: reads cookies straight out of a local Firefox profile instead of a
-				// manually exported file. Untested against a Flatpak-sandboxed Firefox specifically
-				// (non-standard profile path) combined with yt-dlp itself running as a Windows
-				// binary under Wine reaching across into that Linux-side profile - if this silently
-				// doesn't work, cookiesPath (a manually exported cookies.txt) is the reliable
-				// fallback.
-				ytdlRawOptions += $",cookies-from-browser=firefox:{firefoxProfile}";
+				var browserProfile = !string.IsNullOrWhiteSpace(cookiesBrowserProfile)
+					? cookiesBrowserProfile
+					: YouTubeBrowserCookies.FindProfile(cookiesBrowser);
+				if (!string.IsNullOrWhiteSpace(browserProfile))
+				{
+					ytdlRawOptions +=
+						$",cookies-from-browser={YouTubeBrowserCookies.YtdlArg(cookiesBrowser, browserProfile)}";
+				}
 			}
 			else if (!string.IsNullOrEmpty(cookiesPath))
 			{
-				// Lets yt-dlp play age-restricted videos using a real logged-in session - the file
-				// itself is never touched by us beyond handing its path to yt-dlp here.
-				ytdlRawOptions += $",cookies={cookiesPath}";
+				ytdlRawOptions += $",cookies={cookiesPath.Replace('\\', '/')}";
 			}
 
 			_ = mpv_set_option_string(_mpvCtx, "ytdl-raw-options", ytdlRawOptions);
@@ -210,30 +210,6 @@ namespace AlphaChannel.Plugin.Video
 			_closed = false;
 
 			AepLog.Debug("[MPV] Video Player started");
-		}
-
-		// Best-effort discovery of a Flatpak-sandboxed Firefox profile (this environment's actual
-		// install location, not the standard ~/.mozilla/firefox yt-dlp's own auto-detect expects) -
-		// see the caveats noted where this is called from. Returns a Wine Z:-drive path, since this
-		// whole process runs as a Windows binary even though the underlying files are on Linux.
-		private static string? FindFirefoxProfile()
-		{
-			try
-			{
-				var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-				var flatpakRoot = Path.Combine(home, ".var", "app", "org.mozilla.firefox", ".mozilla", "firefox");
-				if (!Directory.Exists(flatpakRoot))
-				{
-					return null;
-				}
-
-				return Directory.GetDirectories(flatpakRoot, "*.default*").FirstOrDefault();
-			}
-			catch (Exception exception)
-			{
-				AepLog.Warning($"[MPV] Failed to locate a Firefox profile: {exception.Message}");
-				return null;
-			}
 		}
 
 		public bool RenderFrame()
