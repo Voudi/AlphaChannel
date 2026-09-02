@@ -1,9 +1,9 @@
 [
   {
-    "Author": "K.I.R.O",
+    "Author": "Voudi",
     "Name": "AlphaChannel",
     "InternalName": "AlphaChannel.Plugin",
-    "AssemblyVersion": "1.0.9.0",
+    "AssemblyVersion": "2.1.4.9",
     "Description": "Renders an in-world video screen and syncs playback with other players running AlphaChannel over a self-hosted relay.",
     "ApplicableVersion": "any",
     "Tags": [
@@ -18,7 +18,7 @@
     "DownloadCount": 0,
     "LastUpdate": 1786073514,
 "RepoUrl": "https://github.com/Kodie0/AlphaChannelKodie",
-"DownloadLinkInstall": "https://github.com/Kodie0/AlphaChannelKodie/releases/download/v2-kodie/latest.zip",
-"DownloadLinkUpdate": "https://github.com/Kodie0/AlphaChannelKodie/releases/download/v2-kodie/latest.zip"
+"DownloadLinkInstall": "https://github.com/Kodie0/AlphaChannelKodie/releases/download/v2.1.4.9/latest.zip",
+"DownloadLinkUpdate": "https://github.com/Kodie0/AlphaChannelKodie/releases/download/v2.1.4.9/latest.zip"
   }
 ]
