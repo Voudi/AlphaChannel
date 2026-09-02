@@ -75,6 +75,30 @@ internal sealed class ModerationAdminService(IDbContextFactory<AlphaChannelDbCon
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<bool> PatchAccountAsync(
+        Guid accountId, PatreonTier? patreonTier, bool? isDeveloper, CancellationToken cancellationToken)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId, cancellationToken);
+        if (account is null)
+        {
+            return false;
+        }
+
+        if (patreonTier is { } tier)
+        {
+            account.PatreonTier = tier;
+        }
+
+        if (isDeveloper is { } developer)
+        {
+            account.IsDeveloper = developer;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     private async Task ApplyBanAsync(Guid accountId, string reason, DateTime? until, CancellationToken cancellationToken)
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);

@@ -57,10 +57,16 @@ internal sealed class VideoPlayer : IDisposable
         set => engine.CookiesPath = value;
     }
 
-    public bool UseFirefoxCookies
+    public string? CookiesBrowser
     {
-        get => engine.UseFirefoxCookies;
-        set => engine.UseFirefoxCookies = value;
+        get => engine.CookiesBrowser;
+        set => engine.CookiesBrowser = value;
+    }
+
+    public string? CookiesBrowserProfile
+    {
+        get => engine.CookiesBrowserProfile;
+        set => engine.CookiesBrowserProfile = value;
     }
 
     public void ShowWaitingScreen()

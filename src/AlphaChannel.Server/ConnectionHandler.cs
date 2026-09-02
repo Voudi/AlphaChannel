@@ -1,4 +1,6 @@
 using System.Net.WebSockets;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using AlphaChannel.Contracts;
 using AlphaChannel.Server.Data;
@@ -67,8 +69,15 @@ internal sealed class ConnectionHandler(
                         // room, their state updates THAT room, not a brand new one keyed by them.
                         var isNewRoom = rooms.FindRoomHostedBy(userId) is null;
                         var room = rooms.FindRoomHostedBy(userId) ?? rooms.GetOrCreateRoom(userId);
-                        room.IsPrivate = message.IsPrivate ?? room.IsPrivate;
-                        room.LastState = message with { HostId = room.HostUserId };
+                        ApplyRoomMetadata(room, message);
+                        room.LastState = SanitizeState(message with
+                        {
+                            HostId = room.HostUserId,
+                            Description = room.Description,
+                            Location = room.Location,
+                            Kind = room.Kind,
+                            IsPrivate = room.IsPrivate,
+                        });
                         await BroadcastAsync(room, room.LastState, token).ConfigureAwait(false);
                         // Safe to call every tick despite StreamState's own every-tick cadence -
                         // PresenceService dedups against the last label it actually pushed.
@@ -103,6 +112,29 @@ internal sealed class ConnectionHandler(
                                 Reason = "Host is not streaming.",
                             }, token).ConfigureAwait(false);
                             break;
+                        }
+
+                        if (target.Kind == RoomKind.Locked)
+                        {
+                            if (string.IsNullOrEmpty(target.PasswordHash))
+                            {
+                                await SendAsync(socket, new StreamControl
+                                {
+                                    Type = SignalType.StreamDeclined,
+                                    Reason = "This room is locked.",
+                                }, token).ConfigureAwait(false);
+                                break;
+                            }
+
+                            if (!PasswordMatches(target.PasswordHash, message.Password))
+                            {
+                                await SendAsync(socket, new StreamControl
+                                {
+                                    Type = SignalType.StreamDeclined,
+                                    Reason = "Wrong password.",
+                                }, token).ConfigureAwait(false);
+                                break;
+                            }
                         }
 
                         target.Viewers[userId] = socket;
@@ -282,4 +314,65 @@ internal sealed class ConnectionHandler(
 
     private static Task SendAsync(WebSocket socket, StreamControl message, CancellationToken token) =>
         SocketSend.SendAsync(socket, message, token);
+
+    private static void ApplyRoomMetadata(Room room, StreamControl message)
+    {
+        room.IsPrivate = message.IsPrivate ?? room.IsPrivate;
+
+        if (message.Description is not null)
+        {
+            var trimmed = message.Description.Trim();
+            room.Description = trimmed.Length == 0 ? null : trimmed[..Math.Min(trimmed.Length, 280)];
+        }
+
+        if (message.Location is not null)
+        {
+            var trimmed = message.Location.Trim();
+            room.Location = trimmed.Length == 0 ? null : trimmed[..Math.Min(trimmed.Length, 120)];
+        }
+
+        if (message.Kind is { } kind)
+        {
+            room.Kind = kind;
+        }
+
+        if (message.Password is not null)
+        {
+            if (message.Password.Length == 0)
+            {
+                room.PasswordHash = null;
+                if (room.Kind == RoomKind.Locked)
+                {
+                    room.Kind = RoomKind.Public;
+                }
+            }
+            else
+            {
+                room.PasswordHash = HashPassword(message.Password);
+            }
+        }
+
+        if (room.Kind == RoomKind.Locked && room.PasswordHash is null)
+        {
+            room.Kind = RoomKind.Public;
+        }
+    }
+
+    private static StreamControl SanitizeState(StreamControl message) =>
+        message with { Password = null };
+
+    private static string HashPassword(string password) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(password)));
+
+    private static bool PasswordMatches(string expectedHexHash, string? password)
+    {
+        if (string.IsNullOrEmpty(password))
+        {
+            return false;
+        }
+
+        var actual = Encoding.UTF8.GetBytes(HashPassword(password));
+        var expected = Encoding.UTF8.GetBytes(expectedHexHash);
+        return actual.Length == expected.Length && CryptographicOperations.FixedTimeEquals(actual, expected);
+    }
 }

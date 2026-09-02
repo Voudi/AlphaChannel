@@ -40,7 +40,8 @@ internal sealed partial class MainWindow
     private readonly Dictionary<string, ISharedImmediateTexture?> capabilityImages = new();
 
     // Constant spacing on right side
-    private const float HomeContentRightInset = 18f;
+    private const float HomeContentRightInsetDesign = 18f;
+    private float HomeContentRightInset => Ui(HomeContentRightInsetDesign);
 
 
 
@@ -126,7 +127,7 @@ internal sealed partial class MainWindow
     string? subtitle,
     string id)
     {
-        const float rowHeight = 34f;
+        var rowHeight = Ui(34f);
 
         var origin =
             ImGui.GetCursorScreenPos();
@@ -273,7 +274,7 @@ internal sealed partial class MainWindow
 
     private void DrawHome()
     {
-        const float contentPaddingLeft = 24f;
+        var contentPaddingLeft = Ui(24f);
 
         ImGui.SetCursorPosX(
             ImGui.GetCursorPosX() + contentPaddingLeft);
@@ -284,10 +285,7 @@ internal sealed partial class MainWindow
                 ImGui.GetStyle().ItemSpacing.X,
                 ImGui.GetStyle().ItemSpacing.Y));
 
-        var searchWidth =
-    ImGui.GetContentRegionAvail().X < 600f
-        ? 330f
-        : 430f;
+        var searchWidth = Math.Clamp(ImGui.GetContentRegionAvail().X * 0.42f, Ui(280f), Ui(520f));
 
         if (!homeYouTubeRequested)
         {
@@ -576,8 +574,8 @@ internal sealed partial class MainWindow
         var startX = ImGui.GetCursorPosX();
         var headerY = ImGui.GetCursorPosY();
 
-        var showWelcome = contentWidth >= 900f;
-        var showWatchers = contentWidth >= 500f;
+        var showWelcome = contentWidth >= Ui(900f);
+        var showWatchers = contentWidth >= Ui(500f);
 
 
         // ---------------------------------------------------------
@@ -587,8 +585,8 @@ internal sealed partial class MainWindow
         {
             ImGui.SetCursorPos(
             new Vector2(
-                startX + 25f,
-                headerY + 6f));
+                startX + Ui(25f),
+                headerY + Ui(6f)));
 
             using (ImRaii.PushFont(UiBuilder.IconFont))
             {
@@ -631,7 +629,7 @@ internal sealed partial class MainWindow
                 ? startX +
                   (contentWidth - searchWidth) *
                   0.5f
-                : startX + 25f;
+                : startX + Ui(25f);
 
 
         ImGui.SetCursorPos(
@@ -645,13 +643,13 @@ internal sealed partial class MainWindow
 
 
 
-        using (ImRaii.PushStyle(
-            ImGuiStyleVar.FrameRounding,
-            18f))
+            using (ImRaii.PushStyle(
+                ImGuiStyleVar.FrameRounding,
+                Ui(18f)))
         {
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.FramePadding,
-                new Vector2(36f, 9f)))
+                UiVec(36f, 9f)))
             {
                 homeSearchInputPos =
                     ImGui.GetCursorScreenPos();
@@ -769,8 +767,8 @@ internal sealed partial class MainWindow
             //           2 watchers online
             //
 
-            const float avatarSize = 38f;
-            const float profileWidth = 185f;
+            var avatarSize = Ui(38f);
+            var profileWidth = Ui(185f);
 
 
             var profileX =
@@ -990,19 +988,19 @@ internal sealed partial class MainWindow
         switch (homeVideoColumnCount)
         {
             case 5:
-                if (windowWidth < 780f)
+                if (windowWidth < Ui(780f))
                     homeVideoColumnCount = 4;
                 break;
 
             case 4:
-                if (windowWidth >= 900f)
+                if (windowWidth >= Ui(900f))
                     homeVideoColumnCount = 5;
-                else if (windowWidth < 560f)
+                else if (windowWidth < Ui(560f))
                     homeVideoColumnCount = 3;
                 break;
 
             case 3:
-                if (windowWidth >= 720f)
+                if (windowWidth >= Ui(720f))
                     homeVideoColumnCount = 4;
                 break;
         }
@@ -1099,12 +1097,12 @@ internal sealed partial class MainWindow
             if (isLoadingHomeYouTube)
             {
                 DrawMediaHubLoadingCards(
-                    224f);
+                    Ui(224f));
             }
             else
             {
                 DrawMediaHubShelfCards(
-                    224f);
+                    Ui(224f));
             }
 
             return;
@@ -1119,8 +1117,8 @@ internal sealed partial class MainWindow
         var cardCount =
       GetHomeVideoColumnCount(windowWidth);
 
-        const float gap = 12f;
-        const float cardHeight = 224f;
+        var gap = Ui(12f);
+        var cardHeight = Ui(224f);
 
         var visibleCount =
             Math.Min(cardCount, results.Count);
@@ -1154,7 +1152,8 @@ internal sealed partial class MainWindow
      string title,
      Vector4 iconColor,
      bool showSeeAll = true,
-     bool addBottomSpacing = true)
+     bool addBottomSpacing = true,
+     Action? onSeeAll = null)
     {
         var origin =
             ImGui.GetCursorScreenPos();
@@ -1268,6 +1267,13 @@ internal sealed partial class MainWindow
                     ImGui.GetColorU32(seeAllColor),
                     FontAwesomeIcon.ChevronRight.ToIconString());
             }
+
+            if (onSeeAll is not null &&
+                seeAllHovered &&
+                ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                onSeeAll();
+            }
         }
         if (addBottomSpacing)
         {
@@ -1287,7 +1293,7 @@ internal sealed partial class MainWindow
         var itemCount =
             GetHomeVideoColumnCount(ImGui.GetWindowSize().X);
 
-        const float gap = 10f;
+        var gap = Ui(10f);
 
         var cardWidth =
             (width - gap * (itemCount - 1)) /
@@ -1322,7 +1328,7 @@ internal sealed partial class MainWindow
         var itemCount =
             GetHomeVideoColumnCount(ImGui.GetWindowSize().X);
 
-        const float gap = 10f;
+        var gap = Ui(10f);
 
         var cardWidth =
             (width - gap * (itemCount - 1)) /
@@ -1369,7 +1375,7 @@ internal sealed partial class MainWindow
             "##loadingCard",
             size);
 
-        const float thumbnailHeight = 116f;
+        var thumbnailHeight = Ui(116f);
 
         // Thumbnail skeleton.
         drawList.AddRectFilled(
@@ -1521,7 +1527,7 @@ internal sealed partial class MainWindow
                 result.Url,
                 StringComparison.OrdinalIgnoreCase);
 
-        const float thumbnailHeight = 116f;
+        var thumbnailHeight = Ui(116f);
 
         // ---------------------------------------------------------
         // Thumbnail
@@ -1836,7 +1842,7 @@ internal sealed partial class MainWindow
                 result.ChannelId,
                 StringComparer.OrdinalIgnoreCase);
 
-        const float subscribeButtonSize = 24f;
+        var subscribeButtonSize = Ui(24f);
 
         var subscribeMin =
             new Vector2(
@@ -2115,7 +2121,7 @@ internal sealed partial class MainWindow
             // Favourite
             // -----------------------------------------------------
 
-            const float favouriteButtonSize = 27f;
+            var favouriteButtonSize = Ui(27f);
 
             var favouriteMin =
                 new Vector2(
@@ -2215,8 +2221,8 @@ internal sealed partial class MainWindow
                     ImGuiMouseCursor.Hand);
             }
 
-            const float buttonGap = 6f;
-            const float buttonHeight = 28f;
+            var buttonGap = Ui(6f);
+            var buttonHeight = Ui(28f);
 
             var availableButtonWidth =
                 MathF.Max(width - 16f, 80f);
@@ -2545,8 +2551,8 @@ internal sealed partial class MainWindow
 
     private void DrawMediaHubFeatured()
     {
-        const float height = 260f;
-        const float rounding = 14f;
+        var height = Ui(260f);
+        var rounding = Ui(14f);
 
         const double holdDuration = 5.5;
         const float transitionDuration = 0.85f;
@@ -2749,9 +2755,9 @@ internal sealed partial class MainWindow
             height -
             20f;
 
-        const float dotGap = 15f;
+        var dotGap = Ui(15f);
         const float dotRadius = 3.5f;
-        const float activePillWidth = 13f;
+        var activePillWidth = Ui(13f);
 
         var totalIndicatorWidth =
             activePillWidth +
@@ -3288,13 +3294,13 @@ internal sealed partial class MainWindow
             AccentHover,
             seeAll);
 
-        ImGui.Dummy(new Vector2(0f, 5f));
+        ImGui.Dummy(new Vector2(0f, Ui(5f)));
 
         // ---------------------------------------------------------
         // Placeholder cards
         // ---------------------------------------------------------
 
-        const float gap = 10f;
+        var gap = Ui(10f);
 
         var cardWidth =
             (width - gap * (itemCount - 1)) /
@@ -3317,7 +3323,7 @@ internal sealed partial class MainWindow
         }
     }
 
-    private static void DrawMediaHubPlaceholderCard(
+    private void DrawMediaHubPlaceholderCard(
     float width,
     float height)
     {
@@ -3406,9 +3412,9 @@ internal sealed partial class MainWindow
             GetHomeVideoColumnCount(
                 ImGui.GetWindowSize().X);
 
-        const float gap = 10f;
-        const float rowGap = 14f;
-        const float cardHeight = 174f;
+        var gap = Ui(10f);
+        var rowGap = Ui(14f);
+        var cardHeight = Ui(174f);
 
         var width =
             ImGui.GetContentRegionAvail().X;
@@ -3678,7 +3684,7 @@ internal sealed partial class MainWindow
         if (videos is not { Count: > 0 })
         {
             DrawMediaHubShelfCards(
-                224f);
+                Ui(224f));
 
             return;
         }
@@ -3688,8 +3694,8 @@ internal sealed partial class MainWindow
             GetHomeVideoColumnCount(
                 ImGui.GetWindowSize().X);
 
-        const float gap = 12f;
-        const float cardHeight = 190f;
+        var gap = Ui(12f);
+        var cardHeight = Ui(190f);
 
 
         var width =
@@ -3749,7 +3755,7 @@ internal sealed partial class MainWindow
                     watched.ThumbnailUrl);
 
 
-            const float thumbnailHeight = 116f;
+            var thumbnailHeight = Ui(116f);
 
 
             if (thumbnail is not null)
@@ -3879,7 +3885,7 @@ internal sealed partial class MainWindow
         var hovered =
             ImGui.IsItemHovered();
 
-        const float thumbnailHeight = 92f;
+        var thumbnailHeight = Ui(92f);
 
         // ---------------------------------------------------------
         // Thumbnail
@@ -4058,8 +4064,8 @@ internal sealed partial class MainWindow
                 ImGui.CalcTextSize(
                     buttonText);
 
-            const float buttonHeight =
-                28f;
+            var buttonHeight =
+                Ui(28f);
 
             var buttonWidth =
                 MathF.Min(
@@ -4138,76 +4144,143 @@ internal sealed partial class MainWindow
             displayTitle);
     }
 
+    private void RefreshHomeWatchPartiesIfNeeded()
+    {
+        var now = ImGui.GetTime();
+        if (now - homeWatchPartyFetchedAt < 5d)
+        {
+            return;
+        }
+
+        var token = CurrentSession?.Token;
+        if (string.IsNullOrEmpty(token))
+        {
+            homeWatchPartyRooms = [];
+            homeWatchPartyFetchedAt = now;
+            return;
+        }
+
+        if (homeWatchPartyLoading)
+        {
+            return;
+        }
+
+        homeWatchPartyFetchedAt = now;
+        homeWatchPartyLoading = true;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                homeWatchPartyRooms =
+                    await roomsClient.ListAsync(token).ConfigureAwait(false);
+            }
+            finally
+            {
+                homeWatchPartyLoading = false;
+            }
+        });
+    }
+
+    private void OpenWatchPartyPage()
+    {
+        currentPage = HomePage.WatchAlong;
+    }
+
+    private void JoinHomeWatchParty(RoomDirectoryDto room)
+    {
+        if (room.Kind == RoomKind.Locked)
+        {
+            joinHostNameInput = room.HostDisplayName;
+            currentPage = HomePage.WatchAlong;
+            return;
+        }
+
+        DoJoin(room.HostDisplayName);
+    }
+
+    private static FontAwesomeIcon WatchPartyKindIcon(RoomKind kind) =>
+        kind switch
+        {
+            RoomKind.Locked => FontAwesomeIcon.Lock,
+            RoomKind.Venue => FontAwesomeIcon.Video,
+            _ => FontAwesomeIcon.Play,
+        };
+
+    private static string WatchPartyActivityText(RoomDirectoryDto room)
+    {
+        if (!string.IsNullOrWhiteSpace(room.Description))
+        {
+            return room.Description!;
+        }
+
+        return room.HasMedia
+            ? "Watching together"
+            : "Waiting for a video";
+    }
+
     private void DrawWatchPartiesShelf()
     {
-        const float gap = 10f;
-        const float cardHeight = 238f;
-        const int cardCount = 4;
+        RefreshHomeWatchPartiesIfNeeded();
+
+        var gap = Ui(10f);
+        var cardHeight = Ui(238f);
+        var rooms = homeWatchPartyRooms.Take(3).ToArray();
+        var cardCount = rooms.Length + 1;
 
         var width =
             ImGui.GetContentRegionAvail().X;
 
         DrawHomeShelfHeading(
             FontAwesomeIcon.Users,
-            "Watch Parties [IGNORE SECTION - UNDER CONSTRUCTION]",
-            AccentHover);
+            "Watch Parties",
+            AccentHover,
+            onSeeAll: OpenWatchPartyPage);
 
         var cardWidth =
             (width - gap * (cardCount - 1)) /
             cardCount;
 
-        DrawWatchPartyCard(
-            "Limsa Lounge",
-            "LOTR Movie Marathon!",
-            "WarriorOfMight",
-            "Plot 5 Ward 6 — The Goblet",
-            "7 watching",
-                    null,
-            FontAwesomeIcon.Play,
-            true,
-            false,
-            cardWidth,
-            cardHeight);
+        for (var i = 0; i < rooms.Length; i++)
+        {
+            var room = rooms[i];
+            if (i > 0)
+            {
+                ImGui.SameLine(0f, gap);
+            }
 
-        ImGui.SameLine(0f, gap);
+            DrawWatchPartyCard(
+                room.HostAccountId,
+                room.HostDisplayName,
+                WatchPartyActivityText(room),
+                room.HostDisplayName,
+                string.IsNullOrWhiteSpace(room.Location)
+                    ? string.Empty
+                    : room.Location,
+                room.ViewerCount == 1
+                    ? "1 watching"
+                    : $"{room.ViewerCount} watching",
+                null,
+                WatchPartyKindIcon(room.Kind),
+                featured: i == 0 && room.HasMedia,
+                locked: room.Kind == RoomKind.Locked,
+                cardWidth,
+                cardHeight,
+                room.ViewerCount,
+                () => JoinHomeWatchParty(room));
+        }
 
-        DrawWatchPartyCard(
-            "Lala Theatre",
-            "Watching: Endwalker Trailer",
-            "Y'shtola",
-            "Shirogane — Empyreum Apartments",
-            "2 watching",
-                    "roombg1.png",
-            FontAwesomeIcon.Video,
-            false,
-            false,
-            cardWidth,
-            cardHeight);
-
-        ImGui.SameLine(0f, gap);
-
-        DrawWatchPartyCard(
-            "Chocobo Club",
-            "anime nightt booooiis",
-            "Alphinaud",
-            "Central Shroud",
-            "1 watching",
-                    "roombg2.png",
-            FontAwesomeIcon.Film,
-            false,
-            true,
-            cardWidth,
-            cardHeight);
-
-        ImGui.SameLine(0f, gap);
+        if (rooms.Length > 0)
+        {
+            ImGui.SameLine(0f, gap);
+        }
 
         DrawCreateWatchPartyCard(
             cardWidth,
             cardHeight);
     }
 
-    const float thumbHeight = 92f;
     private void DrawWatchPartyCard(
+     string id,
      string title,
      string contentText,
      string hostName,
@@ -4218,11 +4291,14 @@ internal sealed partial class MainWindow
      bool featured,
      bool locked,
      float width,
-     float height)
+     float height,
+     int participantCount,
+     Action? onJoin)
     {
         var origin =
             ImGui.GetCursorScreenPos();
 
+        var thumbHeight = Ui(92f);
         var size =
             new Vector2(width, height);
 
@@ -4230,7 +4306,7 @@ internal sealed partial class MainWindow
             ImGui.GetWindowDrawList();
 
         ImGui.InvisibleButton(
-            $"##watchParty_{title}",
+            $"##watchParty_{id}",
             size);
 
         var hovered =
@@ -4346,8 +4422,8 @@ internal sealed partial class MainWindow
         var watcherMin =
             origin +
             new Vector2(
-                8f,
-                8f);
+                Ui(8f),
+                Ui(8f));
 
         var watcherMax =
             watcherMin +
@@ -4416,18 +4492,11 @@ internal sealed partial class MainWindow
         // ---------------------------------------------------------
 
         var avatarY =
-            origin.Y + thumbHeight - 28f;
+            origin.Y + thumbHeight - Ui(28f);
 
  
 
         const int maxVisibleAvatars = 4;
-
-        var participantCount =
-            locked
-                ? 1
-                : featured
-                    ? 7
-                    : 2;
 
         var visibleAvatars =
             Math.Min(participantCount, maxVisibleAvatars);
@@ -4435,8 +4504,8 @@ internal sealed partial class MainWindow
         var extraAvatars =
             participantCount - visibleAvatars;
 
-        const float avatarSize = 22f;
-        const float avatarOverlap = 16f;
+        var avatarSize = Ui(22f);
+        var avatarOverlap = Ui(16f);
 
         var stackWidth =
             avatarSize +
@@ -4535,7 +4604,7 @@ internal sealed partial class MainWindow
         var titleY =
             origin.Y +
             thumbHeight +
-            8f;
+            Ui(8f);
 
         float categoryWidth;
 
@@ -4547,7 +4616,7 @@ internal sealed partial class MainWindow
 
             drawList.AddText(
                 new Vector2(
-                    origin.X + 10f,
+                    origin.X + Ui(10f),
                     titleY),
                 ImGui.GetColorU32(Accent),
                 categoryIcon.ToIconString());
@@ -4555,7 +4624,7 @@ internal sealed partial class MainWindow
 
         drawList.AddText(
             new Vector2(
-                origin.X + 10f + categoryWidth + 6f,
+                origin.X + Ui(10f) + categoryWidth + Ui(6f),
                 titleY),
             ImGui.GetColorU32(Vector4.One),
             title);
@@ -4564,15 +4633,15 @@ internal sealed partial class MainWindow
         // Current content pill
         // ---------------------------------------------------------
 
-        const float contentPillHeight = 20f;
+        var contentPillHeight = Ui(20f);
 
         var contentTextSize =
             ImGui.CalcTextSize(contentText);
 
         var contentPillMin =
             new Vector2(
-                origin.X + 10f,
-                titleY + 22f);
+                origin.X + Ui(10f),
+                titleY + Ui(22f));
 
         var contentPillMax =
             contentPillMin +
@@ -4611,7 +4680,7 @@ internal sealed partial class MainWindow
         var hostY =
             origin.Y +
             thumbHeight +
-            62f;
+            Ui(62f);
 
         using (ImRaii.PushFont(UiBuilder.IconFont))
         {
@@ -4642,7 +4711,7 @@ internal sealed partial class MainWindow
         var metaY =
             origin.Y +
             thumbHeight +
-            102f;
+            Ui(102f);
 
         // Location row
         using (ImRaii.PushFont(UiBuilder.IconFont))
@@ -4676,14 +4745,14 @@ internal sealed partial class MainWindow
         // Join button
         // ---------------------------------------------------------
 
-        const float buttonHeight = 24f;
-        const float statusWidth = 32f;
-        const float buttonGap = 6f;
+        var buttonHeight = Ui(24f);
+        var statusWidth = Ui(32f);
+        var buttonGap = Ui(6f);
 
         var joinMin =
             new Vector2(
-                origin.X + 8f,
-                origin.Y + height - buttonHeight - 8f);
+                origin.X + Ui(8f),
+                origin.Y + height - buttonHeight - Ui(8f));
 
         var joinMax =
             new Vector2(
@@ -4708,7 +4777,6 @@ internal sealed partial class MainWindow
             ImGui.GetMousePos();
 
         var joinHovered =
-            !locked &&
             mouse.X >= joinMin.X &&
             mouse.X <= joinMax.X &&
             mouse.Y >= joinMin.Y &&
@@ -4849,8 +4917,12 @@ ImGui.GetColorU32(
 
         ImGui.Dummy(size);
 
-        // The room cards are still mock/demo data, so don't
-        // actually attempt to join anything yet.
+        if (joinHovered &&
+            onJoin is not null &&
+            ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        {
+            onJoin();
+        }
     }
 
     private void DrawCreateWatchPartyCard(
@@ -4984,14 +5056,14 @@ ImGui.GetColorU32(
         // ---------------------------------------------------------
 
         const float buttonGap = 8f;
-        const float buttonHeight = 28f;
-        const float horizontalPadding = 12f;
+        var buttonHeight = Ui(28f);
+        var horizontalPadding = Ui(12f);
 
         var buttonWidth =
             (width - horizontalPadding * 2f - buttonGap) * 0.5f;
 
         var buttonsY =
-            origin.Y + height - buttonHeight - 10f;
+            origin.Y + height - buttonHeight - Ui(10f);
 
         var newRoomMin =
             new Vector2(
@@ -5110,6 +5182,21 @@ ImGui.GetColorU32(
                 ImGuiMouseCursor.Hand);
         }
 
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        {
+            if (newRoomHovered)
+            {
+                StartWatchParty(goToPlayer: true);
+            }
+            else if (joinRoomHovered)
+            {
+                OpenWatchPartyPage();
+            }
+            else if (hovered)
+            {
+                OpenWatchPartyPage();
+            }
+        }
     }
 
     private static string FormatViewCount(
@@ -5190,7 +5277,7 @@ ImGui.GetColorU32(
     {
         var showArt = Plugin.Cfg.ShowHomeHeroImage;
         var avail = ImGui.GetContentRegionAvail().X;
-        const float gap = 20f;
+        var gap = Ui(20f);
         var textWidth = showArt ? MathF.Min(avail * 0.48f, 420f) : avail;
         var artWidth = MathF.Max(avail - textWidth - gap, 220f);
 
@@ -5448,14 +5535,14 @@ ImGui.GetColorU32(
 
         var avail = ImGui.GetContentRegionAvail().X;
 
-        const float gap = 10f;
+        var gap = Ui(10f);
         var cardWidth = (avail - gap * 2) / 3f;
 
-        const float cardHeight = 175f;
-        const float iconSize = 72f;
-        const float titleY = 36f;
-        const float bodyY = 60f;
-        const float gapAfterTitle = 6f;
+        var cardHeight = Ui(175f);
+        var iconSize = Ui(72f);
+        var titleY = Ui(36f);
+        var bodyY = Ui(60f);
+        var gapAfterTitle = Ui(6f);
 
         DrawCapabilityCard(
             cardWidth, cardHeight, iconSize, titleY, bodyY, gapAfterTitle,
@@ -5651,10 +5738,10 @@ Hex(0x38BDF8),
     private void DrawHomeHowItWorks()
     {
         ImGui.TextUnformatted("How it works");
-        ImGui.Dummy(new Vector2(0, 10));
+        ImGui.Dummy(new Vector2(0, Ui(10f)));
 
         var avail = ImGui.GetContentRegionAvail().X;
-        const float gap = 12f;
+        var gap = Ui(12f);
         var stepWidth = (avail - gap * 2) / 3f;
 
         DrawHowStep(stepWidth, 1, Accent, FontAwesomeIcon.UserPlus, "Invite Friends",
@@ -5763,10 +5850,17 @@ Hex(0x38BDF8),
         }
     }
 
-    private void DoJoin(string hostName)
+    private void DoJoin(string hostName, string? password = null)
     {
         if (hostName.Length == 0)
         {
+            return;
+        }
+
+        if (CurrentSession is null)
+        {
+            joinError = "Sign in to join a watch party.";
+            Plugin.ChatGui.Print("[AlphaChannel] Sign in before joining a watch party.");
             return;
         }
 
@@ -5785,7 +5879,7 @@ Hex(0x38BDF8),
             return;
         }
 
-        queue.Clear();
+        clearQueueWhenJoined = true;
 
         joinedHostDisplayName =
             hostName.Trim();
@@ -5794,7 +5888,13 @@ Hex(0x38BDF8),
     false;
 
         _ = stream.JoinAsync(
-            hostName.Trim());
+            hostName.Trim(),
+            string.IsNullOrWhiteSpace(password) ? null : password.Trim());
+
+        if (!stream.IsConnected)
+        {
+            joinError = "Connecting to the relay…";
+        }
     }
 
     private static string ActivityLabel(ActivityEventDto item) => item.Type switch

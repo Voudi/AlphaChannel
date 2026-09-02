@@ -51,15 +51,14 @@ public sealed class Plugin : IDalamudPlugin
     private readonly PluginHubClient pluginHubClient;
     private readonly VenuesClient venuesClient;
     private readonly LiveClient liveClient;
+    private readonly RoomsClient roomsClient;
+    private readonly RadioClient radioClient;
     private readonly TwitchClient twitchClient;
     private readonly KeysClient keysClient;
     private readonly AlphaChannel.Plugin.Crypto.KeyVault keyVault;
     private readonly Whispers.WhisperMirror whisperMirror;
     private readonly NearbyAutoWatch nearbyAutoWatch;
     private ulong lastWhisperContentId = ulong.MaxValue;
-
-    // TEMP: allows us to test the username UI even when a username already exists.
-    private bool devUsernamePromptShown;
 
     // Written from the network thread (OnRemoteState), read/cleared on the main thread
     // (OnFrameworkUpdate) - a plain reference field is fine here, a single pointer swap is already
@@ -123,7 +122,14 @@ public sealed class Plugin : IDalamudPlugin
         video = new VideoPlayer(screenController.Engine);
         video.SetVolume(Cfg.Muted ? 0 : Cfg.Volume);
         video.CookiesPath = Cfg.YouTubeCookiesPath;
-        video.UseFirefoxCookies = Cfg.UseFirefoxCookies;
+        if (Cfg.UseFirefoxCookies && string.IsNullOrWhiteSpace(Cfg.YouTubeCookiesBrowser))
+        {
+            Cfg.YouTubeCookiesBrowser = "firefox";
+        }
+
+        video.CookiesBrowser = Cfg.YouTubeCookiesBrowser;
+        video.CookiesBrowserProfile = Cfg.YouTubeCookiesProfilePath;
+        _ = Task.Run(() => YouTubeCookieExport.Ensure(Cfg, video));
         var activeProfile =
     Cfg.SavedQueueProfiles[Cfg.ActiveQueueSlot];
 
@@ -146,6 +152,8 @@ public sealed class Plugin : IDalamudPlugin
         pluginHubClient = new PluginHubClient(Cfg);
         venuesClient = new VenuesClient(Cfg);
         liveClient = new LiveClient(Cfg);
+        roomsClient = new RoomsClient(Cfg);
+        radioClient = new RadioClient(Cfg);
         twitchClient = new TwitchClient(Cfg);
         keysClient = new KeysClient(Cfg);
         keyVault = new AlphaChannel.Plugin.Crypto.KeyVault(Cfg, keysClient);
@@ -153,6 +161,7 @@ public sealed class Plugin : IDalamudPlugin
 
         mainWindow = new MainWindow(screenController, video, queue, stream, RequestRename, authClient, signInFlow,
             friendsClient, activityClient, dmClient, reportClient, tweeterClient, pluginHubClient, venuesClient, liveClient,
+            roomsClient, radioClient,
             twitchClient, keyVault, whisperMirror, UpdateSessionForCurrentCharacter);
 
         mainWindow.OnViewerTvSpawnRequested = SpawnViewerTv;
@@ -476,6 +485,7 @@ public sealed class Plugin : IDalamudPlugin
         mainWindow.CurrentCharacterName = ObjectTable.LocalPlayer?.Name.TextValue;
         mainWindow.CurrentWorldName = ReadLocalWorldName();
         mainWindow.CurrentIsLalafell = ReadIsLalafell();
+        mainWindow.ApplyPendingJoinQueueClear();
 
         if (pendingRemoteState is { } remoteState)
         {
@@ -509,10 +519,27 @@ public sealed class Plugin : IDalamudPlugin
         // Mode != Viewing still correctly blocks a host who was just transferred away (Mode flips
         // to Viewing) from continuing to publish their own stale local queue state.
         var current = queue.Current;
+        var engine = screenController.Engine;
 
-        if (stream.Mode != StreamMode.Viewing &&
-            current is not null &&
-            screenController.Engine.IsActive)
+        if (stream.Mode == StreamMode.Hosting)
+        {
+            var (position, _, paused) = current is null ? (0d, 0d, true) : video.GetProgress();
+            _ = stream.PublishStateAsync(
+                current?.Url,
+                position,
+                paused,
+                engine.IsActive ? engine.ScreenPosition : null,
+                engine.IsActive ? engine.ScreenYaw : null,
+                engine.IsActive ? engine.ScreenScale : null);
+
+            if (current is not null)
+            {
+                video.SetOverlayTitle(current.Title, current.Source);
+            }
+        }
+        else if (stream.Mode != StreamMode.Viewing &&
+                 current is not null &&
+                 engine.IsActive)
         {
             var (position, _, paused) = video.GetProgress();
 
@@ -520,9 +547,9 @@ public sealed class Plugin : IDalamudPlugin
                 current.Url,
                 position,
                 paused,
-                screenController.Engine.ScreenPosition,
-                screenController.Engine.ScreenYaw,
-                screenController.Engine.ScreenScale);
+                engine.ScreenPosition,
+                engine.ScreenYaw,
+                engine.ScreenScale);
 
             video.SetOverlayTitle(
                 current.Title,
@@ -685,27 +712,6 @@ mainWindow.AddPartyReactionToFeed(
             return;
         }
 
-        // TEMP DEVELOPMENT:
-        // Force the username prompt once per plugin session,
-        // but only after the user has opened Alpha Channel themselves.
-        if (!devUsernamePromptShown &&
-            mainWindow.IsOpen)
-        {
-            devUsernamePromptShown = true;
-
-            var suggested =
-                Cfg.CharacterDisplayNames.GetValueOrDefault(contentId) ??
-                ObjectTable.LocalPlayer?.Name.TextValue ??
-                "Player";
-
-            PromptForName(
-                contentId,
-                suggested);
-
-            return;
-        }
-
-        // Existing normal behaviour.
         if (Cfg.CharacterDisplayNames.ContainsKey(contentId))
         {
             return;

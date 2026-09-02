@@ -17,6 +17,11 @@ internal sealed class Room
 
     // Set from StreamControl.IsPrivate on stream.state - see that field's doc comment.
     public bool IsPrivate { get; set; }
+
+    public string? Description { get; set; }
+    public string? Location { get; set; }
+    public RoomKind Kind { get; set; } = RoomKind.Public;
+    public string? PasswordHash { get; set; }
 }
 
 internal sealed class RoomManager
@@ -41,4 +46,12 @@ internal sealed class RoomManager
         rooms.Values.FirstOrDefault(room => room.Viewers.ContainsKey(userId));
 
     public void RemoveRoom(string roomKey) => rooms.TryRemove(roomKey, out _);
+
+    public IReadOnlyList<Room> ListListable(RoomKind? kind = null)
+    {
+        return rooms.Values
+            .Where(room => !room.IsPrivate)
+            .Where(room => kind is null || room.Kind == kind)
+            .ToList();
+    }
 }

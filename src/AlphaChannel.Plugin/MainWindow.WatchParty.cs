@@ -1,4 +1,5 @@
-﻿using AlphaChannel.Plugin.Video;
+﻿using AlphaChannel.Contracts;
+using AlphaChannel.Plugin.Video;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Utility.Raii;
@@ -345,24 +346,24 @@ internal sealed partial class MainWindow
 
     private void DrawWatchPartyLanding()
     {
-        DrawWatchPartyHero();
+        var avail = ImGui.GetContentRegionAvail();
+        var heroH = Ui(230f);
+        var featuresH = Ui(130f);
+        var gap = Ui(12f);
+        var actionsH = Math.Max(Ui(325f), avail.Y - heroH - featuresH - gap);
 
-        DrawWatchPartyActions();
-
-        ImGui.SetCursorPosY(
-            ImGui.GetCursorPosY() + 10f);
-
-        DrawWatchPartyFeatures();
+        DrawWatchPartyHero(heroH);
+        DrawWatchPartyActions(actionsH);
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + gap);
+        DrawWatchPartyFeatures(featuresH);
     }
 
-    private void DrawWatchPartyHero()
+    private void DrawWatchPartyHero(float heroHeight)
     {
         using var hero =
     ImRaii.Child(
         "##watchPartyHero",
-new Vector2(
-    0,
-    230),
+        new Vector2(0, heroHeight),
         false,
         ImGuiWindowFlags.NoScrollbar |
         ImGuiWindowFlags.NoScrollWithMouse);
@@ -374,7 +375,7 @@ new Vector2(
 
         var heroMax = new Vector2(
             heroMin.X + ImGui.GetContentRegionAvail().X,
-            heroMin.Y + 230);
+            heroMin.Y + heroHeight);
 
         var drawList = ImGui.GetWindowDrawList();
 
@@ -403,25 +404,24 @@ new Vector2(
             1.5f);
 
 
-        // add padding inside hero
-        ImGui.SetCursorScreenPos(
-            heroMin + new Vector2(24, 24));
-
+        var pad = Ui(24f);
+        ImGui.SetCursorScreenPos(heroMin + new Vector2(pad, pad));
 
         var width =
             ImGui.GetContentRegionAvail().X;
 
-        var previewWidth = 620f;
+        var innerH = Math.Max(Ui(190f), heroHeight - pad * 2f);
+        var previewWidth = Ui(620f);
 
         var textWidth =
-            width - previewWidth - 40f;
+            width - previewWidth - Ui(40f);
 
 
         using (ImRaii.Child(
             "##watchPartyHeroText",
             new Vector2(
                 textWidth,
-                190),
+                innerH),
             false,
             ImGuiWindowFlags.NoBackground |
             ImGuiWindowFlags.NoScrollbar |
@@ -473,7 +473,7 @@ new Vector2(
             "##watchPartyPreview",
             new Vector2(
     previewWidth,
-    190),
+    innerH),
                     false,
             ImGuiWindowFlags.NoBackground |
             ImGuiWindowFlags.NoScrollbar |
@@ -486,7 +486,7 @@ new Vector2(
 
             var previewMax = new Vector2(
                 previewMin.X + innerWidth,
-                previewMin.Y + 190);
+                previewMin.Y + innerH);
 
             drawList.AddRectFilled(
                 previewMin,
@@ -512,7 +512,7 @@ new Vector2(
                 ImDrawFlags.RoundCornersAll,
                 1f);
 
-            var panelHeight = 190f;
+            var panelHeight = innerH;
 
             var panelMin = ImGui.GetCursorScreenPos();
 
@@ -620,19 +620,19 @@ new Vector2(
         ImGui.EndGroup();
     }
 
-   private void DrawWatchPartyActions()
+   private void DrawWatchPartyActions(float cardHeight)
 {
     var width =
         ImGui.GetContentRegionAvail().X;
 
     var cardWidth =
-        (width - 12f) / 2f;
+        (width - Ui(12f)) / 2f;
 
 
         using (var start =
             ImRaii.Child(
                 "##startParty",
-                new Vector2(cardWidth, 325),
+                new Vector2(cardWidth, cardHeight),
                 false,
                 ImGuiWindowFlags.NoScrollbar |
                 ImGuiWindowFlags.NoScrollWithMouse))
@@ -644,7 +644,7 @@ new Vector2(
                 var startMax =
                     startMin + new Vector2(
                         cardWidth,
-                        325);
+                        cardHeight);
 
                 var startDraw =
                     ImGui.GetWindowDrawList();
@@ -680,14 +680,14 @@ new Vector2(
 
                 var iconPos =
                     ImGui.GetCursorScreenPos()
-                    + new Vector2(18, 12);
+                    + UiVec(18, 12);
 
                 ImGui.SetCursorScreenPos(iconPos);
 
 
                 ImGui.GetWindowDrawList().AddCircleFilled(
-                    iconPos + new Vector2(24, 24),
-                    24f,
+                    iconPos + UiVec(24, 24),
+                    Ui(24f),
                     ImGui.GetColorU32(
                         new Vector4(
                             Accent.X,
@@ -697,7 +697,7 @@ new Vector2(
 
 
                 ImGui.SetCursorScreenPos(
-                    iconPos + new Vector2(12, 12));
+                    iconPos + UiVec(12, 12));
 
 
                 using (ImRaii.PushFont(UiBuilder.IconFont))
@@ -740,15 +740,18 @@ new Vector2(
     ImGui.GetCursorPosY() + 12);
                 }
 
+                DrawCreateRoomFields(cardWidth - Ui(40f));
 
                 ImGui.SetCursorPosY(
     ImGui.GetCursorPosY() - 12);
 
 
-                var optionWidth =
-    (cardWidth - 70f) / 2f;
+                var optionHeight = Math.Max(Ui(200f), cardHeight - Ui(125f));
 
-                ImGui.SetCursorPosX(35f);
+                var optionWidth =
+    (cardWidth - Ui(70f)) / 2f;
+
+                ImGui.SetCursorPosX(Ui(35f));
 
 
                 //
@@ -758,7 +761,7 @@ new Vector2(
                     "##startWatchingOption",
                     new Vector2(
                         optionWidth,
-                        200),
+                        optionHeight),
                     false,
                     ImGuiWindowFlags.NoBackground))
                 {
@@ -767,11 +770,11 @@ new Vector2(
                     var hovered =
     ImGui.IsMouseHoveringRect(
         optionMin,
-        optionMin + new Vector2(optionWidth, 200));
+        optionMin + new Vector2(optionWidth, optionHeight));
 
                     ImGui.GetWindowDrawList().AddRectFilled(
                         optionMin,
-                        optionMin + new Vector2(optionWidth, 200),
+                        optionMin + new Vector2(optionWidth, optionHeight),
                         ImGui.GetColorU32(
 hovered
     ? new Vector4(0.12f, 0.08f, 0.22f, 1f)
@@ -780,7 +783,7 @@ hovered
 
                     ImGui.GetWindowDrawList().AddRect(
                         optionMin,
-                        optionMin + new Vector2(optionWidth, 200),
+                        optionMin + new Vector2(optionWidth, optionHeight),
                         ImGui.GetColorU32(
                             new Vector4(
                                 Accent.X,
@@ -832,9 +835,18 @@ hovered
                 ImGui.SetCursorPosX(
                     (optionWidth - ImGui.CalcTextSize("and watch together").X) / 2f);
 
-                ImGui.TextColored(
+                    ImGui.TextColored(
                     MutedText,
                     "and watch together");
+
+                    ImGui.SetCursorScreenPos(optionMin);
+                    if (ImGui.InvisibleButton(
+                            "##startWatchingRoom",
+                            new Vector2(optionWidth, optionHeight)))
+                    {
+                        ApplyCreateRoomToStream();
+                        StartWatchParty(goToPlayer: true);
+                    }
             }
 
 
@@ -848,7 +860,7 @@ hovered
                     "##createRoomOption",
                     new Vector2(
                         optionWidth,
-                        200),
+                        optionHeight),
                     false,
                     ImGuiWindowFlags.NoBackground))
                 {
@@ -857,13 +869,13 @@ hovered
                     var hovered =
     ImGui.IsMouseHoveringRect(
         optionMin,
-        optionMin + new Vector2(optionWidth, 200));
+        optionMin + new Vector2(optionWidth, optionHeight));
 
 
                     var optionMax =
                         optionMin + new Vector2(
                             optionWidth,
-                            200);
+                            optionHeight);
 
 
                     var optionDraw =
@@ -946,7 +958,7 @@ hovered
 
                     if (ImGui.InvisibleButton(
                             "##createEmptyRoom",
-                            new Vector2(optionWidth, 200)))
+                            new Vector2(optionWidth, optionHeight)))
                     {
                         CreateEmptyWatchParty();
                     }
@@ -966,7 +978,7 @@ hovered
         using (var join =
         ImRaii.Child(
 "##joinParty",
-new Vector2(cardWidth, 325),
+new Vector2(cardWidth, cardHeight),
     false,
               ImGuiWindowFlags.NoScrollbar |
               ImGuiWindowFlags.NoScrollWithMouse))
@@ -978,7 +990,7 @@ new Vector2(cardWidth, 325),
                 var joinMax =
 joinMin + new Vector2(
     cardWidth,
-    325);
+    cardHeight);
 
                 var joinDraw =
                     ImGui.GetWindowDrawList();
@@ -1008,11 +1020,11 @@ joinMin + new Vector2(
                     1.5f);
                 var joinIconPos =
                     ImGui.GetCursorScreenPos()
-                    + new Vector2(18, 12);
+                    + UiVec(18, 12);
 
                 ImGui.GetWindowDrawList().AddCircleFilled(
-                    joinIconPos + new Vector2(24, 24),
-                    24f,
+                    joinIconPos + UiVec(24, 24),
+                    Ui(24f),
                     ImGui.GetColorU32(
                         new Vector4(
                             Accent.X,
@@ -1021,7 +1033,7 @@ joinMin + new Vector2(
                             0.25f)));
 
                 ImGui.SetCursorScreenPos(
-                    joinIconPos + new Vector2(12, 12));
+                    joinIconPos + UiVec(12, 12));
 
                 using (ImRaii.PushFont(UiBuilder.IconFont))
                 {
@@ -1062,20 +1074,20 @@ joinMin + new Vector2(
                 ImGui.SetCursorPosX(
     ImGui.GetCursorPosX() + 12);
 
-                var joinButtonWidth = 72f;
-                var joinGap = 10f;
+                var joinButtonWidth = Ui(72f);
+                var joinGap = Ui(10f);
 
                 var joinInputWidth =
-                    cardWidth - joinButtonWidth - joinGap - 64f;
+                    cardWidth - joinButtonWidth - joinGap - Ui(64f);
 
                 ImGui.SetNextItemWidth(joinInputWidth);
 
                 using (ImRaii.PushStyle(
                     ImGuiStyleVar.FrameRounding,
-                    10f)
+                    Ui(10f))
                     .Push(
                         ImGuiStyleVar.FramePadding,
-                        new Vector2(14f, 8f)))
+                        UiVec(14f, 8f)))
                 using (ImRaii.PushColor(
         ImGuiCol.FrameBg,
         new Vector4(0.04f, 0.04f, 0.08f, 1f)))
@@ -1093,14 +1105,22 @@ joinMin + new Vector2(
                         32);
                 }
 
+                ImGui.SetNextItemWidth(joinInputWidth);
+                ImGui.InputTextWithHint(
+                    "##joinRoomPassword",
+                    "Password (locked rooms)",
+                    ref joinPasswordInput,
+                    64,
+                    ImGuiInputTextFlags.Password);
+
                 ImGui.SameLine(
-    cardWidth - joinButtonWidth - 20f);
+    cardWidth - joinButtonWidth - Ui(20f));
 
                 if (ImGui.Button(
                     "Join",
-                  new Vector2(72f, 34f)))
+                  new Vector2(joinButtonWidth, Ui(34f))))
                 {
-                    DoJoin(joinHostNameInput);
+                    DoJoin(joinHostNameInput, joinPasswordInput);
                 }
                 if (joinError is { } error)
                 {
@@ -1121,17 +1141,20 @@ joinMin + new Vector2(
 
                 var optionWidth = (cardWidth - 70f) / 3f;
 
+                var joinOptionH = Math.Max(Ui(130f), cardHeight - Ui(195f));
+
                 void DrawJoinOptionCard(
      float width,
      string icon,
      string title,
-     string description)
+     string description,
+     Action onClick)
                 {
                     var optionMin = ImGui.GetCursorScreenPos();
 
                     var optionMax = optionMin + new Vector2(
     width,
-    130);
+    joinOptionH);
 
                     var hovered =
                         ImGui.IsMouseHoveringRect(
@@ -1173,7 +1196,7 @@ joinMin + new Vector2(
 
 
                     ImGui.SetCursorScreenPos(
-                        optionMin + new Vector2(14, 14));
+                        optionMin + UiVec(14, 14));
 
 
                     using (ImRaii.PushFont(UiBuilder.IconFont))
@@ -1189,29 +1212,32 @@ joinMin + new Vector2(
 
 
                     ImGui.SetCursorScreenPos(
-                       optionMin + new Vector2(14, 48));
+                       optionMin + new Vector2(Ui(14f), Ui(48f)));
 
 
                     ImGui.Text(title);
 
                     ImGui.SetCursorScreenPos(
-                        optionMin + new Vector2(14, 70));
+                        optionMin + new Vector2(Ui(14f), Ui(70f)));
 
 
                     ImGui.TextColored(
                         MutedText,
                         description);
 
-
-
-
+                    ImGui.SetCursorScreenPos(optionMin);
+                    if (ImGui.InvisibleButton($"##joinOption{title}", new Vector2(width, joinOptionH)))
+                    {
+                        onClick();
+                    }
                 }
 
 
-                var joinOptionWidth = 135f;
+                var joinOptionWidth = Math.Max(Ui(135f), (cardWidth - Ui(70f)) / 3f);
+                var joinOptionGap = Ui(10f);
 
                 var totalWidth =
-    (joinOptionWidth * 3) + 10f * 2;
+    (joinOptionWidth * 3) + joinOptionGap * 2;
 
                 ImGui.SetCursorPosX(
                     (cardWidth - totalWidth) / 2f);
@@ -1227,46 +1253,82 @@ joinMin + new Vector2(
                     joinOptionWidth,
                     FontAwesomeIcon.Users.ToIconString(),
                     "Friends",
-                    "See friends \nwith active rooms");
+                    "See friends \nwith active rooms",
+                    () => LoadRoomBrowse("Friends", null, friendsOnly: true));
 
                 ImGui.SetCursorPos(
                     new Vector2(
-                        startX + joinOptionWidth + 10,
+                        startX + joinOptionWidth + joinOptionGap,
                         startY));
 
                 DrawJoinOptionCard(
                     joinOptionWidth,
                     FontAwesomeIcon.Globe.ToIconString(),
                     "Public Rooms",
-                    "Browse public \nwatch parties");
+                    "Browse public \nwatch parties",
+                    () => LoadRoomBrowse("Public Rooms", RoomKind.Public, friendsOnly: false));
 
                 ImGui.SetCursorPos(
                     new Vector2(
-                        startX + (joinOptionWidth + 10) * 2,
+                        startX + (joinOptionWidth + joinOptionGap) * 2,
                         startY));
 
                 DrawJoinOptionCard(
                     joinOptionWidth,
                     FontAwesomeIcon.MapMarker.ToIconString(),
                     "Venues",
-                    "Explore rooms \nnearby");
+                    "Explore rooms \nnearby",
+                    () => LoadRoomBrowse("Venues", RoomKind.Venue, friendsOnly: false));
+
+                DrawRoomBrowseList(cardWidth);
             }
     }
 }
     private async void CreateEmptyWatchParty()
     {
-        gameplayStreamOfferDismissed =
-    false;
+        StartWatchParty(goToPlayer: false);
+        await Task.CompletedTask;
+    }
 
+    private void StartWatchParty(bool goToPlayer)
+    {
+        if (CurrentSession is null)
+        {
+            joinError = "Sign in to host a watch party.";
+            Plugin.ChatGui.Print("[AlphaChannel] Sign in before hosting a watch party.");
+            return;
+        }
+
+        if (createRoomKindIndex == 1 && string.IsNullOrWhiteSpace(createRoomPassword))
+        {
+            joinError = "Locked rooms need a password.";
+            return;
+        }
+
+        ApplyCreateRoomToStream();
+        gameplayStreamOfferDismissed = false;
         screenController.Engine.ShowWaitingScreen();
 
-        await stream.PublishStateAsync(
-            null,
+        var current = queue.Current;
+        var engine = screenController.Engine;
+        _ = stream.PublishStateAsync(
+            current?.Url,
             0,
-            true,
-            screenController.Engine.ScreenPosition,
-            screenController.Engine.ScreenYaw,
-            screenController.Engine.ScreenScale);
+            current is null,
+            engine.IsActive ? engine.ScreenPosition : null,
+            engine.IsActive ? engine.ScreenYaw : null,
+            engine.IsActive ? engine.ScreenScale : null);
+
+        if (goToPlayer)
+        {
+            currentPage = HomePage.Player;
+            playerSourceTab = 0;
+        }
+
+        Plugin.ChatGui.Print(
+            stream.IsConnected
+                ? "[AlphaChannel] Watch party is live. Friends join with your Alpha Channel username."
+                : "[AlphaChannel] Connecting… the room will go live when the relay is up.");
     }
 
 
@@ -1302,14 +1364,14 @@ joinMin + new Vector2(
             screenController.Engine.ScreenScale);
     }
 
-    private void DrawWatchPartyFeatures()
+    private void DrawWatchPartyFeatures(float rowHeight)
     {
 
 
         var width =
             ImGui.GetContentRegionAvail().X;
 
-        const float gap = 12f;
+        var gap = Ui(12f);
 
         var cardWidth =
             (width - (gap * 2)) / 3f;
@@ -1320,6 +1382,7 @@ joinMin + new Vector2(
      "Live Chat",
      "Talk with friends while watching.",
      cardWidth,
+     rowHeight,
      new Vector4(0.35f, 0.75f, 1.00f, 1f));
 
         ImGui.SameLine(0, gap);
@@ -1329,6 +1392,7 @@ joinMin + new Vector2(
             "Reactions",
             "Send emojis and react live.",
             cardWidth,
+            rowHeight,
             new Vector4(1.00f, 0.55f, 0.75f, 1f));
 
         ImGui.SameLine(0, gap);
@@ -1338,6 +1402,7 @@ joinMin + new Vector2(
             "Sync Playback",
             "Everyone stays on the same moment.",
             cardWidth,
+            rowHeight,
             new Vector4(0.45f, 0.90f, 0.60f, 1f));
     }
 
@@ -1346,6 +1411,7 @@ joinMin + new Vector2(
      string title,
      string description,
      float width,
+     float height,
      Vector4 featureColor)
     {
         using var card =
@@ -1353,7 +1419,7 @@ joinMin + new Vector2(
                 $"##watchFeature_{title}",
                 new Vector2(
                     width,
-                    95f),
+                    height),
                 false,
                 ImGuiWindowFlags.NoBackground |
                 ImGuiWindowFlags.NoScrollbar |
@@ -1455,6 +1521,113 @@ joinMin + new Vector2(
             ImGui.SetWindowFontScale(1f);
         }
     }
+
+    private void ApplyCreateRoomToStream()
+    {
+        stream.RoomDescription = string.IsNullOrWhiteSpace(createRoomDescription) ? "" : createRoomDescription.Trim();
+        stream.RoomLocation = string.IsNullOrWhiteSpace(createRoomLocation) ? "" : createRoomLocation.Trim();
+        stream.RoomKind = createRoomKindIndex switch
+        {
+            1 => RoomKind.Locked,
+            2 => RoomKind.Venue,
+            _ => RoomKind.Public,
+        };
+        stream.RoomPassword = stream.RoomKind == RoomKind.Locked ? createRoomPassword : "";
+    }
+
+    private void DrawCreateRoomFields(float width)
+    {
+        ImGui.SetNextItemWidth(width);
+        ImGui.InputTextWithHint("##createRoomDescription", "Description", ref createRoomDescription, 280);
+        ImGui.SetNextItemWidth(width);
+        ImGui.InputTextWithHint("##createRoomLocation", "Location", ref createRoomLocation, 120);
+        ImGui.SetNextItemWidth(width);
+        ImGui.Combo("##createRoomKind", ref createRoomKindIndex, ["Public", "Locked", "Venue"], 3);
+        if (createRoomKindIndex == 1)
+        {
+            ImGui.SetNextItemWidth(width);
+            ImGui.InputTextWithHint("##createRoomPassword", "Room password", ref createRoomPassword, 64, ImGuiInputTextFlags.Password);
+        }
+    }
+
+    private void LoadRoomBrowse(string title, RoomKind? kind, bool friendsOnly)
+    {
+        roomBrowseTitle = title;
+        roomBrowseFriendsOnly = friendsOnly;
+        roomBrowseLoading = true;
+        var token = CurrentSession?.Token;
+        if (string.IsNullOrEmpty(token))
+        {
+            roomBrowseList = [];
+            roomBrowseLoading = false;
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            var rooms = await roomsClient.ListAsync(token, kind).ConfigureAwait(false);
+            if (string.Equals(title, "Public Rooms", StringComparison.Ordinal))
+            {
+                var locked = await roomsClient.ListAsync(token, RoomKind.Locked).ConfigureAwait(false);
+                rooms = rooms.Concat(locked).ToArray();
+            }
+
+            if (friendsOnly)
+            {
+                var friends = await friendsClient.GetFriendsAsync(token).ConfigureAwait(false) ?? [];
+                var ids = friends.Select(f => f.AccountId).ToHashSet(StringComparer.Ordinal);
+                rooms = rooms.Where(r => ids.Contains(r.HostAccountId)).ToArray();
+            }
+
+            roomBrowseList = rooms;
+            roomBrowseLoading = false;
+        });
+    }
+
+    private void DrawRoomBrowseList(float width)
+    {
+        if (roomBrowseTitle is null)
+        {
+            return;
+        }
+
+        ImGui.Dummy(new Vector2(0, 8));
+        ImGui.Text(roomBrowseTitle);
+        if (roomBrowseLoading)
+        {
+            ImGui.TextColored(MutedText, "Loading…");
+            return;
+        }
+
+        if (roomBrowseList.Length == 0)
+        {
+            ImGui.TextColored(MutedText, "No rooms right now.");
+            return;
+        }
+
+        ImGui.SetNextItemWidth(width - Ui(40f));
+        ImGui.InputTextWithHint("##roomBrowsePassword", "Password if locked", ref roomBrowsePassword, 64, ImGuiInputTextFlags.Password);
+
+        foreach (var room in roomBrowseList)
+        {
+            var label = $"{room.HostDisplayName} · {room.Kind}";
+            if (!string.IsNullOrEmpty(room.Location))
+            {
+                label += $" · {room.Location}";
+            }
+
+            if (ImGui.Button($"{label}##{room.HostAccountId}", new Vector2(width - Ui(40f), 0)))
+            {
+                DoJoin(room.HostDisplayName, room.Kind == RoomKind.Locked ? roomBrowsePassword : joinPasswordInput);
+            }
+
+            if (!string.IsNullOrEmpty(room.Description))
+            {
+                ImGui.TextColored(MutedText, room.Description);
+            }
+        }
+    }
+
     private void DrawChatDrawer()
     {
         DrawPartySocialPanel();

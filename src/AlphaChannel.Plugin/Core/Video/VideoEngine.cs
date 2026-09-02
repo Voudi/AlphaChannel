@@ -111,9 +111,10 @@ internal sealed class VideoEngine : IDisposable
     // mpv init time like the other options above, so a settings change applies on the next video.
     internal string? CookiesPath { get; set; }
 
-    // Alternative to CookiesPath - read cookies directly from a local Firefox profile instead of a
-    // manually exported file. Takes priority over CookiesPath when both are set.
-    internal bool UseFirefoxCookies { get; set; }
+    // yt-dlp cookies-from-browser (firefox/chrome/opera/...). Takes priority over CookiesPath.
+    internal string? CookiesBrowser { get; set; }
+
+    internal string? CookiesBrowserProfile { get; set; }
 
     internal Resources Resources { get; }
 
@@ -2217,7 +2218,8 @@ internal sealed class VideoEngine : IDisposable
                             AllowInsecureDirectUrls,
                             _pendingVolume,
                             CookiesPath,
-                            UseFirefoxCookies);
+                            CookiesBrowser,
+                            CookiesBrowserProfile);
 
 
                         AepLog.Info(

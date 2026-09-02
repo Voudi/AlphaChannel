@@ -110,7 +110,7 @@ internal sealed partial class MainWindow
             case SettingsTab.Account:
                 SettingsSection(
                     "Account",
-                    "Sign-in, username, and invite code.");
+                    "Sign-in, username, YouTube, and invite code.");
 
                 DrawAccountSettings();
                 break;
@@ -369,11 +369,101 @@ internal sealed partial class MainWindow
         }
     }
 
+    private void DrawWindowSizeSettings()
+    {
+        ImGui.SetWindowFontScale(1.10f);
+        ImGui.TextColored(Vector4.One, "Window size");
+        ImGui.SetWindowFontScale(1f);
+
+        ImGui.Dummy(new Vector2(0f, 3f));
+        ImGui.TextColored(
+            MutedText,
+            "Design is the original layout. 4K is capped to the game window so Dalamud UI scale cannot push it off-screen.");
+
+        ImGui.Dummy(new Vector2(0f, 12f));
+
+        ReadOnlySpan<UiWindowSizePreset> presets =
+        [
+            UiWindowSizePreset.Design,
+            UiWindowSizePreset.FullHd,
+            UiWindowSizePreset.Qhd,
+            UiWindowSizePreset.Uhd,
+        ];
+
+        var gap = Ui(8f);
+        var buttonWidth = MathF.Max(
+            Ui(88f),
+            (ImGui.GetContentRegionAvail().X - gap * 3f) / 4f);
+        var buttonHeight = Ui(34f);
+
+        for (var i = 0; i < presets.Length; i++)
+        {
+            if (i > 0)
+            {
+                ImGui.SameLine(0f, gap);
+            }
+
+            var preset = presets[i];
+            var selected = Plugin.Cfg.WindowSizePreset == preset;
+            var label = $"{ThemeCatalog.Label(preset)}##windowSize_{preset}";
+
+            using (selected
+                ? ImRaii.PushColor(ImGuiCol.Button, Accent)
+                    .Push(ImGuiCol.ButtonHovered, AccentHover)
+                    .Push(ImGuiCol.ButtonActive, AccentActive)
+                : ImRaii.PushColor(ImGuiCol.Button, CardBg)
+                    .Push(ImGuiCol.ButtonHovered, CardBgHover)
+                    .Push(ImGuiCol.ButtonActive, CardBgHover))
+            {
+                if (ImGui.Button(label, new Vector2(buttonWidth, buttonHeight)) && !selected)
+                {
+                    ApplyWindowSizePreset(preset);
+                }
+            }
+        }
+
+        var applied = ClampWindowSize(userWindowSize);
+        ImGui.Dummy(new Vector2(0f, 10f));
+        ImGui.TextColored(
+            MutedText,
+            Plugin.Cfg.WindowSizePreset == UiWindowSizePreset.Custom
+                ? $"Custom  {applied.X:0} × {applied.Y:0}  — drag a window edge to resize"
+                : $"Applied  {applied.X:0} × {applied.Y:0}");
+    }
+
     private void DrawAppearanceSettings()
     {
         SettingsSection(
             "Appearance",
             "Colors and window chrome.");
+
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.ChildRounding,
+            10f)
+            .Push(
+                ImGuiStyleVar.WindowPadding,
+                new Vector2(20f, 18f)))
+        using (ImRaii.PushColor(
+            ImGuiCol.ChildBg,
+            new Vector4(0.045f, 0.06f, 0.10f, 1f))
+            .Push(
+                ImGuiCol.Border,
+                BorderSubtle))
+        using (var sizeCard = ImRaii.Child(
+            "##appearanceWindowSizeCard",
+            new Vector2(-1f, Ui(168f)),
+            true,
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            if (sizeCard)
+            {
+                DrawWindowSizeSettings();
+            }
+        }
+
+        ImGui.Dummy(
+            new Vector2(0f, 14f));
 
         // =========================================================
         // ACCENT COLOUR
@@ -393,7 +483,7 @@ internal sealed partial class MainWindow
                 BorderSubtle))
         using (var accentCard = ImRaii.Child(
             "##appearanceAccentCard",
-            new Vector2(-1f, 205f),
+            new Vector2(-1f, Ui(205f)),
             true,
             ImGuiWindowFlags.NoScrollbar |
             ImGuiWindowFlags.NoScrollWithMouse))
@@ -481,7 +571,7 @@ internal sealed partial class MainWindow
                 BorderSubtle))
         using (var backgroundCard = ImRaii.Child(
             "##appearanceBackgroundCard",
-            new Vector2(-1f, 515f),
+            new Vector2(-1f, Ui(515f)),
             true,
             ImGuiWindowFlags.NoScrollbar |
             ImGuiWindowFlags.NoScrollWithMouse))
@@ -568,7 +658,9 @@ internal sealed partial class MainWindow
       "Video playback",
       "Playback options for YouTube and online video sources.");
 
-        DrawCookiesSettings();
+        ImGui.TextColored(
+            MutedText,
+            "YouTube sign-in lives on the Account tab.");
 
         SettingsHairline();
 
@@ -795,8 +887,8 @@ internal sealed partial class MainWindow
     private void DrawYouTubeSubscriptionSettingsRow(
     string channelId)
     {
-        const float rowHeight = 42f;
-        const float removeWidth = 88f;
+        var rowHeight = Ui(42f);
+        var removeWidth = Ui(88f);
 
         var origin =
             ImGui.GetCursorScreenPos();
@@ -1333,7 +1425,7 @@ internal sealed partial class MainWindow
                 BorderSubtle))
         using (var heroCard = ImRaii.Child(
             "##appearanceHomeHeroCard",
-            new Vector2(-1f, 445f),
+            new Vector2(-1f, Ui(445f)),
             true,
             ImGuiWindowFlags.NoScrollbar |
             ImGuiWindowFlags.NoScrollWithMouse))
@@ -2128,7 +2220,7 @@ internal sealed partial class MainWindow
                 BorderSubtle))
         using (var card = ImRaii.Child(
             "##whisperHistoryCard",
-            new Vector2(-1f, 205f),
+            new Vector2(-1f, Ui(205f)),
             true,
             ImGuiWindowFlags.NoScrollbar |
             ImGuiWindowFlags.NoScrollWithMouse))

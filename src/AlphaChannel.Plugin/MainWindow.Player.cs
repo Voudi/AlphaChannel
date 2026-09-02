@@ -509,8 +509,8 @@ internal sealed partial class MainWindow
             var next =
                 queue.Entries[0];
 
-            const float rowHeight = 92f;
-            const float thumbWidth = 156f;
+            var rowHeight = Ui(92f);
+            var thumbWidth = Ui(156f);
 
             var origin =
                 ImGui.GetCursorScreenPos();
@@ -1239,7 +1239,7 @@ internal sealed partial class MainWindow
                    "##localVideoNotice",
                    new Vector2(
                        -1f,
-                       76f),
+                       Ui(76f)),
                    true,
                    ImGuiWindowFlags.NoScrollbar |
                    ImGuiWindowFlags.NoScrollWithMouse))

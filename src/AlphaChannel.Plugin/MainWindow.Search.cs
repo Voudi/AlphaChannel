@@ -15,6 +15,8 @@ internal sealed partial class MainWindow
     private string searchQuery = string.Empty;
     private string cookiesPathInput = Plugin.Cfg.YouTubeCookiesPath ?? string.Empty;
     private string? cookiesSearchError;
+    private bool youtubeSignInHelp;
+    private bool youtubeShowAdvancedCookies;
 
     // Written from RunSearchAsync's continuation, which resumes on an arbitrary thread pool thread
     // (not the main thread Draw() runs on) - same reasoning as Plugin.cs's pendingRemoteState.
@@ -73,6 +75,10 @@ internal sealed partial class MainWindow
         ImGui.SetWindowFontScale(1f);
 
         ImGui.Dummy(new Vector2(0f, 10f));
+
+        DrawYouTubeLoginBanner();
+
+        ImGui.Dummy(new Vector2(0f, 8f));
 
         // Search field
         ImGui.SetNextItemWidth(-66f);
@@ -224,7 +230,7 @@ internal sealed partial class MainWindow
 
             ImGui.PushID(index);
 
-            const float rowHeight = 64f;
+            var rowHeight = Ui(64f);
 
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.ChildRounding,
@@ -538,7 +544,7 @@ internal sealed partial class MainWindow
     "dailymotionResults",
     new Vector2(
         0,
-        300),
+        Ui(300f)),
     false))
         {
             if (child)
@@ -549,7 +555,7 @@ internal sealed partial class MainWindow
 
             ImGui.PushID($"dailymotion_{index}");
 
-            const float rowHeight = 64f;
+            var rowHeight = Ui(64f);
 
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.ChildRounding,
@@ -1402,36 +1408,228 @@ internal sealed partial class MainWindow
         }
     }
 
+    private bool IsYouTubeLoggedIn() =>
+        YouTubeCookieExport.LooksSignedIn(Plugin.Cfg.YouTubeCookiesPath) ||
+        (!YouTubeCookieExport.NeedsNativeExport() &&
+         YouTubeBrowserCookies.Find(
+             Plugin.Cfg.YouTubeCookiesBrowser,
+             Plugin.Cfg.YouTubeCookiesProfilePath) is not null);
+
+    private void ApplyYouTubeSessionToPlayer() =>
+        YouTubeCookieExport.ApplyToPlayer(Plugin.Cfg, video);
+
+    private static void OpenYouTubeInBrowser()
+    {
+        try
+        {
+            var xdg = YouTubeBrowserCookies.ToYtDlpPath("/usr/bin/xdg-open");
+            if (File.Exists(xdg))
+            {
+                Process.Start(new ProcessStartInfo(xdg)
+                {
+                    ArgumentList = { "https://www.youtube.com" },
+                    UseShellExecute = false,
+                });
+                return;
+            }
+
+            Process.Start(new ProcessStartInfo("https://www.youtube.com") { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning($"[YouTube] Failed to open browser: {exception.Message}");
+        }
+    }
+
+    private void ConnectYouTubeBrowser(YouTubeBrowserProfile profile)
+    {
+        Plugin.Cfg.YouTubeCookiesBrowser = profile.BrowserId;
+        Plugin.Cfg.YouTubeCookiesProfilePath = profile.ProfilePath;
+        Plugin.Cfg.UseFirefoxCookies = string.Equals(profile.BrowserId, "firefox", StringComparison.OrdinalIgnoreCase);
+        Plugin.Cfg.Save();
+        youtubeSignInHelp = false;
+        _ = Task.Run(() => YouTubeCookieExport.Export(
+            Plugin.Cfg,
+            video,
+            profile.BrowserId,
+            profile.ProfilePath));
+    }
+
+    private void SignOutYouTube()
+    {
+        YouTubeCookieExport.DeleteManagedFile();
+        Plugin.Cfg.YouTubeCookiesBrowser = null;
+        Plugin.Cfg.YouTubeCookiesProfilePath = null;
+        Plugin.Cfg.UseFirefoxCookies = false;
+        Plugin.Cfg.YouTubeCookiesPath = null;
+        cookiesPathInput = string.Empty;
+        YouTubeCookieExport.LastError = null;
+        YouTubeCookieExport.Status = null;
+        Plugin.Cfg.Save();
+        ApplyYouTubeSessionToPlayer();
+        youtubeSignInHelp = false;
+    }
+
+    private string YouTubeLoginStatusText()
+    {
+        if (YouTubeCookieExport.Busy)
+        {
+            return YouTubeCookieExport.Status ?? "Copying YouTube cookies from your browser…";
+        }
+
+        if (YouTubeCookieExport.LooksSignedIn(Plugin.Cfg.YouTubeCookiesPath))
+        {
+            var connected = YouTubeBrowserCookies.Find(
+                Plugin.Cfg.YouTubeCookiesBrowser,
+                Plugin.Cfg.YouTubeCookiesProfilePath);
+            return connected is { } profile
+                ? $"Signed in via {profile.Label}. Takes effect on the next video."
+                : "Signed in via cookies.txt. Takes effect on the next video.";
+        }
+
+        if (!YouTubeCookieExport.NeedsNativeExport() &&
+            !string.IsNullOrWhiteSpace(Plugin.Cfg.YouTubeCookiesBrowser))
+        {
+            return $"Connected via {Plugin.Cfg.YouTubeCookiesBrowser}. Takes effect on the next video.";
+        }
+
+        return "Not signed in. Age-restricted videos need a YouTube login.";
+    }
+
+    private void DrawYouTubeLoginBanner()
+    {
+        if (IsYouTubeLoggedIn())
+        {
+            ImGui.TextColored(Good, YouTubeLoginStatusText());
+            return;
+        }
+
+        ImGui.TextColored(MutedText, "Sign in to YouTube for age-restricted videos.");
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Sign in##youtubeSearch"))
+        {
+            currentPage = HomePage.Settings;
+            settingsTab = SettingsTab.Account;
+            youtubeSignInHelp = true;
+            OpenYouTubeInBrowser();
+        }
+    }
+
+    private void DrawYouTubeLoginSettings()
+    {
+        var loggedIn = IsYouTubeLoggedIn();
+
+        ImGui.TextColored(
+            Vector4.One,
+            "YouTube");
+
+        ImGui.Dummy(new Vector2(0f, 4f));
+        ImGui.TextColored(loggedIn ? Good : MutedText, YouTubeLoginStatusText());
+        if (YouTubeCookieExport.LastError is { Length: > 0 } exportError)
+        {
+            ImGui.Dummy(new Vector2(0f, 4f));
+            ImGui.TextWrapped(exportError);
+        }
+
+        ImGui.Dummy(new Vector2(0f, 10f));
+
+        if (YouTubeCookieExport.Busy)
+        {
+            ImGui.TextColored(MutedText, "Leave the browser open until this finishes.");
+            return;
+        }
+
+        if (!loggedIn)
+        {
+            using (ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, 8f))
+            using (ImRaii.PushColor(ImGuiCol.Button, Accent)
+                .Push(ImGuiCol.ButtonHovered, AccentHover)
+                .Push(ImGuiCol.ButtonActive, AccentActive))
+            {
+                if (ImGui.Button("Open YouTube to sign in", new Vector2(Ui(220f), Ui(36f))))
+                {
+                    youtubeSignInHelp = true;
+                    OpenYouTubeInBrowser();
+                }
+            }
+
+            ImGui.Dummy(new Vector2(0f, 10f));
+            ImGui.TextWrapped(
+                "Opens YouTube in your browser. Sign in there, then click Use for that browser so AlphaChannel can copy the session.");
+
+            ImGui.Dummy(new Vector2(0f, 10f));
+
+            var detected = YouTubeBrowserCookies.Detect();
+            var detectedByKey = detected
+                .GroupBy(profile => profile.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            var buttonWidth = Ui(148f);
+            var buttonHeight = Ui(32f);
+            var gap = Ui(8f);
+            var rowWidth = ImGui.GetContentRegionAvail().X;
+            var used = 0f;
+
+            foreach (var kind in YouTubeBrowserCookies.Catalog)
+            {
+                var found = detectedByKey.TryGetValue(kind.Key, out var profile);
+                if (used > 0f && used + buttonWidth > rowWidth)
+                {
+                    used = 0f;
+                }
+                else if (used > 0f)
+                {
+                    ImGui.SameLine(0f, gap);
+                }
+
+                if (found)
+                {
+                    if (ImGui.Button(
+                            $"Use {kind.Label}##ytBrowser_{kind.Key}",
+                            new Vector2(buttonWidth, buttonHeight)))
+                    {
+                        ConnectYouTubeBrowser(profile);
+                    }
+                }
+                else
+                {
+                    using (ImRaii.Disabled())
+                    {
+                        ImGui.Button(
+                            $"{kind.Label}##ytMissing_{kind.Key}",
+                            new Vector2(buttonWidth, buttonHeight));
+                    }
+
+                    if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                    {
+                        ImGui.SetTooltip($"{kind.Label} was not found on this machine.");
+                    }
+                }
+
+                used += buttonWidth + gap;
+            }
+        }
+        else if (ImGui.Button("Sign out of YouTube", new Vector2(Ui(180f), Ui(34f))))
+        {
+            SignOutYouTube();
+        }
+
+        ImGui.Dummy(new Vector2(0f, 12f));
+        ImGui.Checkbox("Advanced: cookies.txt file", ref youtubeShowAdvancedCookies);
+        if (youtubeShowAdvancedCookies)
+        {
+            ImGui.Dummy(new Vector2(0f, 6f));
+            DrawCookiesSettings();
+        }
+    }
+
     // Opt-in workaround for age-restricted videos, which yt-dlp otherwise refuses outright. Only
     // ever stores/uses a file path the player supplies themselves - see Configuration's own note
     // on why this isn't something the plugin generates or transmits.
     private void DrawCookiesSettings()
     {
-        ImGui.TextWrapped("Age-restricted videos need a YouTube login (cookies.txt).");
-        if (ImGui.Button("Open YouTube to sign in"))
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo("https://www.youtube.com") { UseShellExecute = true });
-            }
-            catch (Exception exception)
-            {
-                AepLog.Warning($"[YouTube] Failed to open browser: {exception.Message}");
-            }
-        }
-
-        ImGui.Spacing();
-
-        var useFirefox = Plugin.Cfg.UseFirefoxCookies;
-        if (ImGui.Checkbox("Read cookies from Firefox automatically", ref useFirefox))
-        {
-            Plugin.Cfg.UseFirefoxCookies = useFirefox;
-            Plugin.Cfg.Save();
-            video.UseFirefoxCookies = useFirefox;
-        }
-
-        ImGui.TextDisabled("Best-effort - needs an actual logged-in Firefox session.");
-        ImGui.TextDisabled("Falls back to the path below if it can't find one.");
+        ImGui.TextWrapped(
+            "Export Netscape cookies.txt from a logged-in YouTube session (browser extension: Get cookies.txt LOCALLY), then save the path.");
 
         ImGui.Spacing();
         ImGui.SetNextItemWidth(-70f);
@@ -1441,8 +1639,15 @@ internal sealed partial class MainWindow
         {
             var path = string.IsNullOrWhiteSpace(cookiesPathInput) ? null : cookiesPathInput.Trim();
             Plugin.Cfg.YouTubeCookiesPath = path;
+            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+            {
+                Plugin.Cfg.YouTubeCookiesBrowser = null;
+                Plugin.Cfg.YouTubeCookiesProfilePath = null;
+                Plugin.Cfg.UseFirefoxCookies = false;
+            }
+
             Plugin.Cfg.Save();
-            video.CookiesPath = path;
+            ApplyYouTubeSessionToPlayer();
         }
 
         if (ImGui.SmallButton("Find in Downloads"))
@@ -1455,7 +1660,7 @@ internal sealed partial class MainWindow
             }
             else
             {
-                cookiesSearchError = "No cookies file found in Downloads - export one first (see above).";
+                cookiesSearchError = "No cookies file found in Downloads - export one first.";
             }
         }
 
@@ -1580,7 +1785,7 @@ internal sealed partial class MainWindow
         {
             ImGui.PushID(stream.ChannelName);
 
-            const float rowHeight = 70f;
+            var rowHeight = Ui(70f);
 
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.ChildRounding,
@@ -1861,7 +2066,7 @@ ImGui.SetWindowFontScale(1f);
         {
             ImGui.Dummy(new Vector2(0f, 16f));
 
-            const float rowHeight = 70f;
+            var rowHeight = Ui(70f);
 
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.ChildRounding,
@@ -1881,8 +2086,8 @@ ImGui.SetWindowFontScale(1f);
                     var rowOrigin =
                         ImGui.GetCursorScreenPos();
 
-                    const float thumbWidth = 105f;
-                    const float thumbHeight = rowHeight;
+                    var thumbWidth = Ui(105f);
+                    var thumbHeight = rowHeight;
 
                     var thumbnail =
                         thumbnails.Get(stream.ThumbnailUrl);

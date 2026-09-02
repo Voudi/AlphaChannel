@@ -151,7 +151,7 @@ internal sealed partial class MainWindow
                 "##goLiveStatus",
                 new Vector2(
                     -1f,
-                    110f),
+                    Ui(110f)),
                 false,
                 ImGuiWindowFlags.NoScrollbar |
                 ImGuiWindowFlags.NoScrollWithMouse))
@@ -790,7 +790,7 @@ internal sealed partial class MainWindow
                 ImGui.PushID(
                 friend.AccountId);
 
-            const float rowHeight = 58f;
+            var rowHeight = Ui(58f);
 
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.ChildRounding,
@@ -1468,7 +1468,7 @@ internal sealed partial class MainWindow
                 "##obsGuideFinalNote",
                 new Vector2(
                     -1f,
-                    72f),
+                    Ui(72f)),
                 false,
                 ImGuiWindowFlags.NoScrollbar))
         {

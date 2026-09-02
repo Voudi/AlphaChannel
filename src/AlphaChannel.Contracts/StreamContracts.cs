@@ -69,6 +69,15 @@ public sealed record StreamControl
     // they've gone offline.
     public bool? IsPrivate { get; init; }
 
+    // Host-set on stream.state (null = unchanged). Description is capped server-side (~280).
+    public string? Description { get; init; }
+    public string? Location { get; init; }
+    public RoomKind? Kind { get; init; }
+
+    // Host sets on stream.state; viewers send on stream.join. Never stored on LastState / never
+    // echoed to other clients. Empty string on state clears the lock.
+    public string? Password { get; init; }
+
     // The host's world-anchored screen transform (VideoEngine.ScreenPosition/ScreenYaw/ScreenScale).
     // Omitted entirely if the host's screen isn't active. Every viewer's client applies this to its
     // own local ScreenPainter - there is no shared/networked 3D object.
@@ -80,3 +89,21 @@ public sealed record StreamControl
 }
 
 public sealed record ParticipantInfo(string UserId, string DisplayName);
+
+public enum RoomKind
+{
+    Public = 0,
+    Locked = 1,
+    Venue = 2,
+}
+
+public sealed record RoomDirectoryDto(
+    string HostAccountId,
+    string HostDisplayName,
+    string? Description,
+    string? Location,
+    RoomKind Kind,
+    int ViewerCount,
+    bool Paused,
+    bool HasMedia,
+    string? Url);

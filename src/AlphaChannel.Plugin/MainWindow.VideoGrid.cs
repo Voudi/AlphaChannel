@@ -561,7 +561,7 @@ internal sealed partial class MainWindow
 
         const float gap = 12f;
         const float rowGap = 16f;
-        const float cardHeight = 224f;
+        var cardHeight = Ui(224f);
 
         var contentWidth =
             ImGui.GetContentRegionAvail().X;
@@ -761,7 +761,7 @@ internal sealed partial class MainWindow
 
         const float gap = 12f;
         const float rowGap = 16f;
-        const float cardHeight = 224f;
+        var cardHeight = Ui(224f);
 
         var contentWidth =
             ImGui.GetContentRegionAvail().X;
@@ -1120,7 +1120,7 @@ internal sealed partial class MainWindow
 
         const float gap = 12f;
         const float rowGap = 16f;
-        const float cardHeight = 224f;
+        var cardHeight = Ui(224f);
 
         var contentWidth =
             ImGui.GetContentRegionAvail().X;

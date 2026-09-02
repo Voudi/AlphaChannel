@@ -46,10 +46,21 @@ public sealed record AuthPollResponse(
 // when viewing someone else's profile (see AccountProfileDto below for that case).
 // AvatarImageUrl is a relative path like /avatars/{file} when the player uploaded a custom pic;
 // clients resolve it against the relay base URL. Null = use AvatarIcon + AvatarColorHex chip.
+public enum PatreonTier
+{
+    None = 0,
+    Unknown = 1,
+    Tier1 = 2,
+    Tier2 = 3,
+    Tier3 = 4,
+}
+
 public sealed record AccountSummary(
     string AccountId, string Handle, string DisplayName, string InviteCode,
     string? AvatarIcon, string AvatarColorHex, string? Bio, string? StatusMessage,
-    string? AvatarImageUrl);
+    string? AvatarImageUrl,
+    PatreonTier PatreonTier = PatreonTier.None,
+    bool IsDeveloper = false);
 
 // The one deliberate exception to "real character name/world is never returned to a client" - only
 // ever the caller's own linked characters, via GET /me/characters, never anyone else's.
@@ -73,4 +84,8 @@ public sealed record UpdateProfileRequest(
 public sealed record AccountProfileDto(
     string AccountId, string Handle, string DisplayName,
     string? AvatarIcon, string AvatarColorHex, string? Bio, string? StatusMessage, long? FriendsSinceUnix,
-    string? AvatarImageUrl);
+    string? AvatarImageUrl,
+    bool IsDeveloper = false,
+    PatreonTier PatreonTier = PatreonTier.None);
+
+public sealed record AdminPatchAccountRequest(PatreonTier? PatreonTier, bool? IsDeveloper);

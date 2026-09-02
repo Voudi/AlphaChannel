@@ -488,7 +488,7 @@ internal sealed partial class MainWindow
                     new Vector4(0.045f, 0.06f, 0.10f, 1f)))
                 using (var requestRow = ImRaii.Child(
                     "##friendRequest",
-                    new Vector2(-1f, 50f),
+                    new Vector2(-1f, Ui(50f)),
                     false,
                     ImGuiWindowFlags.NoScrollbar |
                     ImGuiWindowFlags.NoScrollWithMouse))
@@ -760,7 +760,7 @@ internal sealed partial class MainWindow
                 ImGui.PushID(
                     friend.AccountId);
 
-                const float rowHeight = 62f;
+                var rowHeight = Ui(62f);
 
                 using (ImRaii.PushStyle(
                     ImGuiStyleVar.ChildRounding,

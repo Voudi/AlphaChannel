@@ -2178,7 +2178,7 @@ new Vector2(
                             "##gamesInputSupportNotice",
                             new Vector2(
                                 -1f,
-                                64f),
+                                Ui(64f)),
                             true,
                             ImGuiWindowFlags.NoScrollbar |
                             ImGuiWindowFlags.NoScrollWithMouse))
@@ -2267,7 +2267,7 @@ new Vector2(
                                 "##gamesDuplicateBindingsWarning",
                                 new Vector2(
                                     -1f,
-                                    48f),
+                                    Ui(48f)),
                                 true,
                                 ImGuiWindowFlags.NoScrollbar |
                                 ImGuiWindowFlags.NoScrollWithMouse))
@@ -2957,7 +2957,7 @@ new Vector2(
                     "##snesRomSafetyNotice",
                     new Vector2(
                         -1f,
-                        92f),
+                        Ui(92f)),
                     true,
                     ImGuiWindowFlags.NoScrollbar |
                     ImGuiWindowFlags.NoScrollWithMouse))

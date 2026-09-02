@@ -20,6 +20,15 @@ internal enum UiBackground
     Custom = 6,  // user image from Settings
 }
 
+internal enum UiWindowSizePreset
+{
+    Design = 0,  // 1220×840 original canvas
+    FullHd = 1,  // 1920×1080
+    Qhd = 2,     // 2560×1440
+    Uhd = 3,     // 3840×2160, clamped to game viewport
+    Custom = 4,  // drag-resize
+}
+
 internal readonly record struct ThemeColors(
     Vector4 Accent,
     Vector4 AccentHover,
@@ -65,6 +74,25 @@ internal static class ThemeCatalog
         UiBackground.Carbon => "Carbon",
         UiBackground.Custom => "Custom",
         _ => background.ToString(),
+    };
+
+    internal static string Label(UiWindowSizePreset preset) => preset switch
+    {
+        UiWindowSizePreset.Design => "Design",
+        UiWindowSizePreset.FullHd => "1080p",
+        UiWindowSizePreset.Qhd => "1440p",
+        UiWindowSizePreset.Uhd => "4K",
+        UiWindowSizePreset.Custom => "Custom",
+        _ => preset.ToString(),
+    };
+
+    internal static string SizeCaption(UiWindowSizePreset preset) => preset switch
+    {
+        UiWindowSizePreset.Design => "1220 × 840",
+        UiWindowSizePreset.FullHd => "1920 × 1080",
+        UiWindowSizePreset.Qhd => "2560 × 1440",
+        UiWindowSizePreset.Uhd => "3840 × 2160",
+        _ => string.Empty,
     };
 
     // Swatch shown in Settings for the background picker — match the real window tones.

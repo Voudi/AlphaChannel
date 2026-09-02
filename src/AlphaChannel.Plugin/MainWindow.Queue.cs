@@ -54,7 +54,7 @@ internal sealed partial class MainWindow
             {
                 if (ImGui.BeginChild(
                     "queueCard",
-                    new Vector2(230f, 115f),
+                    new Vector2(Ui(230f), Ui(115f)),
                     true))
                 {
                     if (profile is null)
@@ -400,7 +400,7 @@ internal sealed partial class MainWindow
 
             ImGui.PushID(index);
 
-            const float rowHeight = 66f;
+            var rowHeight = Ui(66f);
 
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.ChildRounding,
@@ -430,8 +430,8 @@ internal sealed partial class MainWindow
                     // Thumbnail
                     // -------------------------------------------------
 
-                    const float thumbWidth = 118f;
-                    const float thumbHeight = rowHeight;
+                    var thumbWidth = Ui(118f);
+                    var thumbHeight = rowHeight;
 
                     var thumbnail =
                         thumbnails.Get(entry.ThumbnailUrl);
