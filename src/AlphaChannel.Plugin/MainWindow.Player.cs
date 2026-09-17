@@ -29,7 +29,7 @@ internal sealed partial class MainWindow
         var buttonSize =
             new Vector2(
                 buttonWidth,
-                46f);
+                Ui(46f));
 
         DrawPlayerDrawerTab(
             FontAwesomeIcon.Tv,
@@ -54,6 +54,7 @@ internal sealed partial class MainWindow
             buttonSize);
     }
     private double queueAddedFeedbackUntil;
+    private string addMediaVideoSearchQuery = string.Empty;
 
 
     //
@@ -65,12 +66,100 @@ internal sealed partial class MainWindow
 
     private string? localVideoError;
 
+    private string? localVideoPatreonAccessMessage;
+
+
+    //
+    // Local-video Watch Party broadcast state.
+    //
+    // Armed means the host chose to broadcast the file. FFmpeg itself only
+    // runs while at least one viewer is present.
+    //
+
+    private bool localVideoBroadcastArmed;
+    private bool localVideoBroadcastStartFailed;
+    private bool localVideoBroadcastEncoderExpectedRunning;
+    private bool localVideoBroadcastPaused;
+
+    private string? localVideoBroadcastPublishUrl;
+    private string? localVideoBroadcastHlsUrl;
+    private float pendingLocalVideoResumePosition;
+    private double localVideoBroadcastStartPosition;
+    private DateTime localVideoBroadcastStartTimeUtc;
+
+    private bool HasConfirmedPatreonAccess()
+    {
+        return patreonAccessConfirmed &&
+               HasConfiguredPatreonAccess();
+    }
+
+    private void RefreshLocalVideoPatreonAccess()
+    {
+        if (!HasConfiguredPatreonAccess())
+        {
+            patreonAccessConfirmed = false;
+            localVideoPatreonAccessMessage =
+                "No active Patreon membership was found.";
+            return;
+        }
+
+        patreonAccessConfirmed = true;
+        localVideoPatreonAccessMessage = null;
+        localVideoError = null;
+
+        Plugin.ChatGui.Print(
+            $"[AlphaChannel] Patreon access confirmed (tier {Plugin.Cfg.PatreonMembershipTier}).");
+    }
+
+    internal string? ActiveLocalVideoBroadcastHlsUrl =>
+        localVideoBroadcastArmed
+            ? localVideoBroadcastHlsUrl
+            : null;
+
+    internal string? ActiveLocalVideoBroadcastTitle
+    {
+        get
+        {
+            if (!localVideoBroadcastArmed)
+            {
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(
+                    localVideoSelectedPath))
+            {
+                return "Local Video";
+            }
+
+            var videoName =
+                Path.GetFileNameWithoutExtension(
+                    localVideoSelectedPath);
+
+            return string.IsNullOrWhiteSpace(
+                videoName)
+                ? "Local Video"
+                : $"Local Video: {videoName}";
+        }
+    }
+
+    internal bool ActiveLocalVideoBroadcastPaused =>
+        localVideoBroadcastArmed &&
+        localVideoBroadcastPaused;
+
+
     private readonly FileDialogManager localVideoFileDialog =
         new();
 
 
     private PlayerDrawer activePlayerDrawer =
         PlayerDrawer.Player;
+
+    /// <summary>
+    /// True while Add Media is displaying the source-selection landing page.
+    /// Selecting a source changes this to false and opens that source's form.
+    /// </summary>
+    private bool showingAddMediaSources =
+        true;
     private void DrawPlayerPage()
     {
         DrawPlayerDrawerTabs();
@@ -130,10 +219,11 @@ internal sealed partial class MainWindow
                 selected ? AccentActive : hoverBg))
         {
             if (ImGui.Button(
-                $"##drawer_{drawer}",
-                size))
+         $"##drawer_{drawer}",
+         size))
             {
-                activePlayerDrawer = drawer;
+                activePlayerDrawer =
+                    drawer;
             }
         }
 
@@ -183,13 +273,13 @@ internal sealed partial class MainWindow
 
         using (ImRaii.PushFont(UiBuilder.IconFont))
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 start,
                 ImGui.GetColorU32(textColor),
                 iconText);
         }
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             start + new Vector2(iconSize.X + gap, 0f),
             ImGui.GetColorU32(textColor),
             label);
@@ -197,421 +287,413 @@ internal sealed partial class MainWindow
 
     private void DrawPlayerPreviewDrawer()
     {
-        var current = queue.Current;
-
-        // ---------------------------------------------------------
-        // Now playing
-        // ---------------------------------------------------------
-
-        ImGui.SetWindowFontScale(1.15f);
-
+        SetUiFontScale(1.15f);
         ImGui.TextColored(
             Vector4.One,
-            "Now Playing Preview");
-
-        ImGui.SetWindowFontScale(1f);
-
-        ImGui.SetWindowFontScale(0.72f);
-
+            "Playback Status");
+        SetUiFontScale(1f);
+        SetUiFontScale(0.72f);
         ImGui.TextColored(
             MutedText,
-            "Check what's displayed on your room's virtual screen");
+            "See what is playing and where it is being watched.");
+        SetUiFontScale(1f);
+        ImGui.Dummy(UiVec(0f, 14f));
 
-        ImGui.SetWindowFontScale(1f);
+        var engine = screenController.Engine;
+        var current = queue.Current;
+        var hasPlayback = current is not null ||
+                          video.IsPlayingGame ||
+                          video.IsPlayingBrowser ||
+                          video.IsPlayingLocalVideo ||
+                          video.IsPlayingImage ||
+                          (stream.Mode == StreamMode.Viewing &&
+                           !string.IsNullOrWhiteSpace(stream.CurrentRoomState?.Url));
 
-        ImGui.Dummy(
-            new Vector2(0f, 4f));
-
-        DrawPlayerPreviewSurface(current);
-
-        ImGui.Dummy(
-            new Vector2(0f, 6f));
-
-        // ---------------------------------------------------------
-        // Up next
-        // ---------------------------------------------------------
-
-        ImGui.SetWindowFontScale(0.82f);
-
-        ImGui.TextColored(
-            MutedText,
-            "UP NEXT");
-
-        ImGui.SetWindowFontScale(1f);
-
-        ImGui.Dummy(
-            new Vector2(0f, 4f));
-
-        DrawPlayerUpNext();
-    }
-
-    private void DrawPlayerPreviewSurface(
-        Video.VideoQueueEntry? current)
-    {
-        var availableWidth =
-            ImGui.GetContentRegionAvail().X;
-
-        // Keep the preview relatively cinematic without consuming
-        // the entire page vertically.
-        var previewWidth =
-     MathF.Min(
-         availableWidth,
-         680f);
-
-        var previewHeight =
-            previewWidth * 9f / 16f;
-
-        var remaining =
-            availableWidth - previewWidth;
-
-        if (remaining > 0f)
+        if (!hasPlayback)
         {
-            ImGui.SetCursorPosX(
-                ImGui.GetCursorPosX() +
-                remaining * 0.5f);
-        }
-
-        var origin =
-            ImGui.GetCursorScreenPos();
-
-        var size =
-            new Vector2(
-                previewWidth,
-                previewHeight);
-
-        var drawList =
-            ImGui.GetWindowDrawList();
-
-        drawList.AddRectFilled(
-            origin,
-            origin + size,
-            ImGui.GetColorU32(
-                new Vector4(
-                    0.025f,
-                    0.032f,
-                    0.055f,
-                    1f)),
-            10f);
-
-        drawList.AddRect(
-            origin,
-            origin + size,
-            ImGui.GetColorU32(
-                new Vector4(
-                    MutedText.X,
-                    MutedText.Y,
-                    MutedText.Z,
-                    0.14f)),
-            10f,
-            ImDrawFlags.None,
-            1f);
-
-        if (current is null)
-        {
-            DrawPlayerEmptyPreview(
-                origin,
-                size);
-        }
-        else
-        {
-            // Live video texture goes here in the next step.
-            DrawPlayerWaitingPreview(
-                origin,
-                size);
-        }
-
-        ImGui.Dummy(size);
-
-        if (current is null)
-        {
+            DrawPlayerStatusEmptyState();
             return;
         }
 
-        ImGui.Dummy(
-            new Vector2(0f, 10f));
+        var (title, source, icon) = GetPlayerStatusMedia(current);
+        var (position, duration, paused) = video.GetProgress();
+        var status = engine.IsShowingWaitingScreen || video.State == Video.VideoPlaybackState.Loading
+            ? "Loading"
+            : paused || video.State == Video.VideoPlaybackState.Paused
+                ? "Paused"
+                : "Playing";
 
-        ImGui.SetWindowFontScale(1.08f);
+        DrawPlayerStatusMediaCard(current, title, source, icon, status, position, duration);
+        ImGui.Dummy(UiVec(0f, 14f));
 
-        ImGui.TextColored(
-            Vector4.One,
-            current.Title);
+        var availableWidth = ImGui.GetContentRegionAvail().X;
+        var gap = Ui(14f);
+        var cardWidth = MathF.Max(Ui(280f), (availableWidth - gap) * 0.5f);
 
-        ImGui.SetWindowFontScale(1f);
+        DrawPlayerViewingModeCard(cardWidth);
+        ImGui.SameLine(0f, gap);
+        DrawPlayerCompactQueueCard(MathF.Max(Ui(280f), availableWidth - cardWidth - gap));
+    }
 
-        if (!string.IsNullOrWhiteSpace(
-                current.Source))
+    private (string Title, string Source, FontAwesomeIcon Icon) GetPlayerStatusMedia(
+        Video.VideoQueueEntry? current)
+    {
+        var engine = screenController.Engine;
+
+        if (current is not null)
         {
-            ImGui.Dummy(
-                new Vector2(0f, 2f));
+            return (
+                string.IsNullOrWhiteSpace(current.Title) ? "Now Playing" : current.Title,
+                current.Source,
+                video.IsAudioOnly ? FontAwesomeIcon.BroadcastTower : FontAwesomeIcon.Video);
+        }
 
-            ImGui.SetWindowFontScale(0.88f);
+        if (engine.IsPlayingGame)
+        {
+            var system = engine.IsPlayingSnes
+                ? GameSystem.Snes
+                : engine.IsPlayingNes
+                    ? GameSystem.Nes
+                    : engine.IsPlayingGameBoyAdvance
+                        ? GameSystem.GameBoyAdvance
+                        : engine.IsPlayingMasterSystem
+                            ? GameSystem.MasterSystem
+                        : engine.IsPlayingGameGear
+                            ? GameSystem.GameGear
+                            : GameSystem.GameBoy;
+            var path = system switch
+            {
+                GameSystem.Snes => snesSelectedRomPath,
+                GameSystem.Nes => nesSelectedRomPath,
+                GameSystem.GameBoyAdvance => gameBoyAdvanceSelectedRomPath,
+                GameSystem.MasterSystem => masterSystemSelectedRomPath,
+                GameSystem.GameGear => gameGearSelectedRomPath,
+                _ => gameBoySelectedRomPath
+            };
+            var systemName = system switch
+            {
+                GameSystem.Snes => "Super Nintendo",
+                GameSystem.Nes => "Nintendo Entertainment System",
+                GameSystem.GameBoyAdvance => "Game Boy Advance",
+                GameSystem.MasterSystem => "Master System / SG-1000",
+                GameSystem.GameGear => "Game Gear",
+                _ => "Game Boy / Color"
+            };
+            var gameName = string.IsNullOrWhiteSpace(path) ? string.Empty : LibraryGameName(path);
+            return (string.IsNullOrWhiteSpace(gameName) ? $"{systemName} game" : gameName, systemName, FontAwesomeIcon.Gamepad);
+        }
 
-            ImGui.TextColored(
-                MutedText,
-                current.Source);
+        if (engine.IsPlayingBrowser)
+        {
+            return (engine.Browser?.Title ?? "Web Browser", "Alpha Channel Browser", FontAwesomeIcon.Globe);
+        }
 
-            ImGui.SetWindowFontScale(1f);
+        if (engine.IsPlayingLocalVideo)
+        {
+            var name = string.IsNullOrWhiteSpace(localVideoSelectedPath)
+                ? "Local Video"
+                : Path.GetFileNameWithoutExtension(localVideoSelectedPath);
+            return (name, "Local video", FontAwesomeIcon.Video);
+        }
+
+        if (engine.IsPlayingImage)
+        {
+            return (engine.GetMediaTitle() ?? "Images", "Image viewer", FontAwesomeIcon.Images);
+        }
+
+        var roomTitle = stream.CurrentRoomState?.MediaTitle;
+        return (string.IsNullOrWhiteSpace(roomTitle) ? "Watch Party media" : roomTitle, "Watch Party", FontAwesomeIcon.Tv);
+    }
+
+    private void DrawPlayerStatusMediaCard(
+        Video.VideoQueueEntry? current,
+        string title,
+        string source,
+        FontAwesomeIcon icon,
+        string status,
+        float position,
+        float duration)
+    {
+        var width = ImGui.GetContentRegionAvail().X;
+        var height = Ui(184f);
+
+        using (ImRaii.PushStyle(ImGuiStyleVar.ChildRounding, Ui(10f))
+                   .Push(ImGuiStyleVar.WindowPadding, UiVec(18f, 18f)))
+        using (ImRaii.PushColor(ImGuiCol.ChildBg, CardBg)
+                   .Push(ImGuiCol.Border, BorderSubtle))
+        {
+            ImGui.BeginChild("##playerStatusMedia", new Vector2(width, height), true, ImGuiWindowFlags.NoScrollbar);
+
+            var thumbSize = UiVec(230f, 130f);
+            var thumbOrigin = ImGui.GetCursorScreenPos();
+            DrawPlayerStatusThumbnail(current, icon, thumbOrigin, thumbSize);
+            ImGui.Dummy(thumbSize);
+
+            var actionsWidth = Ui(205f);
+            var detailsX = thumbOrigin.X + thumbSize.X + Ui(20f);
+            var detailsWidth = MathF.Max(Ui(120f), width - thumbSize.X - actionsWidth - Ui(76f));
+            ImGui.SetCursorScreenPos(new Vector2(detailsX, thumbOrigin.Y + Ui(12f)));
+
+            SetUiFontScale(1.08f);
+            ImGui.TextColored(Vector4.One, TruncateToWidth(title, detailsWidth));
+            SetUiFontScale(1f);
+
+            ImGui.Dummy(UiVec(0f, 6f));
+            DrawPlayerStatusPill(status);
+
+            if (!string.IsNullOrWhiteSpace(source))
+            {
+                ImGui.Dummy(UiVec(0f, 7f));
+                ImGui.TextColored(MutedText, TruncateToWidth(source, detailsWidth));
+            }
+
+            if (duration > 0f)
+            {
+                ImGui.Dummy(UiVec(0f, 6f));
+                ImGui.TextColored(MutedText, $"{FormatTime(position)} of {FormatTime(duration)}");
+            }
+
+            var actionX = thumbOrigin.X + width - actionsWidth - Ui(36f);
+            ImGui.SetCursorScreenPos(new Vector2(actionX, thumbOrigin.Y + Ui(18f)));
+            DrawPlayerTvButton(actionsWidth);
+            ImGui.SetCursorScreenPos(new Vector2(actionX, thumbOrigin.Y + Ui(76f)));
+            DrawPlayerStatusActionButton(
+                "##openMiniPlayerStatus",
+                FontAwesomeIcon.Expand,
+                "Open Mini Player",
+                actionsWidth,
+                false,
+                () => OnMiniPlayerRequested?.Invoke());
+
+            ImGui.EndChild();
         }
     }
 
-    private void DrawPlayerEmptyPreview(
+    private void DrawPlayerStatusThumbnail(
+        Video.VideoQueueEntry? current,
+        FontAwesomeIcon icon,
         Vector2 origin,
         Vector2 size)
     {
-        var drawList =
-            ImGui.GetWindowDrawList();
-
-        var icon =
-            FontAwesomeIcon.PlayCircle
-                .ToIconString();
-
-        Vector2 iconSize;
-
-        using (ImRaii.PushFont(
-                   UiBuilder.IconFont))
+        var drawList = ImGui.GetWindowDrawList();
+        var thumbnailUrl = current?.ThumbnailUrl ??
+                           (stream.Mode == StreamMode.Viewing
+                               ? stream.CurrentRoomState?.MediaThumbnailUrl
+                               : null);
+        var thumbnail = thumbnails.Get(thumbnailUrl);
+        if (thumbnail is not null)
         {
-            iconSize =
-                ImGui.CalcTextSize(icon);
-
-            drawList.AddText(
-                origin +
-                new Vector2(
-                    (size.X - iconSize.X) * 0.5f,
-                    size.Y * 0.5f - 34f),
-                ImGui.GetColorU32(
-                    new Vector4(
-                        Accent.X,
-                        Accent.Y,
-                        Accent.Z,
-                        0.75f)),
-                icon);
-        }
-
-        const string message =
-            "Choose a video to begin playing";
-
-        var messageSize =
-            ImGui.CalcTextSize(message);
-
-        drawList.AddText(
-            origin +
-            new Vector2(
-                (size.X - messageSize.X) * 0.5f,
-                size.Y * 0.5f + 5f),
-            ImGui.GetColorU32(
-                MutedText),
-            message);
-    }
-
-    private void DrawPlayerWaitingPreview(
-    Vector2 origin,
-    Vector2 size)
-    {
-        var engine =
-            screenController.Engine;
-
-        var drawList =
-            ImGui.GetWindowDrawList();
-
-        if (engine.IsActive &&
-            engine.PreviewTextureHandle != nint.Zero)
-        {
-            drawList.AddImageRounded(
-     new ImTextureID(
-         unchecked((ulong)engine.PreviewTextureHandle)),
-     origin,
-     origin + size,
-     Vector2.Zero,
-     Vector2.One,
-     uint.MaxValue,
-     10f);
-
+            drawList.AddImageRounded(thumbnail.Handle, origin, origin + size, Vector2.Zero, Vector2.One, uint.MaxValue, Ui(8f));
             return;
         }
 
-        const string message =
-            "Preparing video preview...";
-
-        var messageSize =
-            ImGui.CalcTextSize(message);
-
-        drawList.AddText(
-            origin +
-            new Vector2(
-                (size.X - messageSize.X) * 0.5f,
-                (size.Y - messageSize.Y) * 0.5f),
-            ImGui.GetColorU32(
-                MutedText),
-            message);
+        drawList.AddRectFilled(origin, origin + size, ImGui.GetColorU32(FrameBg), Ui(8f));
+        var iconText = icon.ToIconString();
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        {
+            var iconSize = ImGui.CalcTextSize(iconText);
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), origin + (size - iconSize) * 0.5f, ImGui.GetColorU32(Accent), iconText);
+        }
     }
 
-    private void DrawPlayerUpNext()
+    private void DrawPlayerStatusPill(string status)
     {
-        if (queue.Entries.Count == 0)
-        {
-            const float emptyHeight = 92f;
+        var color = status == "Playing" ? Good : status == "Paused" ? Accent : MutedText;
+        ImGui.TextColored(color, "●");
+        ImGui.SameLine(0f, Ui(6f));
+        ImGui.TextColored(color, status);
+    }
 
-            var origin =
-                ImGui.GetCursorScreenPos();
-
-            var width =
-                ImGui.GetContentRegionAvail().X;
-
-            var size =
-                new Vector2(
-                    width,
-                    emptyHeight);
-
-            var drawList =
-                ImGui.GetWindowDrawList();
-
-            drawList.AddRectFilled(
-                origin,
-                origin + size,
-                ImGui.GetColorU32(
-                    new Vector4(
-                        0.035f,
-                        0.045f,
-                        0.075f,
-                        1f)),
-                8f);
-
-            drawList.AddRect(
-                origin,
-                origin + size,
-                ImGui.GetColorU32(
-                    new Vector4(
-                        MutedText.X,
-                        MutedText.Y,
-                        MutedText.Z,
-                        0.12f)),
-                8f);
-
-            const string message =
-                "There's no video in the queue.";
-
-            var textSize =
-                ImGui.CalcTextSize(message);
-
-            drawList.AddText(
-                origin +
-                new Vector2(
-                    (size.X - textSize.X) * 0.5f,
-                    (size.Y - textSize.Y) * 0.5f),
-                ImGui.GetColorU32(
-                    MutedText),
-                message);
-
-            ImGui.Dummy(size);
-        }
-        else
-        {
-            var next =
-                queue.Entries[0];
-
-            var rowHeight = Ui(92f);
-            var thumbWidth = Ui(156f);
-
-            var origin =
-                ImGui.GetCursorScreenPos();
-
-            var width =
-                ImGui.GetContentRegionAvail().X;
-
-            var size =
-                new Vector2(
-                    width,
-                    rowHeight);
-
-            var drawList =
-                ImGui.GetWindowDrawList();
-
-            drawList.AddRectFilled(
-                origin,
-                origin + size,
-                ImGui.GetColorU32(
-                    new Vector4(
-                        0.045f,
-                        0.06f,
-                        0.10f,
-                        1f)),
-                8f);
-
-            var thumbnail =
-                thumbnails.Get(
-                    next.ThumbnailUrl);
-
-            if (thumbnail is not null)
+    private void DrawPlayerTvButton(float width)
+    {
+        var engine = screenController.Engine;
+        var spawned = stream.Mode == StreamMode.Viewing ? ViewerTvEnabled : engine.IsActive;
+        DrawPlayerStatusActionButton(
+            "##togglePlayerStatusTv",
+            spawned ? FontAwesomeIcon.Times : FontAwesomeIcon.Tv,
+            spawned ? "Despawn TV" : "Spawn TV",
+            width,
+            spawned,
+            () =>
             {
-                drawList.AddImageRounded(
-                    thumbnail.Handle,
-                    origin,
-                    origin +
-                    new Vector2(
-                        thumbWidth,
-                        rowHeight),
-                    Vector2.Zero,
-                    Vector2.One,
-                    uint.MaxValue,
-                    8f);
+                if (stream.Mode == StreamMode.Viewing)
+                {
+                    if (ViewerTvEnabled)
+                    {
+                        DespawnViewerTv(stopPlayback: !(IsMiniPlayerOpen?.Invoke() ?? false));
+                    }
+                    else
+                    {
+                        ViewerTvEnabled = true;
+                        OnViewerTvSpawnRequested?.Invoke();
+                    }
+                }
+                else if (engine.IsActive)
+                {
+                    engine.DespawnScreen();
+                }
+                else
+                {
+                    engine.RespawnScreen();
+                }
+            });
+    }
+
+    private void DrawPlayerViewingModeCard(float width)
+    {
+        using (ImRaii.PushStyle(ImGuiStyleVar.ChildRounding, Ui(10f))
+                   .Push(ImGuiStyleVar.WindowPadding, UiVec(18f, 16f)))
+        using (ImRaii.PushColor(ImGuiCol.ChildBg, CardBg)
+                   .Push(ImGuiCol.Border, BorderSubtle))
+        {
+            ImGui.BeginChild("##playerViewingMode", new Vector2(width, Ui(215f)), true, ImGuiWindowFlags.NoScrollbar);
+            DrawPlayerCardLabel("VIEWING MODE");
+            ImGui.Dummy(UiVec(0f, 8f));
+
+            var heading = stream.Mode switch
+            {
+                StreamMode.Hosting => "Hosting Watch Party",
+                StreamMode.Viewing => $"Watching with {joinedHostDisplayName ?? "the host"}",
+                _ => "Playing solo"
+            };
+            var detail = stream.Mode switch
+            {
+                StreamMode.Hosting => stream.Roster.Length == 1 ? "1 viewer is watching with you." : $"{stream.Roster.Length} viewers are watching with you.",
+                StreamMode.Viewing => "Playback is synced to the host.",
+                _ => "Only you can currently see this."
+            };
+            ImGui.TextColored(Good, "●");
+            ImGui.SameLine(0f, Ui(6f));
+            ImGui.TextColored(Vector4.One, heading);
+            ImGui.Dummy(UiVec(0f, 5f));
+            ImGui.TextColored(MutedText, detail);
+            ImGui.Dummy(UiVec(0f, 18f));
+
+            DrawPlayerStatusActionButton(
+                "##playerWatchPartyAction",
+                FontAwesomeIcon.Users,
+                stream.Mode == StreamMode.None ? "Create Watch Party" : "Open Watch Party",
+                ImGui.GetContentRegionAvail().X,
+                stream.Mode == StreamMode.None,
+                () => currentPage = HomePage.WatchAlong);
+            ImGui.EndChild();
+        }
+    }
+
+    private void DrawPlayerCompactQueueCard(float width)
+    {
+        using (ImRaii.PushStyle(ImGuiStyleVar.ChildRounding, Ui(10f))
+                   .Push(ImGuiStyleVar.WindowPadding, UiVec(18f, 16f)))
+        using (ImRaii.PushColor(ImGuiCol.ChildBg, CardBg)
+                   .Push(ImGuiCol.Border, BorderSubtle))
+        {
+            ImGui.BeginChild("##playerCompactQueue", new Vector2(width, Ui(215f)), true, ImGuiWindowFlags.NoScrollbar);
+            DrawPlayerCardLabel("UP NEXT");
+            ImGui.Dummy(UiVec(0f, 9f));
+
+            if (queue.Entries.Count == 0)
+            {
+                ImGui.TextColored(Vector4.One, "Nothing queued");
+                ImGui.Dummy(UiVec(0f, 5f));
+                ImGui.TextColored(MutedText, "Add media whenever you're ready.");
             }
             else
             {
-                drawList.AddRectFilled(
-                    origin,
-                    origin +
-                    new Vector2(
-                        thumbWidth,
-                        rowHeight),
-                    ImGui.GetColorU32(
-                        new Vector4(
-                            0.025f,
-                            0.032f,
-                            0.055f,
-                            1f)),
-                    8f);
+                var next = queue.Entries[0];
+                ImGui.TextColored(Vector4.One, TruncateToWidth(next.Title, ImGui.GetContentRegionAvail().X));
+                ImGui.Dummy(UiVec(0f, 5f));
+                var nextDetail = next.Duration is { } nextDuration
+                    ? $"{next.Source}  •  {FormatTime((float)nextDuration.TotalSeconds)}"
+                    : next.Source;
+                ImGui.TextColored(MutedText, TruncateToWidth(nextDetail, ImGui.GetContentRegionAvail().X));
             }
 
-            var contentX =
-                origin.X +
-                thumbWidth +
-                14f;
+            ImGui.SetCursorPosY(Ui(150f));
+            DrawPlayerStatusActionButton(
+                "##viewPlayerQueue",
+                FontAwesomeIcon.List,
+                "View Queue",
+                ImGui.GetContentRegionAvail().X,
+                false,
+                () => activePlayerDrawer = PlayerDrawer.Queue);
+            ImGui.EndChild();
+        }
+    }
 
-            ImGui.SetCursorScreenPos(
-                new Vector2(
-                    contentX,
-                    origin.Y + 17f));
+    private void DrawPlayerCardLabel(string text)
+    {
+        SetUiFontScale(0.78f);
+        ImGui.TextColored(MutedText, text);
+        SetUiFontScale(1f);
+    }
 
-            ImGui.TextColored(
-                Vector4.One,
-                next.Title);
+    private void DrawPlayerStatusEmptyState()
+    {
+        using (ImRaii.PushStyle(ImGuiStyleVar.ChildRounding, Ui(10f))
+                   .Push(ImGuiStyleVar.WindowPadding, UiVec(24f, 24f)))
+        using (ImRaii.PushColor(ImGuiCol.ChildBg, CardBg)
+                   .Push(ImGuiCol.Border, BorderSubtle))
+        {
+            ImGui.BeginChild("##playerStatusEmpty", new Vector2(ImGui.GetContentRegionAvail().X, Ui(300f)), true, ImGuiWindowFlags.NoScrollbar);
+            var contentWidth = ImGui.GetContentRegionAvail().X;
+            ImGui.Dummy(UiVec(0f, 48f));
+            DrawCenteredPlayerIcon(FontAwesomeIcon.Tv);
+            ImGui.Dummy(UiVec(0f, 14f));
+            DrawCenteredPlayerText("Nothing is playing", Vector4.One, 1.12f);
+            ImGui.Dummy(UiVec(0f, 6f));
+            DrawCenteredPlayerText("Choose something from Add Media to put it on your TV.", MutedText, 0.88f);
+            ImGui.Dummy(UiVec(0f, 24f));
 
-            if (!string.IsNullOrWhiteSpace(
-                    next.Source))
+            var buttonWidth = Ui(190f);
+            var gap = Ui(12f);
+            ImGui.SetCursorPosX(Ui(24f) + MathF.Max(0f, (contentWidth - buttonWidth * 2f - gap) * 0.5f));
+            DrawPlayerStatusActionButton("##emptyAddMedia", FontAwesomeIcon.Plus, "Add Media", buttonWidth, true, () => activePlayerDrawer = PlayerDrawer.PlayVideo);
+            ImGui.SameLine(0f, gap);
+            DrawPlayerStatusActionButton("##emptyWatchParty", FontAwesomeIcon.Users, stream.Mode == StreamMode.None ? "Create Watch Party" : "Open Watch Party", buttonWidth, false, () => currentPage = HomePage.WatchAlong);
+            ImGui.EndChild();
+        }
+    }
+
+    private static void DrawCenteredPlayerIcon(FontAwesomeIcon icon)
+    {
+        var text = icon.ToIconString();
+        using (ImRaii.PushFont(UiBuilder.IconFont))
+        {
+            ImGui.SetCursorPosX((ImGui.GetWindowSize().X - ImGui.CalcTextSize(text).X) * 0.5f);
+            ImGui.TextColored(Accent, text);
+        }
+    }
+
+    private void DrawCenteredPlayerText(string text, Vector4 color, float scale)
+    {
+        SetUiFontScale(scale);
+        ImGui.SetCursorPosX((ImGui.GetWindowSize().X - ImGui.CalcTextSize(text).X) * 0.5f);
+        ImGui.TextColored(color, text);
+        SetUiFontScale(1f);
+    }
+
+    private void DrawPlayerStatusActionButton(
+        string id,
+        FontAwesomeIcon icon,
+        string label,
+        float width,
+        bool primary,
+        Action action)
+    {
+        var background = primary ? Accent : FrameBg;
+        var hover = primary ? AccentHover : FrameBgHover;
+        using (ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, Ui(8f)))
+        using (ImRaii.PushColor(ImGuiCol.Button, background)
+                   .Push(ImGuiCol.ButtonHovered, hover)
+                   .Push(ImGuiCol.ButtonActive, primary ? AccentActive : hover))
+        {
+            var position = ImGui.GetCursorScreenPos();
+            var size = new Vector2(width, Ui(40f));
+            if (ImGui.Button(id, size))
             {
-                ImGui.SetCursorScreenPos(
-                    new Vector2(
-                        contentX,
-                        origin.Y + 48f));
-
-                ImGui.SetWindowFontScale(0.86f);
-
-                ImGui.TextColored(
-                    MutedText,
-                    next.Source);
-
-                ImGui.SetWindowFontScale(1f);
+                action();
             }
-
-            ImGui.SetCursorScreenPos(
-                new Vector2(
-                    origin.X,
-                    origin.Y + rowHeight));
-
-            ImGui.Dummy(
-                new Vector2(
-                    width,
-                    1f));
+            DrawPlayerActionButtonContent(position, size, icon, label, Vector4.One);
         }
     }
 
@@ -684,19 +766,29 @@ internal sealed partial class MainWindow
             pendingPlayerSearch = null;
         }
 
-        DrawPlayerSourceTabs();
+        if (showingAddMediaSources)
+        {
+            DrawAddMediaSourceLanding();
+            return;
+        }
+
+        if (ImGui.Button(
+                "\u2039  All media sources##allMediaSources",
+                UiVec(190f, 36f)))
+        {
+            showingAddMediaSources =
+                true;
+
+            return;
+        }
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 8f));
 
         ImGui.Separator();
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 12f));
 
         switch (playerSourceTab)
         {
@@ -734,6 +826,551 @@ internal sealed partial class MainWindow
         }
     }
 
+    private void DrawAddMediaSourceLanding()
+    {
+        var sectionGap = Ui(12f);
+        var headingGap = Ui(2f);
+        var searchRowTop = ImGui.GetCursorPosY();
+
+        DrawAddMediaVideoSearch();
+
+        ImGui.SetCursorPosY(
+            searchRowTop +
+            Ui(36f) +
+            sectionGap);
+
+        var sourceHeadingTop = ImGui.GetCursorPosY();
+        var sourceHeadingHeight = ImGui.GetTextLineHeight();
+
+        ImGui.TextColored(
+            Vector4.One,
+            "Choose a media source:");
+
+        ImGui.SetCursorPosY(
+            sourceHeadingTop +
+            sourceHeadingHeight +
+            headingGap);
+
+        SetUiFontScale(
+            0.88f);
+
+        var sourceSubtitleTop = ImGui.GetCursorPosY();
+        var sourceSubtitleHeight = ImGui.GetTextLineHeight();
+
+        ImGui.TextColored(
+            MutedText,
+            "Select a media source to play on your Alpha Channel TV.");
+
+        SetUiFontScale(
+            1f);
+
+        ImGui.SetCursorPosY(
+            sourceSubtitleTop +
+            sourceSubtitleHeight +
+            sectionGap);
+
+        var availableWidth =
+            ImGui.GetContentRegionAvail().X;
+
+        var cardGap = Ui(12f);
+
+        var cardHeight = Ui(62f);
+
+        var columnWidth =
+            (availableWidth -
+             (cardGap * 2f)) /
+            3f;
+
+        var twoColumnWidth =
+            (columnWidth * 2f) +
+             cardGap;
+
+        var halfWidth =
+            (availableWidth -
+              cardGap) /
+            2f;
+
+        //
+        // =========================================================
+        // Row 1
+        //
+        // Web Link spans two columns because it is the general
+        // quick-play option. YouTube occupies the third column.
+        // =========================================================
+        //
+
+        var sourceRowTop = ImGui.GetCursorPosY();
+
+        DrawAddMediaSourceCard(
+            "webLink",
+            FontAwesomeIcon.Link,
+            "Web Link",
+            "Paste a supported video or webpage URL.",
+            new Vector2(
+                twoColumnWidth,
+                cardHeight),
+            () => OpenAddMediaSource(0));
+
+        ImGui.SameLine(
+            0f,
+            cardGap);
+
+        DrawAddMediaSourceCard(
+            "youtube",
+            FontAwesomeIcon.PlayCircle,
+            "YouTube",
+            "Search or paste a YouTube link.",
+            new Vector2(
+                columnWidth,
+                cardHeight),
+            () => OpenAddMediaSource(1));
+
+        ImGui.SetCursorPosY(
+            sourceRowTop +
+            cardHeight +
+            cardGap);
+
+        //
+        // =========================================================
+        // Row 2
+        //
+        // Twitch | Dailymotion | Stream Live
+        // =========================================================
+        //
+
+        sourceRowTop = ImGui.GetCursorPosY();
+
+        DrawAddMediaSourceCard(
+            "twitch",
+            FontAwesomeIcon.Tv,
+            "Twitch",
+            "Watch any live Twitch channel",
+            new Vector2(
+                columnWidth,
+                cardHeight),
+            () => OpenAddMediaSource(2));
+
+        ImGui.SameLine(
+            0f,
+            cardGap);
+
+        DrawAddMediaSourceCard(
+            "dailymotion",
+            FontAwesomeIcon.Film,
+            "Dailymotion",
+            "Search for Dailymotion videos.",
+            new Vector2(
+                columnWidth,
+                cardHeight),
+            () => OpenAddMediaSource(3));
+
+        ImGui.SameLine(
+            0f,
+            cardGap);
+
+        DrawAddMediaSourceCard(
+            "streamLive",
+            FontAwesomeIcon.BroadcastTower,
+            "Stream Live",
+            "Live stream from your PC",
+            new Vector2(
+                columnWidth,
+                cardHeight),
+            () => OpenAddMediaSource(4));
+
+        ImGui.SetCursorPosY(
+            sourceRowTop +
+            cardHeight +
+            cardGap);
+
+        //
+        // =========================================================
+        // Row 3
+        //
+        // Music / DJ | Images / Slideshows | Local Video
+        // =========================================================
+        //
+
+        sourceRowTop = ImGui.GetCursorPosY();
+
+        DrawAddMediaSourceCard(
+            "musicDj",
+            FontAwesomeIcon.Music,
+            "Radio / DJ Live",
+            "Play radio streams or DJ live",
+            new Vector2(
+                columnWidth,
+                cardHeight),
+            () => OpenAddMediaSource(5));
+
+        ImGui.SameLine(
+            0f,
+            cardGap);
+
+        DrawAddMediaSourceCard(
+            "images",
+            FontAwesomeIcon.Images,
+            "Images / Slideshows",
+            "Show an image or slideshow.",
+            new Vector2(
+                columnWidth,
+                cardHeight),
+            () => OpenAddMediaSource(6));
+
+        ImGui.SameLine(
+            0f,
+            cardGap);
+
+        DrawAddMediaSourceCard(
+            "localVideo",
+            FontAwesomeIcon.Film,
+            "Local Video",
+            "Play a video from your computer.",
+            new Vector2(
+                columnWidth,
+                cardHeight),
+            () => OpenAddMediaSource(7));
+
+        ImGui.SetCursorPosY(
+            sourceRowTop +
+            cardHeight +
+            sectionGap);
+
+        //
+        // =========================================================
+        // Retro Games
+        // =========================================================
+        //
+
+        DrawAddMediaCategory(
+            "RETRO GAMES",
+            sectionGap);
+
+        var gameRowTop = ImGui.GetCursorPosY();
+
+        DrawAddMediaSourceCard(
+            "snes",
+            FontAwesomeIcon.Gamepad,
+            "SNES",
+            "Play a Super Nintendo game.",
+            new Vector2(
+                halfWidth,
+                cardHeight),
+            () =>
+            {
+                selectedGameSystem =
+                    GameSystem.Snes;
+
+                currentPage =
+                    HomePage.PlaySnes;
+            });
+
+        ImGui.SameLine(
+            0f,
+            cardGap);
+
+        DrawAddMediaSourceCard(
+            "gameBoy",
+            FontAwesomeIcon.Gamepad,
+            "Game Boy",
+            "Play a Game Boy game.",
+            new Vector2(
+                halfWidth,
+                cardHeight),
+            () =>
+            {
+                selectedGameSystem =
+                    GameSystem.GameBoy;
+
+                currentPage =
+                    HomePage.PlaySnes;
+            });
+
+        ImGui.SetCursorPosY(
+            gameRowTop +
+            cardHeight +
+            cardGap);
+
+        gameRowTop = ImGui.GetCursorPosY();
+
+        DrawAddMediaSourceCard(
+            "nes",
+            FontAwesomeIcon.Gamepad,
+            "NES",
+            "Play a Nintendo Entertainment System game.",
+            new Vector2(
+                halfWidth,
+                cardHeight),
+            () =>
+            {
+                selectedGameSystem =
+                    GameSystem.Nes;
+
+                currentPage =
+                    HomePage.PlaySnes;
+            });
+
+        ImGui.SameLine(
+            0f,
+            cardGap);
+
+        DrawAddMediaSourceCard(
+            "gameBoyAdvance",
+            FontAwesomeIcon.Gamepad,
+            "Game Boy Advance",
+            "Play a Game Boy Advance game.",
+            new Vector2(
+                halfWidth,
+                cardHeight),
+            () =>
+            {
+                selectedGameSystem =
+                    GameSystem.GameBoyAdvance;
+
+                currentPage =
+                    HomePage.PlaySnes;
+            });
+
+        ImGui.SetCursorPosY(
+            gameRowTop +
+            cardHeight +
+            cardGap);
+
+        DrawAddMediaSourceCard(
+            "masterSystem",
+            FontAwesomeIcon.Gamepad,
+            "Master System / SG-1000",
+            "Play a Sega Master System or SG-1000 game.",
+            new Vector2(
+                halfWidth,
+                cardHeight),
+            () =>
+            {
+                selectedGameSystem =
+                    GameSystem.MasterSystem;
+
+                currentPage =
+                    HomePage.PlaySnes;
+            });
+
+        ImGui.SameLine(
+            0f,
+            cardGap);
+
+        DrawAddMediaSourceCard(
+            "gameGear",
+            FontAwesomeIcon.Gamepad,
+            "Game Gear",
+            "Play a Sega Game Gear game.",
+            new Vector2(
+                halfWidth,
+                cardHeight),
+            () =>
+            {
+                selectedGameSystem =
+                    GameSystem.GameGear;
+
+                currentPage =
+                    HomePage.PlaySnes;
+            });
+    }
+
+    private void DrawAddMediaVideoSearch()
+    {
+        var buttonWidth = Ui(128f);
+        ImGui.SetNextItemWidth(MathF.Max(
+            Ui(180f),
+            ImGui.GetContentRegionAvail().X - buttonWidth - Ui(10f)));
+        var submitted = ImGui.InputTextWithHint(
+            "##addMediaVideoSearch",
+            "Find videos by search term...",
+            ref addMediaVideoSearchQuery,
+            300,
+            ImGuiInputTextFlags.EnterReturnsTrue);
+        ImGui.SameLine(0f, Ui(10f));
+        using (ImRaii.Disabled(string.IsNullOrWhiteSpace(addMediaVideoSearchQuery)))
+        {
+            submitted |= GameLayoutButton(
+                "Search Videos",
+                FontAwesomeIcon.Search,
+                buttonWidth,
+                true,
+                height: 36f);
+        }
+
+        if (submitted && !string.IsNullOrWhiteSpace(addMediaVideoSearchQuery))
+        {
+            var query = addMediaVideoSearchQuery.Trim();
+            addMediaVideoSearchQuery = string.Empty;
+            OpenUnifiedVideoSearch(query);
+        }
+    }
+
+    private void DrawAddMediaCategory(
+        string title,
+        float bottomGap)
+    {
+        SetUiFontScale(
+            0.78f);
+
+        var categoryTop = ImGui.GetCursorPosY();
+        var categoryHeight = ImGui.GetTextLineHeight();
+
+        ImGui.TextColored(
+            MutedText,
+            title);
+
+        SetUiFontScale(
+            1f);
+
+        ImGui.SetCursorPosY(
+            categoryTop +
+            categoryHeight +
+            bottomGap);
+    }
+
+    private void OpenAddMediaSource(
+        int sourceTab)
+    {
+        playerSourceTab =
+            sourceTab;
+
+        showingAddMediaSources =
+            false;
+    }
+
+    private void DrawAddMediaSourceCard(
+        string id,
+        FontAwesomeIcon icon,
+        string title,
+        string description,
+        Vector2 size,
+        Action onClick)
+    {
+        var origin =
+            ImGui.GetCursorScreenPos();
+
+        var clicked =
+            ImGui.InvisibleButton(
+                $"##addMediaSource_{id}",
+                size);
+
+        var hovered =
+            ImGui.IsItemHovered();
+
+        if (clicked)
+        {
+            onClick();
+        }
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        var minimum =
+            origin;
+
+        var maximum =
+            origin + size;
+
+        var background =
+            hovered
+                ? new Vector4(
+                    0.085f,
+                    0.10f,
+                    0.16f,
+                    1f)
+                : new Vector4(
+                    0.055f,
+                    0.065f,
+                    0.105f,
+                    1f);
+
+        var border =
+            hovered
+                ? Accent
+                : new Vector4(
+                    MutedText.X,
+                    MutedText.Y,
+                    MutedText.Z,
+                    0.22f);
+
+        drawList.AddRectFilled(
+            minimum,
+            maximum,
+            ImGui.GetColorU32(
+                background),
+            9f);
+
+        drawList.AddRect(
+            minimum,
+            maximum,
+            ImGui.GetColorU32(
+                border),
+            9f,
+            ImDrawFlags.None,
+            hovered ? 1.5f : 1f);
+
+        var iconText =
+            icon.ToIconString();
+
+        var iconPosition =
+            new Vector2(
+                minimum.X + Ui(20f),
+                minimum.Y + Ui(20f));
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                iconPosition,
+                ImGui.GetColorU32(
+                    hovered
+                        ? AccentHover
+                        : Accent),
+                iconText);
+        }
+
+        var textLeft =
+            minimum.X + 52f;
+
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            new Vector2(
+                textLeft,
+                minimum.Y + Ui(15f)),
+            ImGui.GetColorU32(
+                Vector4.One),
+            title);
+
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            new Vector2(
+                textLeft,
+                minimum.Y + Ui(38f)),
+            ImGui.GetColorU32(
+                MutedText),
+            description);
+
+        var arrow =
+            "\u203A";
+
+        var arrowSize =
+            ImGui.CalcTextSize(
+                arrow);
+
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            new Vector2(
+                maximum.X -
+                arrowSize.X -
+                Ui(18f),
+                minimum.Y +
+                ((size.Y - arrowSize.Y) *
+                 0.5f)),
+            ImGui.GetColorU32(
+                hovered
+                    ? AccentHover
+                    : MutedText),
+            arrow);
+    }
+
     private void DrawQueueDrawer()
     {
         DrawQueue();
@@ -752,22 +1389,18 @@ internal sealed partial class MainWindow
             "SOURCE");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 8f));
 
 
         var availableWidth =
             ImGui.GetContentRegionAvail().X;
 
-        const float categoryWidth =
-            92f;
+        var categoryWidth = Ui(92f);
 
         const float gap =
             10f;
 
-        const float buttonHeight =
-            44f;
+        var buttonHeight = Ui(44f);
 
 
         //
@@ -875,7 +1508,7 @@ internal sealed partial class MainWindow
                 onlineLabelStart.X,
                 onlineLabelStart.Y +
                 buttonHeight +
-                10f));
+                Ui(10f)));
 
 
         //
@@ -1119,8 +1752,7 @@ internal sealed partial class MainWindow
             ImGui.CalcTextSize(
                 title);
 
-        const float contentGap =
-            10f;
+        var contentGap = Ui(10f);
 
 
         var contentWidth =
@@ -1146,7 +1778,7 @@ internal sealed partial class MainWindow
         using (ImRaii.PushFont(
             UiBuilder.IconFont))
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 contentStart,
                 ImGui.GetColorU32(
                     selected
@@ -1160,7 +1792,7 @@ internal sealed partial class MainWindow
         // Label
         //
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 contentStart.X +
                 iconSize.X +
@@ -1171,6 +1803,931 @@ internal sealed partial class MainWindow
             title);
     }
 
+    private void BeginLocalVideoWatchPartyBroadcast(
+    bool startPlayback)
+    {
+        if (!HasConfirmedPatreonAccess())
+        {
+            localVideoError =
+                "A Patreon membership is required to broadcast local videos.";
+
+            return;
+        }
+
+        if (stream.Mode ==
+            StreamMode.Viewing)
+        {
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] Leave your current Watch Party before broadcasting a local video.");
+
+            return;
+        }
+
+        if (stream.Mode ==
+            StreamMode.Hosting)
+        {
+            StartLocalVideoBroadcastInHostedRoom(
+                startPlayback);
+
+            return;
+        }
+
+        if (!startPlayback)
+        {
+            pendingLocalVideoResumePosition =
+                MathF.Max(
+                    0f,
+                    video.GetProgress().Position);
+        }
+        else
+        {
+            pendingLocalVideoResumePosition =
+                0f;
+        }
+
+        pendingWatchPartyMediaKind =
+            startPlayback
+                ? PendingWatchPartyMediaKind.LocalVideoStartAndBroadcast
+                : PendingWatchPartyMediaKind.LocalVideoCurrentPlaybackBroadcast;
+
+        watchPartyCreationPopupOpen =
+            true;
+
+        createRoomPassword =
+            string.Empty;
+
+        createLockedRoomPasswordError =
+            null;
+    }
+
+    private void StartLocalVideoBroadcastInHostedRoom(
+    bool startPlayback,
+    bool navigateToWatchParty = false)
+    {
+        if (!HasConfirmedPatreonAccess())
+        {
+            localVideoError =
+                "A Patreon membership is required to broadcast local videos.";
+
+            return;
+        }
+
+        if (stream.Mode !=
+            StreamMode.Hosting)
+        {
+            return;
+        }
+
+        if (startPlayback)
+        {
+            pendingLocalVideoResumePosition =
+                0f;
+
+            StartSelectedLocalVideo(
+                broadcast: true);
+        }
+        else
+        {
+            //
+            // Creating a Watch Party rebuilds the TV and therefore stops
+            // the existing local MPV playback. Restore the selected file
+            // at the position captured before opening the popup.
+            //
+
+            if (!video.IsPlayingLocalVideo)
+            {
+                if (string.IsNullOrWhiteSpace(
+                        localVideoSelectedPath) ||
+                    !File.Exists(
+                        localVideoSelectedPath))
+                {
+                    localVideoError =
+                        "The selected local video file could not be found.";
+
+                    return;
+                }
+
+                var resumed =
+                    video.PlayLocalVideo(
+                        localVideoSelectedPath);
+
+                if (!resumed)
+                {
+                    localVideoError =
+                        video.LastError ??
+                        "Local video playback could not be resumed.";
+
+                    return;
+                }
+
+                video.SetOverlayTitle(
+                    Path.GetFileNameWithoutExtension(
+                        localVideoSelectedPath),
+                    "Local Video");
+
+                if (pendingLocalVideoResumePosition >
+                    0f)
+                {
+                    video.Seek(
+                        pendingLocalVideoResumePosition);
+                }
+            }
+
+            if (!StartLocalVideoWatchPartyBroadcast())
+            {
+                return;
+            }
+
+            pendingLocalVideoResumePosition =
+                0f;
+        }
+
+        if (!localVideoBroadcastArmed)
+        {
+            return;
+        }
+
+        if (navigateToWatchParty)
+        {
+            currentPage =
+                HomePage.WatchAlong;
+
+            partyPanelTab =
+                PartyPanelTab.NowPlaying;
+        }
+    }
+
+    private bool StartLocalVideoWatchPartyBroadcast()
+    {
+        if (!HasConfirmedPatreonAccess())
+        {
+            localVideoError =
+                "A Patreon membership is required to broadcast local videos.";
+
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] A Patreon membership is required to broadcast local videos.");
+
+            return false;
+        }
+
+        if (stream.Mode !=
+            StreamMode.Hosting)
+        {
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] Host a Watch Party before broadcasting a local video.");
+
+            return false;
+        }
+
+        if (!video.IsPlayingLocalVideo)
+        {
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] Start the local video before broadcasting it.");
+
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(
+                localVideoSelectedPath) ||
+            !File.Exists(
+                localVideoSelectedPath))
+        {
+            localVideoError =
+                "The selected local video file could not be found.";
+
+            return false;
+        }
+
+        if (CurrentSession is not { } session)
+        {
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] Sign in before broadcasting a local video.");
+
+            return false;
+        }
+
+        var streamKey =
+            Plugin.Cfg.StreamKeys
+                .GetValueOrDefault(
+                    session.AccountId);
+
+        if (string.IsNullOrWhiteSpace(
+                streamKey))
+        {
+            localVideoError =
+                "No stream key is available. Generate one from Settings > Account first.";
+
+            return false;
+        }
+
+        //
+        // A single account has one MediaMTX live path. Make sure an old
+        // emulator broadcaster cannot continue owning it.
+        //
+
+        StopGameWatchPartyBroadcast();
+        StopLocalVideoWatchPartyBroadcast();
+
+        screenController.Engine
+            .StopLocalVideoBroadcast();
+
+        localVideoBroadcastPublishUrl =
+            $"{BuildRtmpServer()}/{streamKey}";
+
+        localVideoBroadcastHlsUrl =
+    $"{BuildMyHlsUrl(session)}" +
+    $"?broadcast={Guid.NewGuid():N}";
+
+        localVideoBroadcastStartFailed =
+            false;
+
+        localVideoBroadcastEncoderExpectedRunning =
+            false;
+
+        localVideoBroadcastPaused =
+            false;
+
+        localVideoBroadcastArmed =
+            true;
+
+        localVideoError =
+            null;
+
+        //
+        // Advertise only the public HLS URL. The RTMP URL contains the
+        // private stream key and must never be sent through stream.state.
+        //
+
+        _ = PublishLocalVideoWatchPartyAsync(
+            localVideoBroadcastHlsUrl);
+
+        Plugin.ChatGui.Print(
+            stream.Roster.Length > 0
+                ? "[AlphaChannel] Local video broadcast enabled. Upload will start now."
+                : "[AlphaChannel] Local video broadcast enabled. Uploading will begin when a viewer joins.");
+
+        return true;
+    }
+
+
+    private async Task PublishLocalVideoWatchPartyAsync(
+        string hlsUrl)
+    {
+        if (string.IsNullOrWhiteSpace(
+                hlsUrl))
+        {
+            return;
+        }
+
+        var videoName =
+         string.IsNullOrWhiteSpace(
+             localVideoSelectedPath)
+             ? string.Empty
+             : Path.GetFileNameWithoutExtension(
+                 localVideoSelectedPath);
+
+        var title =
+            ActiveLocalVideoBroadcastTitle ??
+            "Local Video";
+
+        await stream.PublishStateAsync(
+            hlsUrl,
+            0d,
+            false,
+            screenController.Engine.ScreenPosition,
+            screenController.Engine.ScreenYaw,
+            screenController.Engine.ScreenScale,
+            title,
+            null);
+    }
+
+
+    internal void UpdateLocalVideoBroadcastDemand()
+    {
+        if (!localVideoBroadcastArmed)
+        {
+            return;
+        }
+
+        if (!HasConfirmedPatreonAccess())
+        {
+            StopLocalVideoWatchPartyBroadcast();
+            return;
+        }
+
+        var engine =
+            screenController.Engine;
+
+        //
+        // Disarm when the room closes, hosting transfers away, the local
+        // video stops, or its original file is no longer available.
+        //
+
+        if (stream.Mode != StreamMode.Hosting ||
+            !video.IsPlayingLocalVideo ||
+            string.IsNullOrWhiteSpace(
+                localVideoSelectedPath) ||
+            !File.Exists(
+                localVideoSelectedPath) ||
+            string.IsNullOrWhiteSpace(
+                localVideoBroadcastPublishUrl))
+        {
+            StopLocalVideoWatchPartyBroadcast();
+            return;
+        }
+
+        var (position, duration, paused) =
+            video.GetProgress();
+
+        localVideoBroadcastPaused =
+            paused;
+
+        //
+        // Stop cleanly at the end instead of repeatedly launching FFmpeg
+        // at the final frame.
+        //
+
+        if (duration > 0f &&
+            position >=
+            duration - 0.75f)
+        {
+            StopLocalVideoWatchPartyBroadcast();
+            return;
+        }
+
+        var hasViewer =
+            stream.Roster.Length > 0;
+
+        //
+        // Pausing the host or losing the last viewer stops network upload.
+        // On resume/rejoin, FFmpeg starts again at MPV's current timestamp.
+        //
+
+        if (!hasViewer ||
+            paused)
+        {
+            localVideoBroadcastEncoderExpectedRunning =
+                false;
+
+            if (engine.IsLocalVideoBroadcasting)
+            {
+                engine.StopLocalVideoBroadcast();
+            }
+
+            localVideoBroadcastStartFailed =
+                false;
+
+            return;
+        }
+
+        var encoderRunning =
+            engine.IsLocalVideoBroadcasting;
+
+        //
+        // If FFmpeg was expected to remain alive but exited, report the
+        // failure and avoid relaunching it every framework frame.
+        //
+
+        if (localVideoBroadcastEncoderExpectedRunning &&
+            !encoderRunning)
+        {
+            localVideoBroadcastEncoderExpectedRunning =
+                false;
+
+            localVideoBroadcastStartFailed =
+                true;
+
+            localVideoError =
+                engine.LocalVideoBroadcastError ??
+                "The local video relay encoder stopped unexpectedly.";
+
+            return;
+        }
+
+        if (encoderRunning)
+        {
+            //
+            // Detect a host seek. Small differences are normal because MPV
+            // and FFmpeg begin independently. A large difference after the
+            // startup grace period means FFmpeg should be restarted at MPV's
+            // new timestamp.
+            //
+
+            var runningFor =
+                DateTime.UtcNow -
+                localVideoBroadcastStartTimeUtc;
+
+            var expectedPosition =
+                localVideoBroadcastStartPosition +
+                runningFor.TotalSeconds;
+
+            var drift =
+                Math.Abs(
+                    position -
+                    expectedPosition);
+
+            if (runningFor <
+                    TimeSpan.FromSeconds(5) ||
+                drift <= 4d)
+            {
+                return;
+            }
+
+            localVideoBroadcastEncoderExpectedRunning =
+                false;
+
+            engine.StopLocalVideoBroadcast();
+
+            localVideoBroadcastStartFailed =
+                false;
+        }
+
+        if (localVideoBroadcastStartFailed)
+        {
+            return;
+        }
+
+        var started =
+            engine.StartLocalVideoBroadcast(
+                localVideoSelectedPath,
+                localVideoBroadcastPublishUrl,
+                position);
+
+        if (!started)
+        {
+            localVideoBroadcastStartFailed =
+                true;
+
+            localVideoBroadcastEncoderExpectedRunning =
+                false;
+
+            localVideoError =
+                engine.LastError ??
+                engine.LocalVideoBroadcastError ??
+                "The local video broadcast could not be started.";
+
+            return;
+        }
+
+        localVideoBroadcastStartPosition =
+            position;
+
+        localVideoBroadcastStartTimeUtc =
+            DateTime.UtcNow;
+
+        localVideoBroadcastEncoderExpectedRunning =
+            true;
+
+        localVideoError =
+            null;
+
+        Plugin.ChatGui.Print(
+            "[AlphaChannel] A viewer joined. Local video upload started.");
+    }
+
+
+    private void StopLocalVideoWatchPartyBroadcast()
+    {
+        localVideoBroadcastEncoderExpectedRunning =
+            false;
+
+        screenController.Engine
+            .StopLocalVideoBroadcast();
+
+        localVideoBroadcastArmed =
+            false;
+
+        localVideoBroadcastStartFailed =
+            false;
+
+        localVideoBroadcastPaused =
+            false;
+
+        localVideoBroadcastPublishUrl =
+            null;
+
+        localVideoBroadcastHlsUrl =
+            null;
+    }
+
+    private void StartSelectedLocalVideo(
+    bool broadcast)
+    {
+        localVideoError =
+            null;
+
+        if (string.IsNullOrWhiteSpace(
+                localVideoSelectedPath) ||
+            !File.Exists(
+                localVideoSelectedPath))
+        {
+            localVideoError =
+                "The selected local video file could not be found.";
+
+            return;
+        }
+
+        var started =
+            video.PlayLocalVideo(
+                localVideoSelectedPath);
+
+        if (!started)
+        {
+            localVideoError =
+                video.LastError ??
+                "Local video playback could not be started.";
+
+            return;
+        }
+
+        video.SetOverlayTitle(
+            Path.GetFileNameWithoutExtension(
+                localVideoSelectedPath),
+            "Local Video");
+
+        if (broadcast &&
+            !StartLocalVideoWatchPartyBroadcast())
+        {
+            localVideoError ??=
+                "The video is playing locally, but its Watch Party broadcast could not be started.";
+        }
+    }
+
+    private void DrawLocalVideoPatreonHeart(
+        Vector2 center)
+    {
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        var heart =
+            FontAwesomeIcon.Heart.ToIconString();
+
+        var padlock =
+            FontAwesomeIcon.Lock.ToIconString();
+
+        float iconFontSize;
+        Vector2 heartSize;
+        Vector2 lockSize;
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            iconFontSize =
+                ImGui.GetFontSize();
+
+            SetUiFontScale(
+                2.05f);
+
+            heartSize =
+                ImGui.CalcTextSize(
+                    heart);
+
+            SetUiFontScale(
+                0.62f);
+
+            lockSize =
+                ImGui.CalcTextSize(
+                    padlock);
+
+            SetUiFontScale(
+                1f);
+        }
+
+        drawList.AddText(
+            UiBuilder.IconFont,
+            iconFontSize * 2.05f,
+            center -
+            heartSize *
+            0.5f,
+            ImGui.GetColorU32(
+                PatreonOrange),
+            heart);
+
+        drawList.AddText(
+            UiBuilder.IconFont,
+            iconFontSize * 0.62f,
+            center -
+            lockSize *
+            0.5f,
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.055f,
+                    0.06f,
+                    0.09f,
+                    1f)),
+            padlock);
+    }
+
+    private void DrawLockedLocalVideoBroadcastButton(
+        string id,
+        string label,
+        Vector2 size)
+    {
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.FrameRounding,
+                   8f))
+        using (ImRaii.PushColor(
+                   ImGuiCol.Button,
+                   PatreonOrange)
+                   .Push(
+                       ImGuiCol.ButtonHovered,
+                       PatreonOrangeHover)
+                   .Push(
+                       ImGuiCol.ButtonActive,
+                       new Vector4(
+                           0.92f,
+                           0.42f,
+                           0.08f,
+                           1f)))
+        {
+            var origin =
+                ImGui.GetCursorScreenPos();
+
+            if (ImGui.Button(
+                    id,
+                    size))
+            {
+                patreonPopupOpen = true;
+            }
+
+            DrawPlayerActionButtonContent(
+                origin,
+                size,
+                FontAwesomeIcon.Lock,
+                label,
+                Vector4.One);
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(
+                "A Patreon membership is required to broadcast local videos.");
+        }
+    }
+
+    private void DrawLocalVideoPatreonGate()
+    {
+        ImGui.Dummy(
+            UiVec(0f, 16f));
+
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.ChildRounding,
+                   10f)
+                   .Push(
+                       ImGuiStyleVar.ChildBorderSize,
+                       1f)
+                   .Push(
+                       ImGuiStyleVar.WindowPadding,
+                       UiVec(18f, 12f)))
+        using (ImRaii.PushColor(
+                   ImGuiCol.ChildBg,
+                   new Vector4(
+                       0.075f,
+                       0.06f,
+                       0.12f,
+                       1f))
+                   .Push(
+                       ImGuiCol.Border,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.82f)))
+        {
+            if (ImGui.BeginChild(
+                    "##localVideoPatreonGate",
+                    UiVec(-1f, 145f),
+                    true,
+                    ImGuiWindowFlags.NoScrollbar |
+                    ImGuiWindowFlags.NoScrollWithMouse))
+            {
+                var panelMin =
+                    ImGui.GetWindowPos();
+
+                var panelMax =
+                    panelMin +
+                    ImGui.GetWindowSize();
+
+                var panelSize =
+                    ImGui.GetWindowSize();
+
+                var contentOrigin =
+                    ImGui.GetCursorScreenPos();
+
+                var drawList =
+                    ImGui.GetWindowDrawList();
+
+                drawList.AddRectFilled(
+                    panelMin,
+                    panelMax,
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            Accent.X,
+                            Accent.Y,
+                            Accent.Z,
+                            0.09f)),
+                    10f);
+
+                drawList.AddCircleFilled(
+                    new Vector2(
+                        panelMax.X -
+                        panelSize.X * 0.12f,
+                        (panelMin.Y + panelMax.Y) *
+                        0.5f),
+                    panelSize.Y *
+                    1.25f,
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            PatreonOrange.X,
+                            PatreonOrange.Y,
+                            PatreonOrange.Z,
+                            0.07f)),
+                    64);
+
+                var orangeBorder =
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            PatreonOrange.X,
+                            PatreonOrange.Y,
+                            PatreonOrange.Z,
+                            0.82f));
+
+                var middleX =
+                    (panelMin.X + panelMax.X) *
+                    0.5f;
+
+                drawList.AddLine(
+                    new Vector2(
+                        middleX,
+                        panelMin.Y),
+                    new Vector2(
+                        panelMax.X -
+                        Ui(10f),
+                        panelMin.Y),
+                    orangeBorder);
+
+                drawList.AddLine(
+                    new Vector2(
+                        panelMax.X,
+                        panelMin.Y +
+                        Ui(10f)),
+                    new Vector2(
+                        panelMax.X,
+                        panelMax.Y -
+                        Ui(10f)),
+                    orangeBorder);
+
+                drawList.AddLine(
+                    new Vector2(
+                        panelMax.X -
+                        Ui(10f),
+                        panelMax.Y),
+                    new Vector2(
+                        middleX,
+                        panelMax.Y),
+                    orangeBorder);
+
+                DrawLocalVideoPatreonHeart(
+                    contentOrigin +
+                    UiVec(38f, 58f));
+
+                var actionWidth =
+                    MathF.Min(
+                        270f,
+                        panelSize.X *
+                        0.30f);
+
+                var actionX =
+                    panelSize.X -
+                    18f -
+                    actionWidth;
+
+                var copyX =
+                    88f;
+
+                var copyWidth =
+                    MathF.Max(
+                        220f,
+                        actionX -
+                        copyX -
+                        24f);
+
+                ImGui.SetCursorPos(
+                    new Vector2(
+                        copyX,
+                        Ui(20f)));
+
+                SetUiFontScale(
+                    0.82f);
+
+                ImGui.TextColored(
+                    PatreonOrange,
+                    "PATREON FEATURE");
+
+                ImGui.SetCursorPosX(
+                    copyX);
+
+                SetUiFontScale(
+                    1.16f);
+
+                ImGui.TextColored(
+                    Vector4.One,
+                    "Local video broadcasting");
+
+                SetUiFontScale(
+                    1f);
+
+                ImGui.SetCursorPosX(
+                    copyX);
+
+                ImGui.PushTextWrapPos(
+                    copyX +
+                    copyWidth);
+
+                ImGui.TextColored(
+                    MutedText,
+                    "Local playback is free. Join our Patreon to broadcast local videos to your Watch Party.");
+
+                ImGui.PopTextWrapPos();
+
+                ImGui.SetCursorPos(
+                    new Vector2(
+                        actionX,
+                        Ui(27f)));
+
+                DrawDjActionButton(
+                    "##unlockLocalVideoWithPatreon",
+                    FontAwesomeIcon.LockOpen,
+                    "Unlock with Patreon",
+                    new Vector2(
+                        actionWidth,
+                        Ui(40f)),
+                    false,
+                    () =>
+                    {
+                        patreonPopupOpen = true;
+                    },
+                    true);
+
+                ImGui.SetCursorPos(
+                    new Vector2(
+                        actionX,
+                        Ui(72f)));
+
+                using (ImRaii.PushColor(
+                           ImGuiCol.Button,
+                           Vector4.Zero)
+                           .Push(
+                               ImGuiCol.ButtonHovered,
+                               new Vector4(
+                                   Accent.X,
+                                   Accent.Y,
+                                   Accent.Z,
+                                   0.14f))
+                           .Push(
+                               ImGuiCol.ButtonActive,
+                               new Vector4(
+                                   Accent.X,
+                                   Accent.Y,
+                                   Accent.Z,
+                                   0.24f))
+                           .Push(
+                               ImGuiCol.Text,
+                               MutedText))
+                {
+                    if (ImGui.Button(
+                            "Already a member? Refresh access##refreshLocalVideoPatreon",
+                            new Vector2(
+                                actionWidth,
+                                Ui(25f))))
+                    {
+                        RefreshLocalVideoPatreonAccess();
+                    }
+                }
+
+                if (localVideoPatreonAccessMessage is { } accessMessage)
+                {
+                    ImGui.SetCursorPos(
+                        new Vector2(
+                            actionX,
+                            Ui(105f)));
+
+                    SetUiFontScale(
+                        0.82f);
+
+                    ImGui.TextColored(
+                        Danger,
+                        accessMessage);
+
+                    SetUiFontScale(
+                        1f);
+                }
+            }
+
+            ImGui.EndChild();
+        }
+    }
+
     private void DrawLocalVideoSource()
     {
         var engine =
@@ -1179,134 +2736,53 @@ internal sealed partial class MainWindow
         var isPlayingLocal =
             video.IsPlayingLocalVideo;
 
+        var hostingWatchParty =
+            stream.Mode ==
+            StreamMode.Hosting;
+
+        var viewingWatchParty =
+            stream.Mode ==
+            StreamMode.Viewing;
+
 
         //
-        // =========================================================
         // Heading
-        // =========================================================
         //
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1.15f);
 
         ImGui.TextColored(
             Vector4.One,
-            "Play a local video");
+            "Local Video");
 
-        ImGui.SetWindowFontScale(
+        if (HasConfirmedPatreonAccess())
+        {
+            DrawPatreonFeatureTag();
+        }
+
+        SetUiFontScale(
             1f);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                4f));
+            UiVec(0f, 4f));
 
         ImGui.TextColored(
             MutedText,
-            "Play a video file directly from your computer.");
+            "Play a video from your computer or broadcast it to your Watch Party.");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 16f));
 
 
         //
-        // =========================================================
-        // Local-only notice
-        // =========================================================
-        //
-
-        using (ImRaii.PushStyle(
-                   ImGuiStyleVar.ChildRounding,
-                   10f))
-        using (ImRaii.PushColor(
-                   ImGuiCol.ChildBg,
-                   new Vector4(
-                       Accent.X,
-                       Accent.Y,
-                       Accent.Z,
-                       0.08f)))
-        using (ImRaii.PushColor(
-                   ImGuiCol.Border,
-                   new Vector4(
-                       Accent.X,
-                       Accent.Y,
-                       Accent.Z,
-                       0.42f)))
-        using (var notice =
-               ImRaii.Child(
-                   "##localVideoNotice",
-                   new Vector2(
-                       -1f,
-                       Ui(76f)),
-                   true,
-                   ImGuiWindowFlags.NoScrollbar |
-                   ImGuiWindowFlags.NoScrollWithMouse))
-        {
-            if (notice)
-            {
-                using (ImRaii.PushFont(
-                           UiBuilder.IconFont))
-                {
-                    ImGui.TextColored(
-                        Accent,
-                        FontAwesomeIcon.InfoCircle
-                            .ToIconString());
-                }
-
-                ImGui.SameLine(
-                    0f,
-                    8f);
-
-                ImGui.TextColored(
-                    Accent,
-                    "LOCAL PLAY ONLY");
-
-                ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        3f));
-
-                ImGui.TextColored(
-                    MutedText,
-                    "Local video files do not currently support Watch Party syncing.");
-
-                ImGui.TextColored(
-                    MutedText,
-                    "Stop local playback before using other Alpha Channel media features.");
-            }
-        }
-
-
-        ImGui.Dummy(
-            new Vector2(
-                0f,
-                18f));
-
-
-        //
-        // =========================================================
-        // Active local session
-        // =========================================================
+        // Active local-video card
         //
 
         if (isPlayingLocal)
         {
-            ImGui.SetWindowFontScale(
-                0.82f);
-
-            ImGui.TextColored(
-                MutedText,
-                "NOW PLAYING LOCALLY");
-
-            ImGui.SetWindowFontScale(
-                1f);
-
-            ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    5f));
+            var (position, duration, paused) =
+                video.GetProgress();
 
             var playingName =
                 string.IsNullOrWhiteSpace(
@@ -1315,106 +2791,385 @@ internal sealed partial class MainWindow
                     : Path.GetFileName(
                         localVideoSelectedPath);
 
-            ImGui.SetWindowFontScale(
-                1.08f);
-
-            ImGui.TextWrapped(
-                playingName);
-
-            ImGui.SetWindowFontScale(
-                1f);
-
-            ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    14f));
-
-
             using (ImRaii.PushStyle(
-                       ImGuiStyleVar.FrameRounding,
-                       8f))
+                       ImGuiStyleVar.ChildRounding,
+                       10f))
             using (ImRaii.PushColor(
-                       ImGuiCol.Button,
-                       Danger)
-                   .Push(
-                       ImGuiCol.ButtonHovered,
+                       ImGuiCol.ChildBg,
                        new Vector4(
-                           MathF.Min(
-                               Danger.X + 0.08f,
-                               1f),
-                           MathF.Min(
-                               Danger.Y + 0.08f,
-                               1f),
-                           MathF.Min(
-                               Danger.Z + 0.08f,
-                               1f),
-                           1f))
-                   .Push(
-                       ImGuiCol.ButtonActive,
-                       Danger))
+                           FrameBg.X,
+                           FrameBg.Y,
+                           FrameBg.Z,
+                           0.82f)))
+            using (ImRaii.PushColor(
+                       ImGuiCol.Border,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           localVideoBroadcastArmed
+                               ? 0.75f
+                               : 0.32f)))
+            using (var card =
+                   ImRaii.Child(
+                       "##activeLocalVideoCard",
+new Vector2(
+    -1f,
+    Ui(250f)),
+                       true,
+                       ImGuiWindowFlags.NoScrollbar |
+                       ImGuiWindowFlags.NoScrollWithMouse))
             {
-                if (ImGui.Button(
-                        "Stop Local Video & Despawn TV",
-                        new Vector2(
-                            290f,
-                            40f)))
+                if (card)
                 {
-                    video.Stop();
+                    using (ImRaii.PushFont(
+                               UiBuilder.IconFont))
+                    {
+                        ImGui.TextColored(
+                            Accent,
+                            FontAwesomeIcon.Film
+                                .ToIconString());
+                    }
 
-                    localVideoError =
-                        null;
+                    ImGui.SameLine(
+                        0f,
+                        9f);
+
+                    SetUiFontScale(
+                        0.82f);
+
+                    ImGui.TextColored(
+                        MutedText,
+                        localVideoBroadcastArmed
+                            ? "NOW PLAYING · WATCH PARTY"
+                            : "NOW PLAYING LOCALLY");
+
+                    SetUiFontScale(
+                        1f);
+
+                    ImGui.Dummy(
+                        UiVec(0f, 7f));
+
+                    SetUiFontScale(
+                        1.08f);
+
+                    ImGui.TextWrapped(
+                        playingName);
+
+                    SetUiFontScale(
+                        1f);
+
+                    ImGui.Dummy(
+                        UiVec(0f, 8f));
+
+                    string statusText;
+                    Vector4 statusColor;
+
+                    if (!localVideoBroadcastArmed)
+                    {
+                        statusText =
+                            paused
+                                ? "Local playback paused"
+                                : "Playing on your TV";
+
+                        statusColor =
+                            MutedText;
+                    }
+                    else if (paused)
+                    {
+                        statusText =
+                            "Broadcast paused";
+
+                        statusColor =
+                            Gold;
+                    }
+                    else if (stream.Roster.Length == 0)
+                    {
+                        statusText =
+                            "Broadcast ready — waiting for viewers";
+
+                        statusColor =
+                            Gold;
+                    }
+                    else if (engine.IsLocalVideoBroadcasting)
+                    {
+                        statusText =
+                            stream.Roster.Length == 1
+                                ? "Broadcasting to 1 viewer"
+                                : $"Broadcasting to {stream.Roster.Length} viewers";
+
+                        statusColor =
+                            new Vector4(
+                                0.25f,
+                                0.85f,
+                                0.45f,
+                                1f);
+                    }
+                    else
+                    {
+                        statusText =
+                            "Starting relay upload…";
+
+                        statusColor =
+                            Accent;
+                    }
+
+                    ImGui.TextColored(
+                        statusColor,
+                        statusText);
+
+                    ImGui.Dummy(
+                        UiVec(0f, 8f));
+
+                    var progress =
+                        duration > 0f
+                            ? Math.Clamp(
+                                position / duration,
+                                0f,
+                                1f)
+                            : 0f;
+
+                    var elapsedText =
+                        TimeSpan
+                            .FromSeconds(
+                                Math.Max(
+                                    0f,
+                                    position))
+                            .ToString(
+                                duration >= 3600f
+                                    ? @"h\:mm\:ss"
+                                    : @"m\:ss");
+
+                    var durationText =
+                        duration > 0f
+                            ? TimeSpan
+                                .FromSeconds(
+                                    duration)
+                                .ToString(
+                                    duration >= 3600f
+                                        ? @"h\:mm\:ss"
+                                        : @"m\:ss")
+                            : "--:--";
+
+                    ImGui.ProgressBar(
+                        progress,
+                        new Vector2(
+                            -1f,
+                            Ui(18f)),
+                        $"{elapsedText} / {durationText}");
+
+                    ImGui.Dummy(
+                        UiVec(0f, 11f));
+
+                    var buttonGap = Ui(10f);
+
+                    var availableWidth =
+                        ImGui.GetContentRegionAvail().X;
+
+                    var buttonWidth =
+                        MathF.Max(
+                            150f,
+                            (availableWidth -
+                             buttonGap) /
+                            2f);
+
+                    var activeHasBroadcastCredentials =
+                        CurrentSession is { } activeSession &&
+                        !string.IsNullOrWhiteSpace(
+                            Plugin.Cfg.StreamKeys
+                                .GetValueOrDefault(
+                                    activeSession.AccountId));
+
+                    var canStartBroadcast =
+                        !viewingWatchParty &&
+                        activeHasBroadcastCredentials &&
+                        HasConfirmedPatreonAccess();
+
+                    if (hostingWatchParty &&
+    HasConfirmedPatreonAccess() &&
+    !activeHasBroadcastCredentials)
+                    {
+                        ImGui.TextColored(
+                            Gold,
+                            "Generate a secret stream key in Settings > Account before live streaming is available.");
+
+                        ImGui.Dummy(
+                            UiVec(0f, 8f));
+                    }
+
+                    //
+                    // Left button: start or stop broadcasting.
+                    //
+
+                    using (ImRaii.PushStyle(
+                               ImGuiStyleVar.FrameRounding,
+                               8f))
+                    {
+                        if (localVideoBroadcastArmed)
+                        {
+                            if (ImGui.Button(
+                                    "Stop Broadcast",
+                                    new Vector2(
+                                        buttonWidth,
+                                        Ui(38f))))
+                            {
+                                StopLocalVideoWatchPartyBroadcast();
+
+                                localVideoError =
+                                    null;
+                            }
+                        }
+                        else
+                        {
+                            if (!HasConfirmedPatreonAccess())
+                            {
+                                DrawLockedLocalVideoBroadcastButton(
+                                    "##unlockActiveLocalVideoBroadcast",
+                                    "Broadcast to Watch Party",
+                                    new Vector2(
+                                        buttonWidth,
+                                        Ui(38f)));
+                            }
+                            else
+                            {
+                                using (ImRaii.Disabled(
+                                           !canStartBroadcast))
+                                using (ImRaii.PushColor(
+                                           ImGuiCol.Button,
+                                           Accent)
+                                       .Push(
+                                           ImGuiCol.ButtonHovered,
+                                           AccentHover)
+                                       .Push(
+                                           ImGuiCol.ButtonActive,
+                                           AccentActive))
+                                {
+                                    if (ImGui.Button(
+                                            "Broadcast to Watch Party",
+                                            new Vector2(
+                                                buttonWidth,
+                                                Ui(38f))))
+                                    {
+                                        BeginLocalVideoWatchPartyBroadcast(
+                                            startPlayback: false);
+                                    }
+                                }
+
+                                if (viewingWatchParty &&
+                                    ImGui.IsItemHovered(
+                                        ImGuiHoveredFlags.AllowWhenDisabled))
+                                {
+                                    ImGui.SetTooltip(
+                                        "Leave your current Watch Party before broadcasting this video.");
+                                }
+                                else if (!activeHasBroadcastCredentials &&
+                                         ImGui.IsItemHovered(
+                                             ImGuiHoveredFlags.AllowWhenDisabled))
+                                {
+                                    ImGui.SetTooltip(
+                                        "Generate a secret stream key in Settings > Account first.");
+                                }
+                            }
+                        }
+                    }
+
+
+                    ImGui.SameLine(
+                        0f,
+                        buttonGap);
+
+
+                    //
+                    // Right button: stop playback and remove the TV.
+                    //
+
+                    using (ImRaii.PushStyle(
+                               ImGuiStyleVar.FrameRounding,
+                               8f))
+                    using (ImRaii.PushColor(
+                               ImGuiCol.Button,
+                               Danger)
+                           .Push(
+                               ImGuiCol.ButtonHovered,
+                               new Vector4(
+                                   MathF.Min(
+                                       Danger.X + 0.08f,
+                                       1f),
+                                   MathF.Min(
+                                       Danger.Y + 0.08f,
+                                       1f),
+                                   MathF.Min(
+                                       Danger.Z + 0.08f,
+                                       1f),
+                                   1f))
+                           .Push(
+                               ImGuiCol.ButtonActive,
+                               Danger))
+                    {
+                        if (ImGui.Button(
+                                "Stop Video & Despawn TV",
+                                new Vector2(
+                                    buttonWidth,
+                                    Ui(38f))))
+                        {
+                            StopLocalVideoWatchPartyBroadcast();
+
+                            video.Stop();
+
+                            localVideoError =
+                                null;
+                        }
+                    }
                 }
             }
 
+            if (!HasConfirmedPatreonAccess())
+            {
+                DrawLocalVideoPatreonGate();
+            }
 
-            ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    8f));
+            if (!string.IsNullOrWhiteSpace(
+                    localVideoError))
+            {
+                ImGui.Dummy(
+                    UiVec(0f, 8f));
 
-            ImGui.TextColored(
-                MutedText,
-                "Other playback features remain unavailable until local playback is stopped.");
+                ImGui.TextColored(
+                    Danger,
+                    localVideoError);
+            }
 
             return;
         }
 
 
         //
-        // =========================================================
         // Availability
-        // =========================================================
         //
 
-        var inWatchParty =
-            stream.Mode != StreamMode.None;
-
-        var snesActive =
-            engine.IsPlayingSnes;
+        var gameActive = engine.IsPlayingGame || engine.IsPlayingBrowser;
 
         var normalPlaybackActive =
-            queue.Current is not null ||
-            engine.IsActive;
+            queue.Current is not null;
 
         var localPlaybackAvailable =
-            !inWatchParty &&
-            !snesActive &&
+            !viewingWatchParty &&
+            !gameActive &&
             !normalPlaybackActive;
-
 
         if (!localPlaybackAvailable)
         {
             string reason;
 
-            if (inWatchParty)
+            if (viewingWatchParty)
             {
                 reason =
-                    "Leave or end your Watch Party before playing a local video.";
+                    "Leave the current Watch Party before playing a local video.";
             }
-            else if (snesActive)
+            else if (gameActive)
             {
                 reason =
-                    "Exit the current SNES game before playing a local video.";
+                    "Exit the current game before playing a local video.";
             }
             else
             {
@@ -1431,16 +3186,12 @@ internal sealed partial class MainWindow
             }
 
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    12f));
+                UiVec(0f, 12f));
         }
 
 
         //
-        // =========================================================
         // File selector
-        // =========================================================
         //
 
         ImGui.TextColored(
@@ -1448,10 +3199,7 @@ internal sealed partial class MainWindow
             "Video File");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                5f));
-
+            UiVec(0f, 5f));
 
         var displayPath =
             string.IsNullOrWhiteSpace(
@@ -1459,8 +3207,7 @@ internal sealed partial class MainWindow
                 ? "No video selected"
                 : localVideoSelectedPath;
 
-        const float browseButtonWidth =
-            120f;
+        var browseButtonWidth = Ui(120f);
 
         var rowWidth =
             ImGui.GetContentRegionAvail().X;
@@ -1471,7 +3218,6 @@ internal sealed partial class MainWindow
                 rowWidth -
                 browseButtonWidth -
                 10f));
-
 
         using (ImRaii.PushStyle(
                    ImGuiStyleVar.FrameRounding,
@@ -1484,11 +3230,9 @@ internal sealed partial class MainWindow
                 ImGuiInputTextFlags.ReadOnly);
         }
 
-
         ImGui.SameLine(
             0f,
             10f);
-
 
         using (ImRaii.Disabled(
                    !localPlaybackAvailable))
@@ -1500,7 +3244,7 @@ internal sealed partial class MainWindow
                     "Browse...",
                     new Vector2(
                         browseButtonWidth,
-                        34f)))
+                        Ui(34f))))
             {
                 localVideoFileDialog
                     .OpenFileDialog(
@@ -1533,33 +3277,25 @@ internal sealed partial class MainWindow
             }
         }
 
-
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                7f));
+            UiVec(0f, 7f));
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             0.80f);
 
         ImGui.TextColored(
             MutedText,
-            "File type is validated by the video player.");
+            "The file remains on your computer. It is only uploaded while Watch Party viewers are present.");
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
-
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                16f));
+            UiVec(0f, 16f));
 
 
         //
-        // =========================================================
-        // Play
-        // =========================================================
+        // Play and broadcast buttons
         //
 
         var hasFile =
@@ -1572,59 +3308,125 @@ internal sealed partial class MainWindow
             localPlaybackAvailable &&
             hasFile;
 
+        var hasBroadcastCredentials =
+            CurrentSession is { } session &&
+            !string.IsNullOrWhiteSpace(
+                Plugin.Cfg.StreamKeys
+                    .GetValueOrDefault(
+                        session.AccountId));
+
+        var canBroadcast =
+            canPlay &&
+            !viewingWatchParty &&
+            hasBroadcastCredentials &&
+            HasConfirmedPatreonAccess();
+
+        if (hostingWatchParty &&
+            HasConfirmedPatreonAccess() &&
+            CurrentSession is not null &&
+            !hasBroadcastCredentials)
+        {
+            ImGui.TextColored(
+                Gold,
+                "Generate a secret stream key in Settings > Account before live streaming is available.");
+
+            ImGui.Dummy(
+                UiVec(0f, 8f));
+        }
+
+        var actionGap = Ui(10f);
+
+        var actionWidth =
+            MathF.Max(
+                180f,
+                (ImGui.GetContentRegionAvail().X -
+                 actionGap) /
+                2f);
 
         using (ImRaii.Disabled(
                    !canPlay))
         using (ImRaii.PushStyle(
                    ImGuiStyleVar.FrameRounding,
                    8f))
-        using (ImRaii.PushColor(
-                   ImGuiCol.Button,
-                   Accent)
-               .Push(
-                   ImGuiCol.ButtonHovered,
-                   AccentHover)
-               .Push(
-                   ImGuiCol.ButtonActive,
-                   AccentActive))
         {
             if (ImGui.Button(
                     "Play Local Video",
                     new Vector2(
-                        190f,
-                        40f)))
+                        actionWidth,
+                        Ui(42f))))
             {
-                localVideoError =
-                    null;
-
-                var started =
-                    video.PlayLocalVideo(
-                        localVideoSelectedPath);
-
-                if (!started)
-                {
-                    localVideoError =
-                        video.LastError ??
-                        "Local video playback could not be started.";
-                }
-                else
-                {
-                    video.SetOverlayTitle(
-                        Path.GetFileNameWithoutExtension(
-                            localVideoSelectedPath),
-                        "Local Video");
-                }
+                StartSelectedLocalVideo(
+                    broadcast: false);
             }
         }
 
+        ImGui.SameLine(
+            0f,
+            actionGap);
+
+        if (!HasConfirmedPatreonAccess())
+        {
+            DrawLockedLocalVideoBroadcastButton(
+                "##unlockLocalVideoBroadcast",
+                "Broadcast Local Video",
+                new Vector2(
+                    actionWidth,
+                    Ui(42f)));
+        }
+        else
+        {
+            using (ImRaii.Disabled(
+                       !canBroadcast))
+            using (ImRaii.PushStyle(
+                       ImGuiStyleVar.FrameRounding,
+                       8f))
+            using (ImRaii.PushColor(
+                       ImGuiCol.Button,
+                       Accent)
+                   .Push(
+                       ImGuiCol.ButtonHovered,
+                       AccentHover)
+                   .Push(
+                       ImGuiCol.ButtonActive,
+                       AccentActive))
+            {
+                if (ImGui.Button(
+                        "Broadcast Local Video",
+                        new Vector2(
+                            actionWidth,
+                            Ui(42f))))
+                {
+                    BeginLocalVideoWatchPartyBroadcast(
+                        startPlayback: true);
+                }
+            }
+
+            if (viewingWatchParty &&
+                ImGui.IsItemHovered(
+                    ImGuiHoveredFlags.AllowWhenDisabled))
+            {
+                ImGui.SetTooltip(
+                    "Leave your current Watch Party before broadcasting a local video.");
+            }
+            else if (!hasBroadcastCredentials &&
+                     ImGui.IsItemHovered(
+                         ImGuiHoveredFlags.AllowWhenDisabled))
+            {
+                ImGui.SetTooltip(
+                    "Generate a secret stream key in Settings > Account first.");
+            }
+        }
+
+        if (!HasConfirmedPatreonAccess())
+        {
+            DrawLocalVideoPatreonGate();
+        }
 
         if (!string.IsNullOrWhiteSpace(
                 localVideoError))
         {
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    8f));
+                UiVec(0f, 10f));
 
             ImGui.TextColored(
                 Danger,
@@ -1633,14 +3435,11 @@ internal sealed partial class MainWindow
 
 
         //
-        // File dialog must be drawn every frame while this source
-        // page is active.
+        // Draw the file-dialog window.
         //
 
         ImGui.SetNextWindowSize(
-            new Vector2(
-                900f,
-                600f),
+            UiVec(900f, 600f),
             ImGuiCond.Appearing);
 
         ImGui.SetNextWindowPos(
@@ -1669,18 +3468,16 @@ internal sealed partial class MainWindow
 
     private void DrawLinkSource()
     {
-        ImGui.SetWindowFontScale(1.15f);
+        SetUiFontScale(1.15f);
 
         ImGui.TextColored(
             Vector4.One,
             "Play a video link");
 
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(1f);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                10f));
+            UiVec(0f, 10f));
 
 
         //
@@ -1689,16 +3486,14 @@ internal sealed partial class MainWindow
         // =========================================================
         //
 
-        ImGui.SetNextItemWidth(-66f);
+        ImGui.SetNextItemWidth(-Ui(66f));
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.FrameRounding,
             8f)
             .Push(
                 ImGuiStyleVar.FramePadding,
-                new Vector2(
-                    14f,
-                    10f)))
+                UiVec(14f, 10f)))
         using (ImRaii.PushColor(
             ImGuiCol.FrameBg,
             new Vector4(
@@ -1743,9 +3538,7 @@ internal sealed partial class MainWindow
             8f)
             .Push(
                 ImGuiStyleVar.FramePadding,
-                new Vector2(
-                    12f,
-                    10f)))
+                UiVec(12f, 10f)))
         using (ImRaii.PushColor(
             ImGuiCol.Button,
             Accent)
@@ -1761,9 +3554,7 @@ internal sealed partial class MainWindow
             if (ImGui.Button(
                 FontAwesomeIcon.Clipboard
                     .ToIconString(),
-                new Vector2(
-                    48f,
-                    0f)))
+                UiVec(48f, 0f)))
             {
                 var clipboard =
                     ImGui.GetClipboardText();
@@ -1779,29 +3570,25 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                5f));
+            UiVec(0f, 5f));
 
 
         //
         // Help text
         //
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             0.82f);
 
         ImGui.TextColored(
             MutedText,
             "Paste a direct video link or supported webpage URL.");
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
 
         //
@@ -1827,9 +3614,7 @@ internal sealed partial class MainWindow
                 ImGui.GetCursorScreenPos();
 
             var buttonSize =
-                new Vector2(
-                    160f,
-                    38f);
+                UiVec(160f, 38f);
 
 
             if (ImGui.Button(
@@ -1861,6 +3646,58 @@ internal sealed partial class MainWindow
                 FontAwesomeIcon.Play,
                 "Play now",
                 Vector4.One);
+        }
+
+        if (stream.Mode == StreamMode.None)
+        {
+            ImGui.SameLine(
+                0f,
+                14f);
+
+            using (ImRaii.PushStyle(
+                       ImGuiStyleVar.FrameRounding,
+                       8f))
+            using (ImRaii.PushColor(
+                       ImGuiCol.Button,
+                       FrameBgHover)
+                   .Push(
+                       ImGuiCol.ButtonHovered,
+                       Accent)
+                   .Push(
+                       ImGuiCol.ButtonActive,
+                       AccentActive))
+            {
+                var buttonPos =
+                    ImGui.GetCursorScreenPos();
+
+                var buttonSize =
+                    UiVec(190f, 38f);
+
+                if (ImGui.Button(
+                        "##playLinkInWatchParty",
+                        buttonSize) &&
+                    !string.IsNullOrWhiteSpace(
+                        urlInput))
+                {
+                    BeginWebLinkWatchParty(
+                        new Video.VideoQueueEntry(
+                            urlInput.Trim(),
+                            urlInput.Trim(),
+                            string.Empty,
+                            null,
+                            null));
+
+                    urlInput =
+                        string.Empty;
+                }
+
+                DrawPlayerActionButtonContent(
+                    buttonPos,
+                    buttonSize,
+                    FontAwesomeIcon.Users,
+                    "Play in Watch Party",
+                    Vector4.One);
+            }
         }
 
 
@@ -1904,9 +3741,7 @@ internal sealed partial class MainWindow
                 ImGui.GetCursorScreenPos();
 
             var buttonSize =
-                new Vector2(
-                    170f,
-                    38f);
+                UiVec(170f, 38f);
 
 
             if (ImGui.Button(
@@ -1964,9 +3799,7 @@ internal sealed partial class MainWindow
             queueAddedFeedbackUntil)
         {
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    8f));
+                UiVec(0f, 8f));
 
 
             using (ImRaii.PushFont(
@@ -1996,53 +3829,44 @@ internal sealed partial class MainWindow
         //
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                18f));
+            UiVec(0f, 18f));
 
         ImGui.Separator();
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1.08f);
 
         ImGui.TextColored(
             Vector4.One,
             "Recommended websites");
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                2f));
+            UiVec(0f, 2f));
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             0.84f);
 
         ImGui.TextColored(
             MutedText,
             "Popular websites commonly supported by Alpha Channel.");
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                10f));
+            UiVec(0f, 10f));
 
 
         var availableWidth =
             ImGui.GetContentRegionAvail().X;
 
-        const float siteGap =
-            10f;
+        var siteGap = Ui(10f);
 
         var siteCardWidth =
             (availableWidth -
@@ -2052,7 +3876,7 @@ internal sealed partial class MainWindow
         var siteCardSize =
             new Vector2(
                 siteCardWidth,
-                56f);
+                Ui(56f));
 
 
         //
@@ -2093,9 +3917,7 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 8f));
 
 
         //
@@ -2136,9 +3958,7 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 8f));
 
 
         //
@@ -2170,18 +3990,16 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                10f));
+            UiVec(0f, 10f));
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             0.84f);
 
         ImGui.TextColored(
             MutedText,
             "We support many other websites and we're constantly working to add more.");
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
 
@@ -2192,35 +4010,28 @@ internal sealed partial class MainWindow
         //
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                16f));
+            UiVec(0f, 16f));
 
         ImGui.Separator();
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1.08f);
 
         ImGui.TextColored(
             Vector4.One,
             "Frequently asked questions");
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                10f));
+            UiVec(0f, 10f));
 
 
-        const float faqGap =
-            12f;
+        var faqGap = Ui(12f);
 
         var faqCardWidth =
             (ImGui.GetContentRegionAvail().X -
@@ -2230,7 +4041,7 @@ internal sealed partial class MainWindow
         var faqCardSize =
             new Vector2(
                 faqCardWidth,
-                112f);
+                Ui(112f));
 
 
         DrawLinkFaqCard(
@@ -2263,9 +4074,7 @@ internal sealed partial class MainWindow
         //
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                12f));
+            UiVec(0f, 12f));
 
 
         DrawLinkSupportCallout();
@@ -2337,9 +4146,9 @@ internal sealed partial class MainWindow
                 ImGui.CalcTextSize(
                     iconText);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
-                    origin.X + 18f,
+                    origin.X + Ui(18f),
                     origin.Y +
                     (size.Y - iconSize.Y) * 0.5f),
                 ImGui.GetColorU32(
@@ -2356,9 +4165,9 @@ internal sealed partial class MainWindow
             ImGui.CalcTextSize(
                 label);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
-                origin.X + 48f,
+                origin.X + Ui(48f),
                 origin.Y +
                 (size.Y - labelSize.Y) * 0.5f),
             ImGui.GetColorU32(
@@ -2429,10 +4238,10 @@ internal sealed partial class MainWindow
         using (ImRaii.PushFont(
             UiBuilder.IconFont))
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
-                    origin.X + 17f,
-                    origin.Y + 18f),
+                    origin.X + Ui(17f),
+                    origin.Y + Ui(18f)),
                 ImGui.GetColorU32(
                     Accent),
                 iconText);
@@ -2443,10 +4252,10 @@ internal sealed partial class MainWindow
         // Question
         //
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
-                origin.X + 48f,
-                origin.Y + 15f),
+                origin.X + Ui(48f),
+                origin.Y + Ui(15f)),
             ImGui.GetColorU32(
                 Vector4.One),
             title);
@@ -2460,24 +4269,24 @@ internal sealed partial class MainWindow
             ImGui.GetColorU32(
                 MutedText);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
-                origin.X + 48f,
-                origin.Y + 44f),
+                origin.X + Ui(48f),
+                origin.Y + Ui(44f)),
             bodyColor,
             line1);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
-                origin.X + 48f,
-                origin.Y + 62f),
+                origin.X + Ui(48f),
+                origin.Y + Ui(62f)),
             bodyColor,
             line2);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
-                origin.X + 48f,
-                origin.Y + 80f),
+                origin.X + Ui(48f),
+                origin.Y + Ui(80f)),
             bodyColor,
             line3);
     }
@@ -2494,7 +4303,7 @@ internal sealed partial class MainWindow
         var size =
             new Vector2(
                 width,
-                76f);
+                Ui(76f));
 
         var drawList =
             ImGui.GetWindowDrawList();
@@ -2548,10 +4357,10 @@ internal sealed partial class MainWindow
         using (ImRaii.PushFont(
             UiBuilder.IconFont))
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
-                    origin.X + 18f,
-                    origin.Y + 20f),
+                    origin.X + Ui(18f),
+                    origin.Y + Ui(20f)),
                 ImGui.GetColorU32(
                     Accent),
                 iconText);
@@ -2562,10 +4371,10 @@ internal sealed partial class MainWindow
         // Heading
         //
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
-                origin.X + 52f,
-                origin.Y + 14f),
+                origin.X + Ui(52f),
+                origin.Y + Ui(14f)),
             ImGui.GetColorU32(
                 Accent),
             "Unsure if a video or webpage is supported?");
@@ -2575,10 +4384,10 @@ internal sealed partial class MainWindow
         // Supporting text
         //
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
-                origin.X + 52f,
-                origin.Y + 42f),
+                origin.X + Ui(52f),
+                origin.Y + Ui(42f)),
             ImGui.GetColorU32(
                 MutedText),
             "Try it out. Alpha Channel will attempt to locate and play the video automatically.");
@@ -2617,13 +4426,13 @@ internal sealed partial class MainWindow
 
         using (ImRaii.PushFont(UiBuilder.IconFont))
         {
-            ImGui.GetWindowDrawList().AddText(
+            ImGui.GetWindowDrawList().AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 start,
                 ImGui.GetColorU32(color),
                 iconText);
         }
 
-        ImGui.GetWindowDrawList().AddText(
+        ImGui.GetWindowDrawList().AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             start + new Vector2(iconSize.X + gap, 0f),
             ImGui.GetColorU32(color),
             label);

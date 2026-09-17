@@ -7,11 +7,8 @@ using AlphaChannel.Plugin.Auth;
 
 namespace AlphaChannel.Plugin;
 
-// Rewrite, not a port, of Aetherphone's WatchAlongSession networking half - that one is built
-// directly on AethernetSession/CallHub (account auth, a websocket shared with phone calls). This
-// talks to AlphaChannel.Server's dedicated /rt endpoint instead, with the same stream.* message
-// shape (see AlphaChannel.Contracts). Auth is now a real XIVAuth-backed account (see Auth/) - the
-// bearer token comes from the current character's CharacterSession, not a self-asserted UserId.
+// Connects to the Alpha Channel server's /rt WebSocket endpoint using AlphaChannel.Contracts.
+// Authenticates with the bearer token from the current character's CharacterSession.
 internal enum StreamMode
 {
     None,
@@ -19,17 +16,43 @@ internal enum StreamMode
     Viewing,
 }
 
+internal enum RealtimeConnectionState
+{
+    Disconnected,
+    Connecting,
+    Connected,
+    Reconnecting,
+    AuthenticationRequired,
+    ServerUnavailable,
+}
+
+internal sealed record PartyNextQueueSnapshot(
+    int Count,
+    string? Title,
+    string? Source,
+    double? DurationSeconds,
+    string? ThumbnailUrl);
+
 internal sealed class StreamClient : IDisposable
 {
-    private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SignedOutPollDelay = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
 
     private readonly Configuration configuration;
     private readonly Func<string?> displayNameProvider;
     private readonly Func<CharacterSession?> sessionProvider;
     private readonly CancellationTokenSource lifetime = new();
     private readonly SemaphoreSlim sendLock = new(1, 1);
+    private readonly object lifecycleGate = new();
+    private readonly ManualResetEventSlim sendsDrained = new(true);
     private ClientWebSocket? socket;
     private Task? runTask;
+    private bool disposed;
+    private int activeSends;
+    private volatile RealtimeConnectionState connectionState =
+        RealtimeConnectionState.Disconnected;
+    private int connectionGeneration;
+    private string? rejectedSessionToken;
 
     // Snapshot of sessionProvider().AccountId taken at the moment a connection is established -
     // used for the rest of that connection's lifetime so a mid-session character switch can't
@@ -40,10 +63,26 @@ internal sealed class StreamClient : IDisposable
     private string? pendingJoinHost;
     private string? pendingJoinPassword;
 
+    //
+    // Prevent periodic stream.state publication from recreating a room
+    // while its host's stream.leave message is being sent.
+    //
+    private volatile bool leavingRoom;
+
     internal StreamMode Mode { get; private set; } = StreamMode.None;
     internal string? HostId { get; private set; }
     internal ParticipantInfo[] Roster { get; private set; } = [];
     internal bool IsConnected => socket?.State == WebSocketState.Open;
+    internal RealtimeConnectionState ConnectionState => connectionState;
+    internal string ConnectionStatusText => connectionState switch
+    {
+        RealtimeConnectionState.Connecting => "Connecting",
+        RealtimeConnectionState.Connected => "Connected",
+        RealtimeConnectionState.Reconnecting => "Reconnecting",
+        RealtimeConnectionState.AuthenticationRequired => "Authentication required",
+        RealtimeConnectionState.ServerUnavailable => "Server unavailable",
+        _ => "Disconnected",
+    };
 
     // Filled from Dispatch (a background thread) - drained by MainWindow's Draw (main thread) each
     // frame, so this needs to be thread-safe for that handoff, same reasoning as everywhere else
@@ -61,6 +100,7 @@ internal sealed class StreamClient : IDisposable
     { get; } = new();
 
     internal ConcurrentQueue<(
+        string UserId,
         string DisplayName,
         Guid RequestId,
         string Url,
@@ -69,6 +109,16 @@ internal sealed class StreamClient : IDisposable
         TimeSpan? Duration,
         string? ThumbnailUrl)> IncomingMediaRequests
     { get; } = new();
+
+    internal ConcurrentQueue<(
+        string UserId,
+        string DisplayName,
+        Guid RequestId,
+        string Url)> PendingHostMediaRequests { get; } = new();
+
+    private readonly ConcurrentDictionary<Guid, string> observedMediaRequestUrls = new();
+    internal ConcurrentQueue<PartyNextQueueSnapshot> IncomingNextQueueSnapshots { get; } = new();
+    private readonly Dictionary<string, string?[]> incomingNextQueueChunks = new(StringComparer.Ordinal);
 
     internal ConcurrentQueue<(
     Guid RequestId,
@@ -106,30 +156,70 @@ internal sealed class StreamClient : IDisposable
 
     internal void Start()
     {
+        if (disposed)
+        {
+            return;
+        }
+
         runTask = Task.Run(() => RunAsync(lifetime.Token));
     }
 
     private async Task RunAsync(CancellationToken token)
     {
+        var reconnectAttempt = 0;
+        var hasConnected = false;
+
         while (!token.IsCancellationRequested)
         {
             var session = sessionProvider();
             if (session is null)
             {
-                // No signed-in account for the current character - nothing to connect with.
-                // Player/Screen/Settings don't need this, so we just idle rather than error.
-                await Task.Delay(ReconnectDelay, token).ConfigureAwait(false);
+                SetConnectionState(RealtimeConnectionState.AuthenticationRequired);
+                ClearRoomForAuthenticationLoss();
+                rejectedSessionToken = null;
+                reconnectAttempt = 0;
+                await DelaySafelyAsync(SignedOutPollDelay, token).ConfigureAwait(false);
                 continue;
             }
+
+            if (string.Equals(
+                    rejectedSessionToken,
+                    session.Token,
+                    StringComparison.Ordinal))
+            {
+                SetConnectionState(RealtimeConnectionState.AuthenticationRequired);
+                await DelaySafelyAsync(SignedOutPollDelay, token).ConfigureAwait(false);
+                continue;
+            }
+
+            SetConnectionState(
+                hasConnected || reconnectAttempt > 0
+                    ? RealtimeConnectionState.Reconnecting
+                    : RealtimeConnectionState.Connecting);
 
             try
             {
                 using var ws = new ClientWebSocket();
                 ws.Options.SetRequestHeader("Authorization", $"Bearer {session.Token}");
-                await ws.ConnectAsync(BuildUri(configuration.RelayServerUrl), token).ConfigureAwait(false);
+
+                using var connection =
+                    CancellationTokenSource.CreateLinkedTokenSource(token);
+                connection.CancelAfter(ConnectTimeout);
+
+                await ws.ConnectAsync(
+                        BuildUri(configuration.RelayServerUrl),
+                        connection.Token)
+                    .ConfigureAwait(false);
+
+                var generation = Interlocked.Increment(ref connectionGeneration);
                 socket = ws;
                 myAccountId = session.AccountId;
-                AepLog.Info("[Stream] connected");
+                hasConnected = true;
+                reconnectAttempt = 0;
+                rejectedSessionToken = null;
+                SetConnectionState(RealtimeConnectionState.Connected);
+                AepLog.Info("[Realtime] Connected.");
+
                 if (displayNameProvider() is { Length: > 0 } name)
                 {
                     await SendHelloAsync(name).ConfigureAwait(false);
@@ -137,14 +227,71 @@ internal sealed class StreamClient : IDisposable
 
                 await FlushPendingAsync(token).ConfigureAwait(false);
 
-                await ReceiveLoopAsync(ws, token).ConfigureAwait(false);
+                using var activeConnection =
+                    CancellationTokenSource.CreateLinkedTokenSource(token);
+
+                var receiveTask =
+                    ReceiveLoopAsync(ws, generation, activeConnection.Token);
+                var sessionMonitorTask =
+                    MonitorSessionAsync(session, activeConnection.Token);
+
+                await Task.WhenAny(receiveTask, sessionMonitorTask)
+                    .ConfigureAwait(false);
+
+                activeConnection.Cancel();
+                try
+                {
+                    ws.Abort();
+                }
+                catch
+                {
+                    // The receive loop may already have closed the socket.
+                }
+
+                try
+                {
+                    await Task.WhenAll(receiveTask, sessionMonitorTask)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (activeConnection.IsCancellationRequested)
+                {
+                    // The companion task is intentionally cancelled after the
+                    // socket closes or the active character/session changes.
+                }
+
+                var currentSession = sessionProvider();
+                if (currentSession is null ||
+                    !string.Equals(
+                        currentSession.AccountId,
+                        session.AccountId,
+                        StringComparison.Ordinal))
+                {
+                    ClearRoomForAuthenticationLoss();
+                }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
+                return;
+            }
+            catch (OperationCanceledException exception)
+            {
+                AepLog.Warning(
+                    $"[Realtime] Connection timed out: {exception.Message}");
+                SetConnectionState(RealtimeConnectionState.ServerUnavailable);
             }
             catch (Exception exception)
             {
-                AepLog.Warning($"[Stream] connection error: {exception.Message}");
+                if (IsAuthenticationRejected(exception))
+                {
+                    rejectedSessionToken = session.Token;
+                    SetConnectionState(RealtimeConnectionState.AuthenticationRequired);
+                    AepLog.Warning(
+                        "[Realtime] Authentication rejected. Reconnection paused until the session changes.");
+                    continue;
+                }
+
+                SetConnectionState(RealtimeConnectionState.ServerUnavailable);
+                AepLog.Warning($"[Realtime] Connection error: {exception.Message}");
             }
             finally
             {
@@ -156,11 +303,20 @@ internal sealed class StreamClient : IDisposable
                 return;
             }
 
-            await Task.Delay(ReconnectDelay, token).ConfigureAwait(false);
+            reconnectAttempt++;
+            var delay = GetReconnectDelay(reconnectAttempt);
+            SetConnectionState(RealtimeConnectionState.Reconnecting);
+            AepLog.Warning(
+                $"[Realtime] Connection lost. Reconnecting in {delay.TotalSeconds:0.0} seconds " +
+                $"(attempt {reconnectAttempt}).");
+            await DelaySafelyAsync(delay, token).ConfigureAwait(false);
         }
     }
 
-    private async Task ReceiveLoopAsync(ClientWebSocket ws, CancellationToken token)
+    private async Task ReceiveLoopAsync(
+        ClientWebSocket ws,
+        int generation,
+        CancellationToken token)
     {
         var buffer = new byte[16 * 1024];
         while (!token.IsCancellationRequested && ws.State == WebSocketState.Open)
@@ -204,12 +360,18 @@ internal sealed class StreamClient : IDisposable
                 {
                     if (JsonSerializer.Deserialize<SocialControl>(bytes) is { } social)
                     {
-                        DispatchSocial(social);
+                        if (generation == Volatile.Read(ref connectionGeneration))
+                        {
+                            DispatchSocial(social);
+                        }
                     }
                 }
                 else if (JsonSerializer.Deserialize<StreamControl>(bytes) is { } message)
                 {
-                    Dispatch(message);
+                    if (generation == Volatile.Read(ref connectionGeneration))
+                    {
+                        Dispatch(message);
+                    }
                 }
             }
             catch (JsonException exception)
@@ -224,8 +386,39 @@ internal sealed class StreamClient : IDisposable
         switch (message.Type)
         {
             case SignalType.StreamState:
+                //
+                // Retain the complete current room state so the Watch
+                // Party details tab can render the same information for
+                // hosts and viewers.
+                //
+                CurrentRoomState =
+                    message;
 
-                OnState?.Invoke(message);
+                RoomDescription =
+                    message.Description ?? "";
+
+                RoomLocation =
+                    message.Location ?? "";
+
+                if (message.Kind is { } roomKind)
+                {
+                    RoomKind =
+                        roomKind;
+                }
+
+                if (message.IsPrivate is { } isPrivate)
+                {
+                    IsPrivate =
+                        isPrivate;
+                }
+
+                //
+                // Password is deliberately not assigned here. The server
+                // sanitizes it before broadcasting stream.state.
+                //
+                OnState?.Invoke(
+                    message);
+
                 break;
             case SignalType.StreamJoined:
                 Mode = StreamMode.Viewing;
@@ -256,6 +449,10 @@ internal sealed class StreamClient : IDisposable
 
                 IncomingChat.Clear();
                 IncomingMediaRequests.Clear();
+                PendingHostMediaRequests.Clear();
+                observedMediaRequestUrls.Clear();
+                IncomingNextQueueSnapshots.Clear();
+                incomingNextQueueChunks.Clear();
 
                 OnEnded?.Invoke();
                 break;
@@ -347,7 +544,97 @@ internal sealed class StreamClient : IDisposable
        "[[AC_MEDIA_REQUEST_1]]";
 
                     const string mediaResultPrefix =
-    "[[AC_MEDIA_RESULT_1]]";
+     "[[AC_MEDIA_RESULT_1]]";
+
+                    const string mediaPublishedPrefix =
+                        "[[AC_MEDIA_PUBLISHED_1]]";
+
+                    const string mediaDeniedPrefix =
+                        "[[AC_MEDIA_DENIED_1]]";
+
+                    const string nextQueuePrefix = "[[AC_NEXT_QUEUE_1]]";
+
+                    var sentByHost = Mode == StreamMode.Hosting ||
+                        string.Equals(message.UserId, HostId, StringComparison.Ordinal);
+
+                    if (text.StartsWith(nextQueuePrefix, StringComparison.Ordinal))
+                    {
+                        var parts = text[nextQueuePrefix.Length..].Split('|', 4);
+                        if (sentByHost && parts.Length == 4 &&
+                            int.TryParse(parts[1], out var chunkIndex) &&
+                            int.TryParse(parts[2], out var chunkCount) &&
+                            chunkCount is > 0 and <= 32 && chunkIndex >= 0 && chunkIndex < chunkCount)
+                        {
+                            if (!incomingNextQueueChunks.TryGetValue(parts[0], out var chunks) || chunks.Length != chunkCount)
+                            {
+                                chunks = new string?[chunkCount];
+                                incomingNextQueueChunks[parts[0]] = chunks;
+                            }
+
+                            chunks[chunkIndex] = parts[3];
+                            if (chunks.All(chunk => chunk is not null))
+                            {
+                                incomingNextQueueChunks.Remove(parts[0]);
+                                try
+                                {
+                                    var json = Encoding.UTF8.GetString(Convert.FromBase64String(string.Concat(chunks)));
+                                    var snapshot = JsonSerializer.Deserialize<PartyNextQueueSnapshot>(json);
+                                    if (snapshot is not null)
+                                        IncomingNextQueueSnapshots.Enqueue(snapshot);
+                                }
+                                catch (Exception exception) when (exception is FormatException or JsonException)
+                                {
+                                    AepLog.Warning("[Stream] Ignored malformed next-queue snapshot.");
+                                }
+                            }
+                        }
+
+                        break;
+                    }
+
+                    if (text.StartsWith(mediaDeniedPrefix, StringComparison.Ordinal))
+                    {
+                        var payload = text[mediaDeniedPrefix.Length..];
+                        var split = payload.IndexOf('|');
+                        if (sentByHost && split > 0 &&
+                            string.Equals(payload[..split], myAccountId, StringComparison.Ordinal))
+                        {
+                            try
+                            {
+                                var reason = Encoding.UTF8.GetString(Convert.FromBase64String(payload[(split + 1)..]));
+                                IncomingChat.Enqueue((message.UserId ?? string.Empty, "Host", reason));
+                            }
+                            catch (FormatException)
+                            {
+                                AepLog.Warning("[Stream] Ignored malformed media request denial.");
+                            }
+                        }
+
+                        break;
+                    }
+
+                    if (text.StartsWith(mediaPublishedPrefix, StringComparison.Ordinal))
+                    {
+                        var parts = text[mediaPublishedPrefix.Length..].Split('|', 3);
+                        if (sentByHost && parts.Length == 3 &&
+                            Guid.TryParseExact(parts[0], "N", out var publishedId) &&
+                            observedMediaRequestUrls.TryRemove(publishedId, out var publishedUrl))
+                        {
+                            try
+                            {
+                                var requesterName = Encoding.UTF8.GetString(Convert.FromBase64String(parts[2]));
+                                IncomingMediaRequests.Enqueue((
+                                    parts[1], requesterName, publishedId, publishedUrl, publishedUrl,
+                                    string.Empty, null, null));
+                            }
+                            catch (FormatException)
+                            {
+                                AepLog.Warning("[Stream] Ignored malformed published media request.");
+                            }
+                        }
+
+                        break;
+                    }
 
                     if (text.StartsWith(
         mediaResultPrefix,
@@ -432,16 +719,16 @@ internal sealed class StreamClient : IDisposable
                             break;
                         }
 
-                        IncomingMediaRequests.Enqueue(
-                            (
+                        observedMediaRequestUrls[requestId] = url;
+
+                        if (Mode == StreamMode.Hosting)
+                        {
+                            PendingHostMediaRequests.Enqueue((
+                                message.UserId ?? string.Empty,
                                 displayName,
                                 requestId,
-                                url,
-                                url,
-                                string.Empty,
-                                null,
-                                null
-                            ));
+                                url));
+                        }
 
                         break;
                     }
@@ -455,6 +742,7 @@ internal sealed class StreamClient : IDisposable
 
                     break;
                 }
+
         }
     }
 
@@ -489,51 +777,285 @@ internal sealed class StreamClient : IDisposable
     internal Task SendHelloAsync(string displayName) =>
         SendAsync(new StreamControl { Type = SignalType.StreamHello, DisplayName = displayName });
 
+    //
+    // Current room metadata.
+    //
+    // Hosts populate these before publishing. Viewers receive the same
+    // values from the host's stream.state message. Password is never
+    // echoed by the server and therefore remains host-only.
+    //
     internal bool IsPrivate { get; set; }
+
     internal string? RoomDescription { get; set; }
+
     internal string? RoomLocation { get; set; }
-    internal RoomKind RoomKind { get; set; } = RoomKind.Public;
+
+    internal RoomKind RoomKind { get; set; } =
+        RoomKind.Public;
+
     internal string? RoomPassword { get; set; }
 
-    internal Task PublishStateAsync(string? url, double positionSeconds, bool paused, Vector3? screenPosition,
-        float? screenYaw, float? screenScale)
+    internal StreamControl? CurrentRoomState
     {
-        Mode = StreamMode.Hosting;
-        pendingJoinHost = null;
-        pendingJoinPassword = null;
-        lastHostState = new StreamControl
-        {
-            Type = SignalType.StreamState,
-            HostId = myAccountId,
-            Url = url,
-            PositionSeconds = positionSeconds,
-            Paused = paused,
-            ScreenX = screenPosition?.X,
-            ScreenY = screenPosition?.Y,
-            ScreenZ = screenPosition?.Z,
-            ScreenYaw = screenYaw,
-            ScreenScale = screenScale,
-            IsPrivate = IsPrivate,
-            Description = RoomDescription ?? "",
-            Location = RoomLocation ?? "",
-            Kind = RoomKind,
-            Password = RoomKind == RoomKind.Locked ? RoomPassword : null,
-        };
-        return SendAsync(lastHostState);
+        get;
+        private set;
     }
 
-    internal Task JoinAsync(string hostId, string? password = null)
+    //
+    // Compatibility overload for existing callers that only provide one
+    // fixed-ratio scale value.
+    //
+    internal Task PublishStateAsync(
+        string? url,
+        double positionSeconds,
+        bool paused,
+        Vector3? screenPosition,
+        float? screenYaw,
+        float? screenScale,
+        string? mediaTitle,
+        string? mediaThumbnailUrl)
     {
-        HostId = hostId;
-        pendingJoinHost = hostId;
-        pendingJoinPassword = string.IsNullOrWhiteSpace(password) ? null : password.Trim();
-        lastHostState = null;
-        return SendAsync(new StreamControl
+        return PublishStateAsync(
+            url,
+            positionSeconds,
+            paused,
+            screenPosition,
+            screenYaw,
+            screenScale,
+            screenDisableFixedScaleRatio: false,
+            screenWidthScale: screenScale,
+            screenHeightScale: screenScale,
+            mediaTitle,
+            mediaThumbnailUrl);
+    }
+
+    internal Task PublishStateAsync(
+    string? url,
+    double positionSeconds,
+    bool paused,
+Vector3? screenPosition,
+float? screenYaw,
+float? screenScale,
+bool? screenDisableFixedScaleRatio,
+float? screenWidthScale,
+float? screenHeightScale,
+string? mediaTitle,
+    string? mediaThumbnailUrl)
+    {
+        //
+        // LeaveAsync changes Mode immediately, but a framework update that
+        // already began may still reach this method. Do not let that stale
+        // update put the client back into Hosting or recreate the room.
+        //
+        if (leavingRoom)
         {
-            Type = SignalType.StreamJoin,
-            HostId = hostId,
-            Password = pendingJoinPassword,
-        });
+            return Task.CompletedTask;
+        }
+
+        Mode =
+            StreamMode.Hosting;
+
+        pendingJoinHost =
+            null;
+
+        pendingJoinPassword =
+            null;
+
+        lastHostState =
+            new StreamControl
+            {
+                Type =
+                    SignalType.StreamState,
+
+                HostId =
+                    myAccountId,
+
+                Url =
+                    url,
+
+                MediaTitle =
+                    mediaTitle,
+
+                MediaThumbnailUrl =
+                    mediaThumbnailUrl,
+
+                PositionSeconds =
+                    positionSeconds,
+
+                Paused =
+                    paused,
+
+                ScreenX =
+                    screenPosition?.X,
+
+                ScreenY =
+                    screenPosition?.Y,
+
+                ScreenZ =
+                    screenPosition?.Z,
+
+                ScreenYaw =
+                    screenYaw,
+
+                ScreenScale =
+    screenScale,
+
+                ScreenDisableFixedScaleRatio =
+    screenDisableFixedScaleRatio,
+
+                ScreenWidthScale =
+    screenWidthScale,
+
+                ScreenHeightScale =
+    screenHeightScale,
+
+                IsPrivate =
+                    IsPrivate,
+
+                Description =
+                    RoomDescription ?? "",
+
+                Location =
+                    RoomLocation ?? "",
+
+                Kind =
+                    RoomKind,
+
+                Password =
+                    RoomKind ==
+                    RoomKind.Locked
+                        ? RoomPassword
+                        : null,
+            };
+
+        CurrentRoomState =
+            lastHostState;
+
+        return SendAsync(
+            lastHostState);
+    }
+
+    //
+    // Republishes only the editable room metadata while preserving the
+    // current URL, timestamp, paused state, media details and screen
+    // transform from the most recently published host state.
+    //
+    // This updates the existing server Room and does not create a new
+    // room, clear the queue or disconnect its roster.
+    //
+    internal Task PublishRoomDetailsAsync()
+    {
+        //
+        // Do not allow a pending room-details update to recreate a room
+        // after its host has begun leaving.
+        //
+        if (leavingRoom ||
+            Mode != StreamMode.Hosting)
+        {
+            return Task.CompletedTask;
+        }
+
+        var currentState =
+            lastHostState ??
+            CurrentRoomState;
+
+        if (currentState is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        lastHostState =
+            currentState with
+            {
+                Type =
+                    SignalType.StreamState,
+
+                HostId =
+                    myAccountId,
+
+                IsPrivate =
+                    IsPrivate,
+
+                Description =
+                    RoomDescription ?? "",
+
+                Location =
+                    RoomLocation ?? "",
+
+                Kind =
+                    RoomKind,
+
+                //
+                // An empty password explicitly clears the server's old
+                // password hash when changing away from Locked.
+                //
+                Password =
+                    RoomKind ==
+                    RoomKind.Locked
+                        ? RoomPassword
+                        : string.Empty,
+            };
+
+        CurrentRoomState =
+            lastHostState;
+
+        return SendAsync(
+            lastHostState);
+    }
+
+    internal Task JoinAsync(
+        string hostId,
+        string? password = null)
+    {
+        HostId =
+            hostId;
+
+        pendingJoinHost =
+            hostId;
+
+        pendingJoinPassword =
+            string.IsNullOrWhiteSpace(
+                password)
+                ? null
+                : password.Trim();
+
+        lastHostState =
+            null;
+
+        //
+        // Prevent the previous room's details appearing briefly while
+        // waiting for the newly joined host's first state message.
+        //
+        CurrentRoomState =
+            null;
+
+        RoomDescription =
+            null;
+
+        RoomLocation =
+            null;
+
+        RoomKind =
+            RoomKind.Public;
+
+        RoomPassword =
+            null;
+
+        IsPrivate =
+            false;
+
+        return SendAsync(
+            new StreamControl
+            {
+                Type =
+                    SignalType.StreamJoin,
+
+                HostId =
+                    hostId,
+
+                Password =
+                    pendingJoinPassword,
+            });
     }
 
     // targetUserId comes straight from Roster (ParticipantInfo.UserId) - the host already has real
@@ -560,9 +1082,6 @@ internal sealed class StreamClient : IDisposable
       TimeSpan? duration,
       string? thumbnailUrl)
     {
-        const string mediaRequestPrefix =
-            "[[AC_MEDIA_REQUEST_1]]";
-
         var requestId =
             Guid.NewGuid();
 
@@ -570,57 +1089,283 @@ internal sealed class StreamClient : IDisposable
             new StreamControl
             {
                 Type = SignalType.StreamChat,
-                ChatText =
-                    mediaRequestPrefix +
-                    requestId.ToString("N") +
-                    "|" +
-                    url
+                ChatText = "[[AC_MEDIA_REQUEST_1]]" + requestId.ToString("N") + "|" + url
             });
     }
 
-    internal Task SendMediaRequestResultAsync(
-    Guid requestId,
-    bool playNow,
-    int queuePosition)
-    {
-        const string mediaResultPrefix =
-            "[[AC_MEDIA_RESULT_1]]";
+    internal Task PublishMediaRequestAsync(string requesterId, string requesterName, Guid requestId) =>
+        SendAsync(new StreamControl
+        {
+            Type = SignalType.StreamChat,
+            ChatText = "[[AC_MEDIA_PUBLISHED_1]]" + requestId.ToString("N") + "|" +
+                requesterId + "|" + Convert.ToBase64String(Encoding.UTF8.GetBytes(requesterName)),
+        });
 
-        return SendAsync(
-            new StreamControl
+    internal async Task SendNextQueueSnapshotAsync(PartyNextQueueSnapshot snapshot)
+    {
+        const int chunkSize = 180;
+        var encoded = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(snapshot)));
+        var chunkCount = Math.Max(1, (encoded.Length + chunkSize - 1) / chunkSize);
+        var messageId = Guid.NewGuid().ToString("N");
+
+        for (var index = 0; index < chunkCount; index++)
+        {
+            var offset = index * chunkSize;
+            var chunk = encoded.Substring(offset, Math.Min(chunkSize, encoded.Length - offset));
+            await SendAsync(new StreamControl
             {
                 Type = SignalType.StreamChat,
-                ChatText =
-                    mediaResultPrefix +
-                    requestId.ToString("N") +
-                    "|" +
-                    (playNow
-                        ? "play"
-                        : "queue") +
-                    "|" +
-                    queuePosition
-            });
+                ChatText = $"[[AC_NEXT_QUEUE_1]]{messageId}|{index}|{chunkCount}|{chunk}",
+            }).ConfigureAwait(false);
+        }
     }
 
-    internal async Task LeaveAsync()
+    private async Task MonitorSessionAsync(
+        CharacterSession connectedSession,
+        CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1), token).ConfigureAwait(false);
+            var current = sessionProvider();
+            if (current is null ||
+                !string.Equals(current.AccountId, connectedSession.AccountId, StringComparison.Ordinal) ||
+                !string.Equals(current.Token, connectedSession.Token, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+    }
+
+    private static TimeSpan GetReconnectDelay(int attempt)
+    {
+        var exponent = Math.Clamp(attempt - 1, 0, 5);
+        var seconds = Math.Min(30d, Math.Pow(2d, exponent));
+        var jitter = 0.8d + Random.Shared.NextDouble() * 0.4d;
+        return TimeSpan.FromSeconds(Math.Max(0.5d, seconds * jitter));
+    }
+
+    private static bool IsAuthenticationRejected(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is HttpRequestException
+                {
+                    StatusCode: System.Net.HttpStatusCode.Unauthorized or
+                                System.Net.HttpStatusCode.Forbidden,
+                })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void SetConnectionState(RealtimeConnectionState state) =>
+        connectionState = state;
+
+    private void ClearRoomForAuthenticationLoss()
     {
         if (Mode == StreamMode.None)
         {
             return;
         }
 
-        await SendAsync(new StreamControl { Type = SignalType.StreamLeave, HostId = HostId }).ConfigureAwait(false);
         Mode = StreamMode.None;
         HostId = null;
         Roster = [];
         lastHostState = null;
         pendingJoinHost = null;
         pendingJoinPassword = null;
-
-        IncomingChat.Clear();
-        IncomingMediaRequests.Clear();
+        CurrentRoomState = null;
+        OnEnded?.Invoke();
     }
 
+    private static async Task DelaySafelyAsync(
+        TimeSpan delay,
+        CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(delay, token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+    }
+
+    internal Task SendMediaRequestDeniedAsync(string requesterId, string reason) =>
+        SendAsync(new StreamControl
+        {
+            Type = SignalType.StreamChat,
+            ChatText = "[[AC_MEDIA_DENIED_1]]" + requesterId + "|" +
+                Convert.ToBase64String(Encoding.UTF8.GetBytes(reason)),
+        });
+
+    internal Task SendMediaRequestResultAsync(
+    Guid requestId,
+    bool playNow,
+    int queuePosition)
+    {
+        return SendAsync(
+            new StreamControl
+            {
+                Type = SignalType.StreamChat,
+                ChatText = "[[AC_MEDIA_RESULT_1]]" + requestId.ToString("N") + "|" +
+                    (playNow ? "play" : "queue") + "|" + queuePosition,
+            });
+    }
+
+    internal async Task LeaveAsync()
+    {
+        if (Mode ==
+            StreamMode.None)
+        {
+            return;
+        }
+
+        //
+        // The currently deployed server only guarantees room teardown when
+        // the host's socket disconnects. Remember whether this client was
+        // hosting before clearing its local mode.
+        //
+        var wasHosting =
+            Mode ==
+            StreamMode.Hosting;
+
+        //
+        // For viewers this identifies the room being left. A host normally
+        // has no HostId because the server identifies their room from their
+        // authenticated account.
+        //
+        var leavingHostId =
+            HostId;
+
+        //
+        // Prevent any periodic state publication from recreating the room
+        // while departure is in progress.
+        //
+        leavingRoom =
+            true;
+
+        Mode =
+            StreamMode.None;
+
+        lastHostState =
+            null;
+
+        CurrentRoomState =
+            null;
+
+        pendingJoinHost =
+            null;
+
+        pendingJoinPassword =
+            null;
+
+        try
+        {
+            //
+            // Keep sending the explicit leave message. This supports the
+            // updated server handler once that version is deployed, and is
+            // still the normal departure path for viewers.
+            //
+            await SendAsync(
+                    new StreamControl
+                    {
+                        Type =
+                            SignalType.StreamLeave,
+
+                        HostId =
+                            leavingHostId,
+                    })
+                .ConfigureAwait(false);
+
+            //
+            // Temporary compatibility behavior for the currently deployed
+            // server: disconnect a departing host's shared /rt socket so the
+            // server's existing connection-finally cleanup closes the room
+            // and broadcasts stream.ended to every viewer.
+            //
+            // RunAsync will establish a fresh connection automatically.
+            //
+            if (wasHosting)
+            {
+                var currentSocket =
+                    socket;
+
+                if (currentSocket is
+                    {
+                        State:
+                            WebSocketState.Open
+                    })
+                {
+                    try
+                    {
+                        await currentSocket.CloseOutputAsync(
+                                WebSocketCloseStatus.NormalClosure,
+                                "Watch Party host left",
+                                CancellationToken.None)
+                            .ConfigureAwait(false);
+                    }
+                    catch (Exception exception)
+                    {
+                        AepLog.Warning(
+                            $"[Stream] Graceful host-leave disconnect failed: {exception.Message}");
+
+                        //
+                        // Abort is the fallback that guarantees the receive
+                        // loop exits and the server observes disconnection.
+                        //
+                        try
+                        {
+                            currentSocket.Abort();
+                        }
+                        catch (Exception abortException)
+                        {
+                            AepLog.Warning(
+                                $"[Stream] Failed to abort host connection: {abortException.Message}");
+                        }
+                    }
+                }
+            }
+        }
+        finally
+        {
+            HostId =
+                null;
+
+            Roster =
+                [];
+
+            RoomDescription =
+                null;
+
+            RoomLocation =
+                null;
+
+            RoomKind =
+                RoomKind.Public;
+
+            RoomPassword =
+                null;
+
+            IsPrivate =
+                false;
+
+            IncomingChat.Clear();
+            IncomingMediaRequests.Clear();
+            PendingHostMediaRequests.Clear();
+            observedMediaRequestUrls.Clear();
+            IncomingNextQueueSnapshots.Clear();
+            incomingNextQueueChunks.Clear();
+
+            leavingRoom =
+                false;
+        }
+    }
     private async Task FlushPendingAsync(CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
@@ -643,6 +1388,22 @@ internal sealed class StreamClient : IDisposable
 
     private async Task SendAsync(StreamControl message)
     {
+        lock (lifecycleGate)
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            activeSends++;
+            sendsDrained.Reset();
+        }
+
+        var enteredSendLock =
+            false;
+
+        try
+        {
         var ws = socket;
         if (ws is not { State: WebSocketState.Open })
         {
@@ -650,10 +1411,14 @@ internal sealed class StreamClient : IDisposable
         }
 
         var json = JsonSerializer.SerializeToUtf8Bytes(message);
-        await sendLock.WaitAsync().ConfigureAwait(false);
-        try
-        {
+        await sendLock.WaitAsync(lifetime.Token).ConfigureAwait(false);
+        enteredSendLock = true;
+
             await ws.SendAsync(json, WebSocketMessageType.Text, true, lifetime.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+            // Normal during plugin shutdown.
         }
         catch (Exception exception)
         {
@@ -661,7 +1426,19 @@ internal sealed class StreamClient : IDisposable
         }
         finally
         {
-            sendLock.Release();
+            if (enteredSendLock)
+            {
+                sendLock.Release();
+            }
+
+            lock (lifecycleGate)
+            {
+                activeSends--;
+                if (activeSends == 0)
+                {
+                    sendsDrained.Set();
+                }
+            }
         }
     }
 
@@ -682,9 +1459,55 @@ internal sealed class StreamClient : IDisposable
 
     public void Dispose()
     {
+        lock (lifecycleGate)
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            disposed = true;
+        }
+
         lifetime.Cancel();
-        socket?.Dispose();
+
+        try { socket?.Abort(); } catch { }
+        try { socket?.Dispose(); } catch { }
+
+        try
+        {
+            if (runTask is { IsCompleted: false } &&
+                !runTask.Wait(TimeSpan.FromSeconds(3)))
+            {
+                AepLog.Warning(
+                    "[Realtime] Connection worker did not stop within 3 seconds.");
+            }
+        }
+        catch (Exception exception)
+        {
+            AepLog.Debug(
+                $"[Realtime] Connection worker cleanup warning: {exception.Message}");
+        }
+
+        var sendsFinished =
+            sendsDrained.Wait(TimeSpan.FromSeconds(3));
+
+        if (!sendsFinished)
+        {
+            // SemaphoreSlim has no native handle unless AvailableWaitHandle is
+            // requested. Leaving it for GC is safer than disposing it beneath
+            // a send which is still unwinding.
+            AepLog.Warning(
+                "[Realtime] A send was still finishing during shutdown.");
+        }
+
+        runTask = null;
         lifetime.Dispose();
-        sendLock.Dispose();
+
+        if (sendsFinished)
+        {
+            sendLock.Dispose();
+            sendsDrained.Dispose();
+        }
     }
 }

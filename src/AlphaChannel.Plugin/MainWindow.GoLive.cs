@@ -23,9 +23,36 @@ internal sealed partial class MainWindow
     private bool keyRotating;
     private string? keyError;
     private bool keyRegenerateConfirmPending;
+    private string? livePatreonAccessMessage;
 
-    private bool obsSetupGuideOpen;
+    private void RefreshLivePatreonAccess()
+    {
+        if (!HasConfiguredPatreonAccess())
+        {
+            patreonAccessConfirmed = false;
+            livePatreonAccessMessage =
+                "No active Patreon membership was found.";
+            return;
+        }
+
+        patreonAccessConfirmed = true;
+        livePatreonAccessMessage = null;
+        obsConnectionError = null;
+
+        Plugin.ChatGui.Print(
+            $"[AlphaChannel] Patreon access confirmed (tier {Plugin.Cfg.PatreonMembershipTier}).");
+    }
+
+    private enum LiveStreamGuideKind
+    {
+        None,
+        ObsStudio,
+        GenericRtmp,
+    }
+
+    private LiveStreamGuideKind liveStreamGuideKind;
     private int obsSetupGuideStep;
+    private int genericStreamGuideStep;
 
     private bool friendsLiveDirty = true;
     private LiveFriendDto[] friendsLive = [];
@@ -47,10 +74,6 @@ internal sealed partial class MainWindow
             RefreshLiveStatus(session);
         }
 
-        if (friendsLiveDirty)
-        {
-            RefreshFriendsLive(session.Token);
-        }
 
         // Keep the Go Live content scrollable without scrolling
         // the Player header/source navigation above it.
@@ -69,106 +92,319 @@ internal sealed partial class MainWindow
         // Heading
         // ---------------------------------------------------------
 
-        ImGui.SetWindowFontScale(1.15f);
+        SetUiFontScale(
+            1.3f);
 
         ImGui.TextColored(
             Vector4.One,
-            "Go Live with OBS");
+            "Live Stream");
 
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(
+            1f);
 
         ImGui.Dummy(
-            new Vector2(0f, 8f));
+            UiVec(0f, 2f));
 
-        using (ImRaii.PushStyle(
-            ImGuiStyleVar.FrameRounding,
-            7f))
-        using (ImRaii.PushColor(
-            ImGuiCol.Button,
-            new Vector4(
-                0.055f,
-                0.07f,
-                0.115f,
-                1f))
-            .Push(
-                ImGuiCol.ButtonHovered,
-                new Vector4(
-                    0.075f,
-                    0.095f,
-                    0.15f,
-                    1f))
-            .Push(
-                ImGuiCol.ButtonActive,
-                new Vector4(
-                    0.075f,
-                    0.095f,
-                    0.15f,
-                    1f)))
-        {
-            var buttonPos =
-                ImGui.GetCursorScreenPos();
+        SetUiFontScale(
+            0.88f);
 
-            var buttonSize =
-                new Vector2(
-                    170f,
-                    34f);
+        ImGui.TextColored(
+            MutedText,
+            "Stream from OBS Studio or another RTMP-compatible broadcasting app.");
 
-            if (ImGui.Button(
-                "##obsSetupGuide",
-                buttonSize))
+        SetUiFontScale(
+            1f);
+
+        ImGui.Dummy(
+            UiVec(0f, 16f));
+
+        // ---------------------------------------------------------
+        // Three-step workflow
+        // ---------------------------------------------------------
+
+        var cachedStreamKey =
+            Plugin.Cfg.StreamKeys.GetValueOrDefault(
+                session.AccountId);
+
+        var livePatreonUnlocked =
+            HasConfirmedPatreonAccess();
+
+        var hasStreamKey =
+            livePatreonUnlocked &&
+            !string.IsNullOrWhiteSpace(
+                cachedStreamKey);
+
+        var currentLiveStep =
+            !hasStreamKey
+                ? 1
+                : obsConnectionOnline
+                    ? 3
+                    : 2;
+
+        var workflowOrigin =
+            ImGui.GetCursorScreenPos();
+
+        var workflowWidth =
+            ImGui.GetContentRegionAvail().X;
+
+        var workflowHeight =
+            Ui(54f);
+
+        var workflowDrawList =
+            ImGui.GetWindowDrawList();
+
+        var stepCenters =
+            new[]
             {
-                obsSetupGuideStep = 0;
-                obsSetupGuideOpen = true;
+                workflowOrigin.X +
+                (workflowWidth * 0.12f),
+
+                workflowOrigin.X +
+                (workflowWidth * 0.50f),
+
+                workflowOrigin.X +
+                (workflowWidth * 0.88f)
+            };
+
+        var stepLabels =
+            new[]
+            {
+                "Add connection details",
+                "Start streaming in your app",
+                "Broadcast to TV"
+            };
+
+        for (var index = 0;
+             index < 2;
+             index++)
+        {
+            var lineStart =
+                new Vector2(
+                    stepCenters[index] +
+                    Ui(18f),
+                    workflowOrigin.Y +
+                    Ui(18f));
+
+            var lineEnd =
+                new Vector2(
+                    stepCenters[index + 1] -
+                    Ui(18f),
+                    workflowOrigin.Y +
+                    Ui(18f));
+
+            workflowDrawList.AddLine(
+                lineStart,
+                lineEnd,
+                ImGui.GetColorU32(
+                    !livePatreonUnlocked &&
+                    index == 0
+                        ? Accent
+                        : index + 1 <
+                    currentLiveStep
+                        ? Accent
+                        : new Vector4(
+                            MutedText.X,
+                            MutedText.Y,
+                            MutedText.Z,
+                            0.34f)),
+                Ui(2f));
+        }
+
+        for (var index = 0;
+             index < 3;
+             index++)
+        {
+            var stepNumber =
+                index + 1;
+
+            var active =
+                stepNumber ==
+                currentLiveStep;
+
+            var completed =
+                stepNumber <
+                currentLiveStep;
+
+            var patreonLockedStep =
+                !livePatreonUnlocked &&
+                index == 0;
+
+            var circleCenter =
+                new Vector2(
+                    stepCenters[index],
+                    workflowOrigin.Y +
+                    Ui(18f));
+
+            workflowDrawList.AddCircleFilled(
+                circleCenter,
+                Ui(16f),
+                ImGui.GetColorU32(
+                    patreonLockedStep
+                        ? PatreonOrange
+                        : active
+                        ? Accent
+                        : completed
+                            ? new Vector4(
+                                Accent.X,
+                                Accent.Y,
+                                Accent.Z,
+                                0.55f)
+                            : new Vector4(
+                                0.10f,
+                                0.13f,
+                                0.20f,
+                                1f)),
+                32);
+
+            var numberText =
+                patreonLockedStep
+                    ? FontAwesomeIcon.Lock.ToIconString()
+                    : stepNumber.ToString();
+
+            Vector2 numberSize;
+
+            if (patreonLockedStep)
+            {
+                using (ImRaii.PushFont(
+                           UiBuilder.IconFont))
+                {
+                    numberSize =
+                        ImGui.CalcTextSize(
+                            numberText);
+                }
+            }
+            else
+            {
+                numberSize =
+                    ImGui.CalcTextSize(
+                        numberText);
             }
 
-            DrawPlayerActionButtonContent(
-                buttonPos,
-                buttonSize,
-                FontAwesomeIcon.BookOpen,
-                "OBS Setup Guide",
-                Vector4.One);
+            if (patreonLockedStep)
+            {
+                workflowDrawList.AddText(
+                    UiBuilder.IconFont,
+                    ImGui.GetFontSize(),
+                    circleCenter -
+                    numberSize *
+                    0.5f,
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            0.055f,
+                            0.06f,
+                            0.09f,
+                            1f)),
+                    numberText);
+            }
+            else
+            {
+                workflowDrawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                    circleCenter -
+                    numberSize *
+                    0.5f,
+                    ImGui.GetColorU32(
+                        Vector4.One),
+                    numberText);
+            }
+
+            var labelSize =
+                ImGui.CalcTextSize(
+                    stepLabels[index]);
+
+            workflowDrawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                new Vector2(
+                    circleCenter.X -
+                    (labelSize.X * 0.5f),
+                    workflowOrigin.Y +
+                    Ui(39f)),
+                ImGui.GetColorU32(
+                    patreonLockedStep
+                        ? PatreonOrange
+                        : active
+                        ? Accent
+                        : MutedText),
+                stepLabels[index]);
         }
 
         ImGui.Dummy(
-            new Vector2(0f, 12f));
+            new Vector2(
+                workflowWidth,
+                workflowHeight));
+
+        ImGui.Dummy(
+            UiVec(0f, 12f));
 
         // ---------------------------------------------------------
-        // Stream status
+        // Incoming-stream status
         // ---------------------------------------------------------
+
+        var statusCardHeight =
+            Ui(116f);
 
         using (ImRaii.PushStyle(
-            ImGuiStyleVar.ChildRounding,
-            8f))
+                   ImGuiStyleVar.ChildRounding,
+                   9f))
         using (ImRaii.PushColor(
-            ImGuiCol.ChildBg,
-            new Vector4(
-                0.045f,
-                0.06f,
-                0.10f,
-                1f)))
+                   ImGuiCol.ChildBg,
+                   new Vector4(
+                       0.045f,
+                       0.06f,
+                       0.10f,
+                       1f)))
         using (var statusCard =
-            ImRaii.Child(
-                "##goLiveStatus",
-                new Vector2(
-                    -1f,
-                    Ui(110f)),
-                false,
-                ImGuiWindowFlags.NoScrollbar |
-                ImGuiWindowFlags.NoScrollWithMouse))
+               ImRaii.Child(
+                   "##goLiveStatus",
+                   new Vector2(
+                       -1f,
+                       statusCardHeight),
+                   false,
+                   ImGuiWindowFlags.NoScrollbar |
+                   ImGuiWindowFlags.NoScrollWithMouse))
         {
             if (statusCard)
             {
-                // -------------------------------------------------
-                // LIVE / OFFLINE
-                // -------------------------------------------------
+                var origin =
+                    ImGui.GetCursorScreenPos();
 
-                ImGui.SetCursorPos(
+                var cardWidth =
+                    ImGui.GetWindowWidth();
+
+                var drawList =
+                    ImGui.GetWindowDrawList();
+
+                drawList.AddRect(
+                    origin,
+                    origin +
                     new Vector2(
-                        14f,
-                        12f));
+                        cardWidth,
+                        statusCardHeight),
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            obsConnectionOnline
+                                ? Good.X
+                                : MutedText.X,
+                            obsConnectionOnline
+                                ? Good.Y
+                                : MutedText.Y,
+                            obsConnectionOnline
+                                ? Good.Z
+                                : MutedText.Z,
+                            obsConnectionOnline
+                                ? 0.25f
+                                : 0.14f)),
+                    9f,
+                    ImDrawFlags.None,
+                    1f);
+
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        origin.X +
+                        Ui(16f),
+                        origin.Y +
+                        Ui(15f)));
 
                 using (ImRaii.PushFont(
-                    UiBuilder.IconFont))
+                           UiBuilder.IconFont))
                 {
                     ImGui.TextColored(
                         obsConnectionOnline
@@ -180,200 +416,190 @@ internal sealed partial class MainWindow
 
                 ImGui.SameLine(
                     0f,
-                    8f);
+                    Ui(8f));
 
                 ImGui.TextColored(
                     obsConnectionOnline
                         ? Good
                         : MutedText,
                     obsConnectionOnline
-                        ? "LIVE"
-                        : "OFFLINE");
+                        ? "STREAM DETECTED"
+                        : obsConnectionChecking
+                            ? "CHECKING CONNECTION"
+                            : "WAITING FOR STREAM");
 
-                // -------------------------------------------------
-                // Main text
-                // -------------------------------------------------
-
-                ImGui.SetCursorPos(
+                ImGui.SetCursorScreenPos(
                     new Vector2(
-                        14f,
-                        39f));
+                        origin.X +
+                        Ui(16f),
+                        origin.Y +
+                        Ui(46f)));
 
                 ImGui.TextColored(
                     Vector4.One,
                     obsConnectionOnline
-                        ? "OBS stream detected"
-                        : "Not streaming right now");
+                        ? "Incoming stream detected"
+                        : obsConnectionChecking
+                            ? "Looking for an incoming stream..."
+                            : "No incoming stream detected");
 
-                // -------------------------------------------------
-                // Supporting text
-                // -------------------------------------------------
-
-                ImGui.SetCursorPos(
-                    new Vector2(
-                        14f,
-                        65f));
-
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     0.82f);
+
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        origin.X +
+                        Ui(16f),
+                        origin.Y +
+                        Ui(76f)));
 
                 ImGui.TextColored(
                     MutedText,
                     obsConnectionOnline
-                        ? "Your OBS stream is ready to broadcast."
+                        ? "Your incoming stream is ready to broadcast."
                         : obsConnectionChecking
-                            ? "Checking for your OBS stream..."
-                            : "Start streaming from OBS, then check the connection.");
+                            ? "This normally takes only a few seconds."
+                            : "Start streaming from your broadcasting app, then check the connection.");
 
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     1f);
 
-                // -------------------------------------------------
-                // Right-side action buttons
-                // -------------------------------------------------
+                var checkSize =
+                    new Vector2(
+                        Ui(142f),
+                        Ui(38f));
 
-                if (obsConnectionOnline)
+                var broadcastSize =
+                    new Vector2(
+                        Ui(172f),
+                        Ui(38f));
+
+                var actionGap =
+                    Ui(9f);
+
+                var totalActionWidth =
+                    checkSize.X +
+                    actionGap +
+                    broadcastSize.X;
+
+                var actionX =
+                    origin.X +
+                    cardWidth -
+                    totalActionWidth -
+                    Ui(14f);
+
+                var actionY =
+                    origin.Y +
+                    ((statusCardHeight -
+                      checkSize.Y) *
+                     0.5f);
+
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        actionX,
+                        actionY));
+
+                if (!livePatreonUnlocked)
                 {
-                    var broadcastSize =
-                        new Vector2(
-                            190f,
-                            36f);
-
-                    var refreshSize =
-                        new Vector2(
-                            42f,
-                            36f);
-
-                    var totalWidth =
-                        broadcastSize.X +
-                        8f +
-                        refreshSize.X;
-
-                    ImGui.SetCursorPos(
-                        new Vector2(
-                            ImGui.GetWindowWidth() -
-                            totalWidth -
-                            14f,
-                            29f));
-
+                    using (ImRaii.Disabled())
                     using (ImRaii.PushStyle(
-                        ImGuiStyleVar.FrameRounding,
-                        8f))
-                    using (ImRaii.PushColor(
-                        ImGuiCol.Button,
-                        Accent)
-                        .Push(
-                            ImGuiCol.ButtonHovered,
-                            AccentHover)
-                        .Push(
-                            ImGuiCol.ButtonActive,
-                            AccentActive))
+                               ImGuiStyleVar.FrameRounding,
+                               8f))
                     {
-                        if (ImGui.Button(
-                            "Broadcast Stream to TV",
-                            broadcastSize))
-                        {
-                            var hlsUrl =
-                                BuildMyHlsUrl(
-                                    session);
-
-                            queue.PlayNow(
-                                new VideoQueueEntry(
-                                    hlsUrl,
-                                    "My OBS live stream",
-                                    "Live",
-                                    null,
-                                    null));
-
-                            currentPage =
-                                HomePage.Player;
-                        }
-                    }
-
-                    ImGui.SameLine(
-                        0f,
-                        8f);
-
-                    using (ImRaii.Disabled(
-          obsConnectionChecking))
-                    using (ImRaii.PushStyle(
-                        ImGuiStyleVar.FrameRounding,
-                        8f))
-                    using (ImRaii.PushColor(
-                        ImGuiCol.Button,
-                        Accent)
-                        .Push(
-                            ImGuiCol.ButtonHovered,
-                            AccentHover)
-                        .Push(
-                            ImGuiCol.ButtonActive,
-                            AccentActive))
-                    {
-                        var buttonPos =
+                        var lockedCheckOrigin =
                             ImGui.GetCursorScreenPos();
 
-                        if (ImGui.Button(
-                            "##refreshObsConnection",
-                            refreshSize))
-                        {
-                            CheckObsConnection(
-                                session);
-                        }
+                        ImGui.Button(
+                            "##lockedLiveConnectionCheck",
+                            checkSize);
 
-                        // Draw the refresh glyph ourselves using the
-                        // correct Dalamud icon font.
-                        using (ImRaii.PushFont(
-                            UiBuilder.IconFont))
-                        {
-                            var icon =
-                                FontAwesomeIcon.SyncAlt
-                                    .ToIconString();
+                        DrawPlayerActionButtonContent(
+                            lockedCheckOrigin,
+                            checkSize,
+                            FontAwesomeIcon.Lock,
+                            "Check connection",
+                            MutedText);
+                    }
 
-                            var iconSize =
-                                ImGui.CalcTextSize(
-                                    icon);
-
-                            ImGui.GetWindowDrawList()
-                                .AddText(
-                                    buttonPos +
-                                    new Vector2(
-                                        (refreshSize.X - iconSize.X) * 0.5f,
-                                        (refreshSize.Y - iconSize.Y) * 0.5f),
-                                    ImGui.GetColorU32(
-                                        Vector4.One),
-                                    icon);
-                        }
+                    if (ImGui.IsItemHovered(
+                            ImGuiHoveredFlags.AllowWhenDisabled))
+                    {
+                        ImGui.SetTooltip(
+                            "Unlock live streaming to check your connection.");
                     }
                 }
                 else
                 {
-                    var checkSize =
-                        new Vector2(
-                            150f,
-                            36f);
-
-                    ImGui.SetCursorPos(
-                        new Vector2(
-                            ImGui.GetWindowWidth() -
-                            checkSize.X -
-                            14f,
-                            29f));
-
                     using (ImRaii.Disabled(
-                        obsConnectionChecking))
+                               obsConnectionChecking))
                     using (ImRaii.PushStyle(
-                        ImGuiStyleVar.FrameRounding,
-                        8f))
+                               ImGuiStyleVar.FrameRounding,
+                               8f))
                     {
                         if (ImGui.Button(
-                            obsConnectionChecking
-                                ? "Checking..."
-                                : "Check Connection",
-                            checkSize))
+                                obsConnectionChecking
+                                    ? "Checking..."
+                                    : "Check connection",
+                                checkSize))
                         {
                             CheckObsConnection(
                                 session);
                         }
+                    }
+                }
+
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        actionX +
+                        checkSize.X +
+                        actionGap,
+                        actionY));
+
+                using (ImRaii.Disabled(
+                           !livePatreonUnlocked ||
+                           !obsConnectionOnline ||
+                           stream.Mode ==
+                           StreamMode.Viewing))
+                using (ImRaii.PushStyle(
+                           ImGuiStyleVar.FrameRounding,
+                           8f))
+                using (ImRaii.PushColor(
+                           ImGuiCol.Button,
+                           Accent)
+                       .Push(
+                           ImGuiCol.ButtonHovered,
+                           AccentHover)
+                       .Push(
+                           ImGuiCol.ButtonActive,
+                           AccentActive))
+                {
+                    if (ImGui.Button(
+         "Broadcast to TV",
+         broadcastSize))
+                    {
+                        BeginLiveWatchPartyBroadcast(
+                            session);
+                    }
+                }
+
+                if (ImGui.IsItemHovered(
+          ImGuiHoveredFlags.AllowWhenDisabled))
+                {
+                    if (!livePatreonUnlocked)
+                    {
+                        ImGui.SetTooltip(
+                            "A Patreon membership is required to broadcast live streams.");
+                    }
+                    else if (!obsConnectionOnline)
+                    {
+                        ImGui.SetTooltip(
+                            "Start streaming from your broadcasting app first.");
+                    }
+                    else if (stream.Mode ==
+                             StreamMode.Viewing)
+                    {
+                        ImGui.SetTooltip(
+                            "Leave your current Watch Party before broadcasting.");
                     }
                 }
             }
@@ -382,801 +608,1340 @@ internal sealed partial class MainWindow
         if (obsConnectionError is { Length: > 0 } connectionError)
         {
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    6f));
+                UiVec(0f, 6f));
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 0.82f);
 
             ImGui.TextColored(
                 MutedText,
                 connectionError);
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
         }
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                18f));
+            UiVec(0f, 18f));
 
-       
+
 
         // ---------------------------------------------------------
-        // OBS setup
+        // Compact setup cards
         // ---------------------------------------------------------
 
-        ImGui.SetWindowFontScale(1.08f);
+        var setupAvailableWidth =
+            ImGui.GetContentRegionAvail().X;
 
-        ImGui.TextColored(
-            Vector4.One,
-            "OBS setup");
+        var setupGap =
+            Ui(12f);
 
-        ImGui.SetWindowFontScale(1f);
+        var connectionCardWidth =
+            (setupAvailableWidth -
+             setupGap) *
+            0.54f;
 
-        ImGui.Dummy(new Vector2(0f, 4f));
+        var softwareCardWidth =
+            setupAvailableWidth -
+            connectionCardWidth -
+            setupGap;
 
-        ImGui.SetWindowFontScale(0.82f);
+        var setupCardHeight =
+            Ui(286f);
 
-        ImGui.TextColored(
-            MutedText,
-            "Connect OBS using the server and stream key below.");
+        DrawLiveConnectionCard(
+            session,
+            connectionCardWidth,
+            setupCardHeight);
 
-        ImGui.SetWindowFontScale(1f);
+        ImGui.SameLine(
+            0f,
+            setupGap);
 
-        ImGui.Dummy(new Vector2(0f, 14f));
+        DrawLiveSoftwareCard(
+            softwareCardWidth,
+            setupCardHeight);
 
-        // ---------------------------------------------------------
-        // Server
-        // ---------------------------------------------------------
 
-        ImGui.SetWindowFontScale(0.88f);
+    }
 
-        ImGui.TextColored(
-            MutedText,
-            "Server");
-
-        ImGui.SetWindowFontScale(1f);
-
-        ImGui.Dummy(new Vector2(0f, 4f));
-
-        var rtmpServer = BuildRtmpServer();
-
-        ImGui.SetNextItemWidth(-126f);
-
+    private void DrawLiveConnectionCard(
+    CharacterSession session,
+    float width,
+    float height)
+    {
         using (ImRaii.PushStyle(
-            ImGuiStyleVar.FrameRounding,
-            8f)
-            .Push(
-                ImGuiStyleVar.FramePadding,
-                new Vector2(14f, 10f)))
+                   ImGuiStyleVar.ChildRounding,
+                   9f))
         using (ImRaii.PushColor(
-            ImGuiCol.FrameBg,
-            new Vector4(0.045f, 0.06f, 0.105f, 1f))
-            .Push(
-                ImGuiCol.FrameBgHovered,
-                new Vector4(0.045f, 0.06f, 0.105f, 1f))
-            .Push(
-                ImGuiCol.FrameBgActive,
-                new Vector4(0.045f, 0.06f, 0.105f, 1f)))
+                   ImGuiCol.ChildBg,
+                   new Vector4(
+                       0.045f,
+                       0.06f,
+                       0.10f,
+                       1f)))
+        using (var card = ImRaii.Child(
+                   "##liveConnectionCard",
+                   new Vector2(
+                       width,
+                       height),
+                   false,
+                   ImGuiWindowFlags.NoScrollbar |
+                   ImGuiWindowFlags.NoScrollWithMouse))
         {
-            ImGui.InputText(
-                "##rtmpServer",
-                ref rtmpServer,
-                256,
-                ImGuiInputTextFlags.ReadOnly);
-        }
+            if (!card)
+            {
+                return;
+            }
 
-        ImGui.SameLine(0f, 10f);
-
-        // Copy server button
-        using (ImRaii.PushStyle(
-            ImGuiStyleVar.FrameRounding,
-            8f))
-        using (ImRaii.PushColor(
-            ImGuiCol.Button,
-            new Vector4(0.055f, 0.07f, 0.115f, 1f))
-            .Push(
-                ImGuiCol.ButtonHovered,
-                new Vector4(0.075f, 0.095f, 0.15f, 1f))
-            .Push(
-                ImGuiCol.ButtonActive,
-                new Vector4(0.075f, 0.095f, 0.15f, 1f)))
-        {
-            var buttonPos =
+            var origin =
                 ImGui.GetCursorScreenPos();
 
-            var buttonSize =
-                new Vector2(110f, 38f);
+            var cardWidth =
+                ImGui.GetWindowWidth();
+
+            if (!HasConfirmedPatreonAccess())
+            {
+                DrawLivePatreonConnectionGate();
+
+                return;
+            }
+
+            var padding =
+                Ui(16f);
+
+            ImGui.SetCursorScreenPos(
+                origin +
+                new Vector2(
+                    padding,
+                    Ui(14f)));
+
+            SetUiFontScale(
+                1.08f);
+
+            ImGui.TextColored(
+                Vector4.One,
+                "Connect your streaming app");
+
+            DrawPatreonFeatureTag();
+
+            SetUiFontScale(
+                1f);
+
+            ImGui.SetCursorScreenPos(
+                origin +
+                new Vector2(
+                    padding,
+                    Ui(43f)));
+
+            SetUiFontScale(
+                0.80f);
+
+            ImGui.TextColored(
+                MutedText,
+                "Enter these details in your broadcasting software.");
+
+            SetUiFontScale(
+                1f);
+
+            var rtmpServer =
+                BuildRtmpServer();
+
+            // -------------------------------------------------
+            // Server URL
+            // -------------------------------------------------
+
+            ImGui.SetCursorScreenPos(
+                origin +
+                new Vector2(
+                    padding,
+                    Ui(78f)));
+
+            SetUiFontScale(
+                0.82f);
+
+            ImGui.TextColored(
+                MutedText,
+                "Server URL");
+
+            SetUiFontScale(
+                1f);
+
+            var copyServerSize =
+                new Vector2(
+                    Ui(74f),
+                    Ui(36f));
+
+            var serverFieldWidth =
+                cardWidth -
+                (padding * 2f) -
+                copyServerSize.X -
+                Ui(8f);
+
+            ImGui.SetCursorScreenPos(
+                origin +
+                new Vector2(
+                    padding,
+                    Ui(99f)));
+
+            ImGui.SetNextItemWidth(
+                serverFieldWidth);
+
+            using (ImRaii.PushStyle(
+                       ImGuiStyleVar.FrameRounding,
+                       7f)
+                   .Push(
+                       ImGuiStyleVar.FramePadding,
+                       new Vector2(
+                           Ui(11f),
+                           Ui(9f))))
+            using (ImRaii.PushColor(
+                       ImGuiCol.FrameBg,
+                       new Vector4(
+                           0.025f,
+                           0.035f,
+                           0.065f,
+                           1f))
+                   .Push(
+                       ImGuiCol.FrameBgHovered,
+                       new Vector4(
+                           0.025f,
+                           0.035f,
+                           0.065f,
+                           1f))
+                   .Push(
+                       ImGuiCol.FrameBgActive,
+                       new Vector4(
+                           0.025f,
+                           0.035f,
+                           0.065f,
+                           1f)))
+            {
+                ImGui.InputText(
+                    "##compactRtmpServer",
+                    ref rtmpServer,
+                    256,
+                    ImGuiInputTextFlags.ReadOnly);
+            }
+
+            ImGui.SameLine(
+                0f,
+                Ui(8f));
 
             if (ImGui.Button(
-                "##copyServer",
-                buttonSize))
+                    "Copy##compactServerCopy",
+                    copyServerSize))
             {
                 ImGui.SetClipboardText(
                     rtmpServer);
             }
 
-            DrawPlayerActionButtonContent(
-                buttonPos,
-                buttonSize,
-                FontAwesomeIcon.Copy,
-                "Copy",
-                Vector4.One);
-        }
+            // -------------------------------------------------
+            // Stream key
+            // -------------------------------------------------
 
-        ImGui.Dummy(new Vector2(0f, 16f));
+            ImGui.SetCursorScreenPos(
+                origin +
+                new Vector2(
+                    padding,
+                    Ui(151f)));
 
-        // ---------------------------------------------------------
-        // Stream key
-        // ---------------------------------------------------------
-
-        ImGui.SetWindowFontScale(0.88f);
-
-        ImGui.TextColored(
-            MutedText,
-            "Stream key");
-
-        ImGui.SetWindowFontScale(1f);
-
-        ImGui.Dummy(new Vector2(0f, 4f));
-
-        var cachedKey =
-            Plugin.Cfg.StreamKeys.GetValueOrDefault(
-                session.AccountId);
-
-        if (cachedKey is null)
-        {
-            ImGui.SetWindowFontScale(0.82f);
+            SetUiFontScale(
+                0.82f);
 
             ImGui.TextColored(
                 MutedText,
-                liveStatus?.HasKey ?? false
-                    ? "A stream key exists on another install. Regenerate it to use it here."
-                    : "No stream key yet. Generate one to connect OBS.");
+                "Stream key");
 
-            ImGui.SetWindowFontScale(1f);
+            SetUiFontScale(
+                1f);
 
-            ImGui.Dummy(new Vector2(0f, 8f));
-        }
-        else
-        {
-            var displayKey =
-                streamKeyRevealed
-                    ? cachedKey
-                    : new string(
-                        '•',
-                        Math.Min(
-                            cachedKey.Length,
-                            32));
+            var cachedKey =
+                Plugin.Cfg.StreamKeys.GetValueOrDefault(
+                    session.AccountId);
 
-            ImGui.SetNextItemWidth(-1f);
-
-            using (ImRaii.PushStyle(
-                ImGuiStyleVar.FrameRounding,
-                8f)
-                .Push(
-                    ImGuiStyleVar.FramePadding,
-                    new Vector2(14f, 10f)))
-            using (ImRaii.PushColor(
-                ImGuiCol.FrameBg,
-                new Vector4(0.045f, 0.06f, 0.105f, 1f))
-                .Push(
-                    ImGuiCol.FrameBgHovered,
-                    new Vector4(0.045f, 0.06f, 0.105f, 1f))
-                .Push(
-                    ImGuiCol.FrameBgActive,
-                    new Vector4(0.045f, 0.06f, 0.105f, 1f)))
+            if (!string.IsNullOrWhiteSpace(
+                    cachedKey))
             {
-                ImGui.InputText(
-                    "##streamKey",
-                    ref displayKey,
-                    256,
-                    ImGuiInputTextFlags.ReadOnly);
-            }
+                var displayKey =
+                    streamKeyRevealed
+                        ? cachedKey
+                        : new string(
+                            '•',
+                            Math.Min(
+                                cachedKey.Length,
+                                24));
 
-            ImGui.Dummy(new Vector2(0f, 8f));
+                var revealSize =
+                    new Vector2(
+                        Ui(72f),
+                        Ui(36f));
 
-            // Reveal / Hide
-            using (ImRaii.PushStyle(
-                ImGuiStyleVar.FrameRounding,
-                8f))
-            using (ImRaii.PushColor(
-                ImGuiCol.Button,
-                new Vector4(0.055f, 0.07f, 0.115f, 1f))
-                .Push(
-                    ImGuiCol.ButtonHovered,
-                    new Vector4(0.075f, 0.095f, 0.15f, 1f))
-                .Push(
-                    ImGuiCol.ButtonActive,
-                    new Vector4(0.075f, 0.095f, 0.15f, 1f)))
-            {
-                var buttonPos =
-                    ImGui.GetCursorScreenPos();
+                var copyKeySize =
+                    new Vector2(
+                        Ui(66f),
+                        Ui(36f));
 
-                var buttonSize =
-                    new Vector2(110f, 34f);
+                var keyFieldWidth =
+                    cardWidth -
+                    (padding * 2f) -
+                    revealSize.X -
+                    copyKeySize.X -
+                    Ui(16f);
+
+                ImGui.SetCursorScreenPos(
+                    origin +
+                    new Vector2(
+                        padding,
+                        Ui(172f)));
+
+                ImGui.SetNextItemWidth(
+                    keyFieldWidth);
+
+                using (ImRaii.PushStyle(
+                           ImGuiStyleVar.FrameRounding,
+                           7f)
+                       .Push(
+                           ImGuiStyleVar.FramePadding,
+                           new Vector2(
+                               Ui(11f),
+                               Ui(9f))))
+                using (ImRaii.PushColor(
+                           ImGuiCol.FrameBg,
+                           new Vector4(
+                               0.025f,
+                               0.035f,
+                               0.065f,
+                               1f))
+                       .Push(
+                           ImGuiCol.FrameBgHovered,
+                           new Vector4(
+                               0.025f,
+                               0.035f,
+                               0.065f,
+                               1f))
+                       .Push(
+                           ImGuiCol.FrameBgActive,
+                           new Vector4(
+                               0.025f,
+                               0.035f,
+                               0.065f,
+                               1f)))
+                {
+                    ImGui.InputText(
+                        "##compactStreamKey",
+                        ref displayKey,
+                        512,
+                        ImGuiInputTextFlags.ReadOnly);
+                }
+
+                ImGui.SameLine(
+                    0f,
+                    Ui(8f));
 
                 if (ImGui.Button(
-                    "##toggleStreamKey",
-                    buttonSize))
+                        streamKeyRevealed
+                            ? "Hide##compactKeyReveal"
+                            : "Reveal##compactKeyReveal",
+                        revealSize))
                 {
                     streamKeyRevealed =
                         !streamKeyRevealed;
                 }
 
-                DrawPlayerActionButtonContent(
-                    buttonPos,
-                    buttonSize,
-                    streamKeyRevealed
-                        ? FontAwesomeIcon.EyeSlash
-                        : FontAwesomeIcon.Eye,
-                    streamKeyRevealed
-                        ? "Hide"
-                        : "Reveal",
-                    Vector4.One);
-            }
-
-            ImGui.SameLine(0f, 8f);
-
-            // Copy key
-            using (ImRaii.PushStyle(
-                ImGuiStyleVar.FrameRounding,
-                8f))
-            using (ImRaii.PushColor(
-                ImGuiCol.Button,
-                new Vector4(0.055f, 0.07f, 0.115f, 1f))
-                .Push(
-                    ImGuiCol.ButtonHovered,
-                    new Vector4(0.075f, 0.095f, 0.15f, 1f))
-                .Push(
-                    ImGuiCol.ButtonActive,
-                    new Vector4(0.075f, 0.095f, 0.15f, 1f)))
-            {
-                var buttonPos =
-                    ImGui.GetCursorScreenPos();
-
-                var buttonSize =
-                    new Vector2(118f, 34f);
+                ImGui.SameLine(
+                    0f,
+                    Ui(8f));
 
                 if (ImGui.Button(
-                    "##copyStreamKey",
-                    buttonSize))
+                        "Copy##compactKeyCopy",
+                        copyKeySize))
                 {
                     ImGui.SetClipboardText(
                         cachedKey);
                 }
+            }
+            else
+            {
+                ImGui.SetCursorScreenPos(
+                    origin +
+                    new Vector2(
+                        padding,
+                        Ui(177f)));
 
-                DrawPlayerActionButtonContent(
-                    buttonPos,
-                    buttonSize,
-                    FontAwesomeIcon.Copy,
-                    "Copy key",
-                    Vector4.One);
+                ImGui.TextColored(
+                    Gold,
+                    "No stream key is saved on this installation.");
+
+                ImGui.SetCursorScreenPos(
+                    origin +
+                    new Vector2(
+                        padding,
+                        Ui(205f)));
+
+                SetUiFontScale(
+                    0.78f);
+
+                ImGui.TextColored(
+                    MutedText,
+                    "Generate one from Settings > Account.");
+
+                SetUiFontScale(
+                    1f);
             }
 
-            ImGui.SameLine(0f, 8f);
+            // -------------------------------------------------
+            // Security note
+            // -------------------------------------------------
+
+            ImGui.SetCursorScreenPos(
+                origin +
+                new Vector2(
+                    padding,
+                    height -
+                    Ui(40f)));
+
+            using (ImRaii.PushFont(
+                       UiBuilder.IconFont))
+            {
+                ImGui.TextColored(
+                    Gold,
+                    FontAwesomeIcon.ExclamationTriangle
+                        .ToIconString());
+            }
+
+            ImGui.SameLine(
+                0f,
+                Ui(7f));
+
+            SetUiFontScale(
+                0.78f);
+
+            ImGui.TextColored(
+                Gold,
+                "Keep your stream key private.");
+
+            SetUiFontScale(
+                1f);
+        }
+    }
+
+    private void DrawLivePatreonConnectionGate()
+    {
+        var panelMin =
+            ImGui.GetWindowPos();
+
+        var panelSize =
+            ImGui.GetWindowSize();
+
+        var panelMax =
+            panelMin +
+            panelSize;
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        drawList.AddRectFilled(
+            panelMin,
+            panelMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.10f)),
+            9f);
+
+        drawList.AddCircleFilled(
+            new Vector2(
+                panelMax.X -
+                panelSize.X *
+                0.12f,
+                (panelMin.Y + panelMax.Y) *
+                0.5f),
+            panelSize.Y *
+            0.92f,
+            ImGui.GetColorU32(
+                new Vector4(
+                    PatreonOrange.X,
+                    PatreonOrange.Y,
+                    PatreonOrange.Z,
+                    0.075f)),
+            64);
+
+        drawList.AddRect(
+            panelMin,
+            panelMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.82f)),
+            9f,
+            ImDrawFlags.RoundCornersAll,
+            1f);
+
+        var orangeBorder =
+            ImGui.GetColorU32(
+                new Vector4(
+                    PatreonOrange.X,
+                    PatreonOrange.Y,
+                    PatreonOrange.Z,
+                    0.82f));
+
+        var middleX =
+            (panelMin.X + panelMax.X) *
+            0.5f;
+
+        drawList.AddLine(
+            new Vector2(
+                middleX,
+                panelMin.Y),
+            new Vector2(
+                panelMax.X -
+                Ui(9f),
+                panelMin.Y),
+            orangeBorder);
+
+        drawList.AddLine(
+            new Vector2(
+                panelMax.X,
+                panelMin.Y +
+                Ui(9f)),
+            new Vector2(
+                panelMax.X,
+                panelMax.Y -
+                Ui(9f)),
+            orangeBorder);
+
+        drawList.AddLine(
+            new Vector2(
+                panelMax.X -
+                Ui(9f),
+                panelMax.Y),
+            new Vector2(
+                middleX,
+                panelMax.Y),
+            orangeBorder);
+
+        DrawLocalVideoPatreonHeart(
+            new Vector2(
+                (panelMin.X + panelMax.X) *
+                0.5f,
+                panelMin.Y +
+                Ui(44f)));
+
+        ImGui.SetCursorPosY(
+            Ui(72f));
+
+        DrawPatreonCenteredText(
+            "PATREON FEATURE",
+            PatreonOrange,
+            0.82f);
+
+        DrawPatreonCenteredText(
+            "Unlock live streaming",
+            Vector4.One,
+            1.22f);
+
+        DrawPatreonCenteredText(
+            "Join our Patreon to access your private stream connection",
+            MutedText,
+            0.86f);
+
+        DrawPatreonCenteredText(
+            "details and broadcast from OBS or another streaming app.",
+            MutedText,
+            0.86f);
+
+        var unlockSize =
+            new Vector2(
+                MathF.Min(
+                    Ui(280f),
+                    panelSize.X -
+                    Ui(44f)),
+                Ui(42f));
+
+        ImGui.SetCursorPosX(
+            (panelSize.X -
+             unlockSize.X) *
+            0.5f);
+
+        DrawDjActionButton(
+            "##unlockLiveStreamingWithPatreon",
+            FontAwesomeIcon.LockOpen,
+            "Unlock with Patreon",
+            unlockSize,
+            false,
+            () =>
+            {
+                patreonPopupOpen = true;
+            },
+            true);
+
+        var refreshSize =
+            new Vector2(
+                unlockSize.X,
+                Ui(25f));
+
+        ImGui.SetCursorPosX(
+            (panelSize.X -
+             refreshSize.X) *
+            0.5f);
+
+        using (ImRaii.PushColor(
+                   ImGuiCol.Button,
+                   Vector4.Zero)
+                   .Push(
+                       ImGuiCol.ButtonHovered,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.14f))
+                   .Push(
+                       ImGuiCol.ButtonActive,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.24f))
+                   .Push(
+                       ImGuiCol.Text,
+                       MutedText))
+        {
+            if (ImGui.Button(
+                    "Already a member? Refresh access##refreshLivePatreon",
+                    refreshSize))
+            {
+                RefreshLivePatreonAccess();
+            }
         }
 
-        // Generate / Regenerate
-        using (ImRaii.Disabled(keyRotating))
-        using (ImRaii.PushStyle(
-            ImGuiStyleVar.FrameRounding,
-            8f))
-        using (ImRaii.PushColor(
-            ImGuiCol.Button,
-            new Vector4(0.055f, 0.07f, 0.115f, 1f))
-            .Push(
-                ImGuiCol.ButtonHovered,
-                new Vector4(0.075f, 0.095f, 0.15f, 1f))
-            .Push(
-                ImGuiCol.ButtonActive,
-                new Vector4(0.075f, 0.095f, 0.15f, 1f)))
+        if (livePatreonAccessMessage is { } accessMessage)
         {
-            var buttonPos =
+            DrawPatreonCenteredText(
+                accessMessage,
+                Danger,
+                0.78f);
+        }
+    }
+
+    private void DrawLiveSoftwareCard(
+        float width,
+        float height)
+    {
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.ChildRounding,
+                   9f))
+        using (ImRaii.PushColor(
+                   ImGuiCol.ChildBg,
+                   new Vector4(
+                       0.045f,
+                       0.06f,
+                       0.10f,
+                       1f)))
+        using (var card = ImRaii.Child(
+                   "##liveSoftwareCard",
+                   new Vector2(
+                       width,
+                       height),
+                   false,
+                   ImGuiWindowFlags.NoScrollbar |
+                   ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            if (!card)
+            {
+                return;
+            }
+
+            var origin =
                 ImGui.GetCursorScreenPos();
 
-            var buttonSize =
-                new Vector2(142f, 34f);
+            var cardWidth =
+                ImGui.GetWindowWidth();
 
-            if (ImGui.Button(
-                "##regenerateStreamKey",
-                buttonSize))
-            {
-                if (cachedKey is null)
-                {
-                    RotateStreamKey(session);
-                }
-                else
-                {
-                    keyRegenerateConfirmPending =
-                        true;
-                }
-            }
+            var padding =
+                Ui(16f);
 
-            DrawPlayerActionButtonContent(
-                buttonPos,
-                buttonSize,
-                FontAwesomeIcon.SyncAlt,
-                cachedKey is null
-                    ? "Generate"
-                    : "Regenerate",
-                Vector4.One);
-        }
+            ImGui.SetCursorScreenPos(
+                origin +
+                new Vector2(
+                    padding,
+                    Ui(14f)));
 
-        // Regenerate confirmation
-        if (keyRegenerateConfirmPending)
-        {
-            ImGui.Dummy(
-                new Vector2(0f, 10f));
+            SetUiFontScale(
+                1.08f);
 
             ImGui.TextColored(
-                Danger,
-                "Regenerating disconnects OBS sessions using the old key. Continue?");
+                Vector4.One,
+                "Streaming software");
 
-            ImGui.Dummy(
-                new Vector2(0f, 6f));
+            SetUiFontScale(
+                1f);
 
-            using (ImRaii.PushStyle(
-                ImGuiStyleVar.FrameRounding,
-                7f))
-            using (ImRaii.PushColor(
-                ImGuiCol.Button,
-                Danger))
+            var recommendationTop =
+                origin.Y +
+                Ui(50f);
+
+            var recommendationHeight =
+                Ui(150f);
+
+            var recommendationMin =
+                new Vector2(
+                    origin.X +
+                    padding,
+                    recommendationTop);
+
+            var recommendationMax =
+                new Vector2(
+                    origin.X +
+                    cardWidth -
+                    padding,
+                    recommendationTop +
+                    recommendationHeight);
+
+            var drawList =
+                ImGui.GetWindowDrawList();
+
+            drawList.AddRectFilled(
+                recommendationMin,
+                recommendationMax,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        0.025f,
+                        0.035f,
+                        0.065f,
+                        1f)),
+                Ui(8f));
+
+            drawList.AddRect(
+                recommendationMin,
+                recommendationMax,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        0.20f)),
+                Ui(8f),
+                ImDrawFlags.None,
+                1f);
+
+            ImGui.SetCursorScreenPos(
+                recommendationMin +
+                new Vector2(
+                    Ui(14f),
+                    Ui(14f)));
+
+            using (ImRaii.PushFont(
+                       UiBuilder.IconFont))
             {
-                if (ImGui.Button(
-                    "Yes, regenerate"))
-                {
-                    keyRegenerateConfirmPending =
-                        false;
-
-                    RotateStreamKey(session);
-                }
+                ImGui.TextColored(
+                    Accent,
+                    FontAwesomeIcon.Desktop
+                        .ToIconString());
             }
 
-            ImGui.SameLine(0f, 8f);
-
-            if (ImGui.Button("Cancel"))
-            {
-                keyRegenerateConfirmPending =
-                    false;
-            }
-        }
-
-        if (keyError is { Length: > 0 } error)
-        {
-            ImGui.Dummy(
-                new Vector2(0f, 8f));
+            ImGui.SameLine(
+                0f,
+                Ui(10f));
 
             ImGui.TextColored(
-                Danger,
-                error);
-        }
+                Vector4.One,
+                "OBS Studio");
 
-        ImGui.Dummy(
-            new Vector2(0f, 22f));
+            ImGui.SameLine(
+                0f,
+                Ui(8f));
 
-        // ---------------------------------------------------------
-        // Friends live
-        // ---------------------------------------------------------
+            SetUiFontScale(
+                0.70f);
 
-        ImGui.SetWindowFontScale(1.08f);
+            ImGui.TextColored(
+                Accent,
+                "RECOMMENDED");
 
-        ImGui.TextColored(
-            Vector4.One,
-            $"Friends live ({friendsLive.Length})");
+            SetUiFontScale(
+                1f);
 
-        ImGui.SetWindowFontScale(1f);
+            ImGui.SetCursorScreenPos(
+                recommendationMin +
+                new Vector2(
+                    Ui(14f),
+                    Ui(48f)));
 
-        ImGui.Dummy(
-            new Vector2(0f, 8f));
-
-        if (friendsLive.Length == 0)
-        {
-            ImGui.SetWindowFontScale(0.88f);
+            SetUiFontScale(
+                0.78f);
 
             ImGui.TextColored(
                 MutedText,
-                "Nobody you know is live.");
+                "Free, widely supported, and easy to configure.");
 
-            ImGui.SetWindowFontScale(1f);
-        }
-        else
-        {
-            foreach (var friend in friendsLive)
-            {
-                ImGui.PushID(
-                friend.AccountId);
+            SetUiFontScale(
+                1f);
 
-            var rowHeight = Ui(58f);
+            var buttonGap =
+                Ui(8f);
+
+            var innerButtonWidth =
+                ((recommendationMax.X -
+                  recommendationMin.X) -
+                 Ui(28f) -
+                 buttonGap) /
+                2f;
+
+            ImGui.SetCursorScreenPos(
+                recommendationMin +
+                new Vector2(
+                    Ui(14f),
+                    Ui(93f)));
 
             using (ImRaii.PushStyle(
-                ImGuiStyleVar.ChildRounding,
-                8f))
-            using (ImRaii.PushColor(
-                ImGuiCol.ChildBg,
-                new Vector4(0.045f, 0.06f, 0.10f, 1f)))
-            using (var row = ImRaii.Child(
-                $"##friendLive_{friend.AccountId}",
-                new Vector2(-6f, rowHeight),
-                false,
-                ImGuiWindowFlags.NoScrollbar |
-                ImGuiWindowFlags.NoScrollWithMouse))
+                       ImGuiStyleVar.FrameRounding,
+                       7f))
             {
-                if (row)
+                if (ImGui.Button(
+          "OBS setup guide##compactObsGuide",
+          new Vector2(
+              innerButtonWidth,
+              Ui(38f))))
                 {
-                    var origin =
-                        ImGui.GetCursorScreenPos();
+                    obsSetupGuideStep =
+                        0;
 
-                    // Live dot
-                    using (ImRaii.PushFont(
-                        UiBuilder.IconFont))
-                    {
-                        ImGui.GetWindowDrawList()
-                            .AddText(
-                                origin +
-                                new Vector2(14f, 21f),
-                                ImGui.GetColorU32(Good),
-                                FontAwesomeIcon.Circle
-                                    .ToIconString());
-                    }
+                    liveStreamGuideKind =
+                        LiveStreamGuideKind.ObsStudio;
+                }
 
-                    // Friend name
-                    ImGui.GetWindowDrawList()
-                        .AddText(
-                            origin +
-                            new Vector2(38f, 20f),
-                            ImGui.GetColorU32(
-                                Vector4.One),
-                            friend.DisplayName);
+                ImGui.SameLine(
+                    0f,
+                    buttonGap);
 
-                    // Watch button
-                    var watchSize =
-                        new Vector2(104f, 34f);
+                if (ImGui.Button(
+        "Other apps##otherStreamingApps",
+        new Vector2(
+            innerButtonWidth,
+            Ui(38f))))
+                {
+                    genericStreamGuideStep =
+                        0;
 
-                    var watchPos =
-                        new Vector2(
-                            origin.X +
-                            ImGui.GetWindowWidth() -
-                            116f,
-                            origin.Y +
-                            (rowHeight -
-                             watchSize.Y) *
-                            0.5f);
-
-                    ImGui.SetCursorScreenPos(
-                        watchPos);
-
-                    using (ImRaii.PushStyle(
-                        ImGuiStyleVar.FrameRounding,
-                        8f))
-                    using (ImRaii.PushColor(
-                        ImGuiCol.Button,
-                        Accent)
-                        .Push(
-                            ImGuiCol.ButtonHovered,
-                            AccentHover)
-                        .Push(
-                            ImGuiCol.ButtonActive,
-                            AccentActive))
-                    {
-                        var buttonPos =
-                            ImGui.GetCursorScreenPos();
-
-                        if (ImGui.Button(
-                            $"##watch_{friend.AccountId}",
-                            watchSize))
-                        {
-                            queue.PlayNow(
-                                new VideoQueueEntry(
-                                    friend.HlsUrl,
-                                    $"{friend.DisplayName}'s stream",
-                                    "Live",
-                                    null,
-                                    null));
-
-                            currentPage =
-                                HomePage.Player;
-                        }
-
-                        DrawPlayerActionButtonContent(
-                            buttonPos,
-                            watchSize,
-                            FontAwesomeIcon.Play,
-                            "Watch",
-                            Vector4.One);
-                    }
+                    liveStreamGuideKind =
+                        LiveStreamGuideKind.GenericRtmp;
                 }
             }
 
-                ImGui.PopID();
+            ImGui.SetCursorScreenPos(
+                origin +
+                new Vector2(
+                    padding,
+                    Ui(222f)));
 
-                ImGui.Dummy(
-                    new Vector2(0f, 8f));
-            }
+            SetUiFontScale(
+                0.76f);
+
+            ImGui.PushTextWrapPos(
+                origin.X +
+                cardWidth -
+                padding);
+
+            ImGui.TextColored(
+                MutedText,
+                "Also works with apps that support a custom RTMP server and stream key.");
+
+            ImGui.PopTextWrapPos();
+
+            SetUiFontScale(
+                1f);
         }
-
-        DrawObsSetupGuide(session);
     }
 
-    private void DrawObsSetupGuide(
-    CharacterSession session)
+    private void DrawLiveStreamGuideOverlay()
     {
-        if (obsSetupGuideOpen)
-        {
-            ImGui.OpenPopup(
-                "OBS Setup Guide##obsGuide");
-            obsSetupGuideOpen = false;
-        }
-
-        ImGui.SetNextWindowSize(
-            new Vector2(
-                650f,
-                520f),
-            ImGuiCond.Appearing);
-
-        ImGui.SetNextWindowSizeConstraints(
-            new Vector2(
-                560f,
-                460f),
-            new Vector2(
-                800f,
-                700f));
-
-        var popupOpen = true;
-
-        if (!ImGui.BeginPopupModal(
-                "OBS Setup Guide##obsGuide",
-                ref popupOpen,
-                ImGuiWindowFlags.NoCollapse))
+        if (liveStreamGuideKind ==
+            LiveStreamGuideKind.None)
         {
             return;
         }
 
-        // -----------------------------------------------------
-        // Heading
-        // -----------------------------------------------------
+        var parentPosition =
+            ImGui.GetWindowPos();
 
-        ImGui.SetWindowFontScale(
-            1.15f);
+        var parentSize =
+            ImGui.GetWindowSize();
 
-        ImGui.TextColored(
-            Vector4.One,
-            "Set up OBS for Alpha Channel");
+        var panelWidth =
+            MathF.Min(
+                Ui(700f),
+                parentSize.X -
+                Ui(40f));
 
-        ImGui.SetWindowFontScale(
-            1f);
+        var panelHeight =
+            MathF.Min(
+                Ui(560f),
+                parentSize.Y -
+                Ui(40f));
 
-        ImGui.Dummy(
+        var panelPosition =
+            parentPosition +
             new Vector2(
-                0f,
-                4f));
+                (parentSize.X -
+                 panelWidth) *
+                0.5f,
 
-        ImGui.SetWindowFontScale(
-            0.82f);
+                (parentSize.Y -
+                 panelHeight) *
+                0.5f);
 
-        ImGui.TextColored(
-            MutedText,
-            "Follow these steps to broadcast OBS to your Alpha Channel TV.");
+        ImGui.SetNextWindowPos(
+            parentPosition,
+            ImGuiCond.Always);
 
-        ImGui.SetWindowFontScale(
-            1f);
+        ImGui.SetNextWindowSize(
+            parentSize,
+            ImGuiCond.Always);
 
-        ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+        ImGui.SetNextWindowBgAlpha(
+            0f);
 
-        // -----------------------------------------------------
-        // Step selector
-        // -----------------------------------------------------
+        const ImGuiWindowFlags overlayFlags =
+            ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse |
+            ImGuiWindowFlags.NoCollapse |
+            ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoNav |
+            ImGuiWindowFlags.NoDocking |
+            ImGuiWindowFlags.NoBackground;
 
-        var availableWidth =
-            ImGui.GetContentRegionAvail().X;
-
-        var spacing = 8f;
-
-        var stepWidth =
-            (availableWidth -
-             (spacing * 4f)) /
-            5f;
-
-        for (var i = 0; i < 5; i++)
+        if (!ImGui.Begin(
+                "##liveStreamGuideOverlay",
+                overlayFlags))
         {
-            if (i > 0)
-            {
-                ImGui.SameLine(
-                    0f,
-                    spacing);
-            }
+            ImGui.End();
 
-            var selected =
-                obsSetupGuideStep == i;
-
-            using (ImRaii.PushStyle(
-                ImGuiStyleVar.FrameRounding,
-                8f))
-            using (ImRaii.PushColor(
-                ImGuiCol.Button,
-                selected
-                    ? Accent
-                    : new Vector4(
-                        0.055f,
-                        0.07f,
-                        0.115f,
-                        1f))
-                .Push(
-                    ImGuiCol.ButtonHovered,
-                    selected
-                        ? AccentHover
-                        : new Vector4(
-                            0.075f,
-                            0.095f,
-                            0.15f,
-                            1f))
-                .Push(
-                    ImGuiCol.ButtonActive,
-                    AccentActive))
-            {
-                if (ImGui.Button(
-                    $"{i + 1}##obsGuideStep{i}",
-                    new Vector2(
-                        stepWidth,
-                        36f)))
-                {
-                    obsSetupGuideStep = i;
-                }
-            }
+            return;
         }
 
-        ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+        var drawList =
+            ImGui.GetWindowDrawList();
 
-        ImGui.Separator();
+        drawList.AddRectFilled(
+            parentPosition,
+            parentPosition +
+            parentSize,
+            ImGui.GetColorU32(
+                new Vector4(
+                    0f,
+                    0f,
+                    0f,
+                    0.56f)));
 
-        ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
-
-        // -----------------------------------------------------
-        // Scrollable guide contents
-        // -----------------------------------------------------
-
-        var footerHeight = 58f;
+        ImGui.SetCursorScreenPos(
+            panelPosition);
 
         using (ImRaii.PushStyle(
-            ImGuiStyleVar.WindowPadding,
-            new Vector2(
-                16f,
-                14f)))
-        using (var guideContent =
-            ImRaii.Child(
-                "##obsGuideContent",
-                new Vector2(
-                    -1f,
-                    -footerHeight),
-                false,
-                ImGuiWindowFlags.None))
+                   ImGuiStyleVar.ChildRounding,
+                   Ui(14f)))
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.ChildBorderSize,
+                   Ui(1f)))
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.WindowPadding,
+                   UiVec(
+                       24f,
+                       20f)))
+        using (ImRaii.PushColor(
+                   ImGuiCol.ChildBg,
+                   new Vector4(
+                       0.025f,
+                       0.03f,
+                       0.06f,
+                       0.995f)))
+        using (ImRaii.PushColor(
+                   ImGuiCol.Border,
+                   new Vector4(
+                       Accent.X,
+                       Accent.Y,
+                       Accent.Z,
+                       0.82f)))
+        using (var panel = ImRaii.Child(
+                   "##liveStreamGuidePanel",
+                   new Vector2(
+                       panelWidth,
+                       panelHeight),
+                   true,
+                   ImGuiWindowFlags.NoScrollbar |
+                   ImGuiWindowFlags.NoScrollWithMouse))
         {
-            if (guideContent)
+            if (panel)
             {
-                switch (obsSetupGuideStep)
+                var contentOrigin =
+                    ImGui.GetCursorScreenPos();
+
+                var closeSize =
+                    new Vector2(
+                        Ui(32f),
+                        Ui(32f));
+
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        panelPosition.X +
+                        panelWidth -
+                        Ui(24f) -
+                        closeSize.X,
+                        panelPosition.Y +
+                        Ui(16f)));
+
+                DrawDjActionButton(
+                    "##closeLiveStreamGuide",
+                    FontAwesomeIcon.Times,
+                    string.Empty,
+                    closeSize,
+                    false,
+                    CloseLiveStreamGuide);
+
+                ImGui.SetCursorScreenPos(
+                    contentOrigin);
+
+                switch (liveStreamGuideKind)
                 {
-                    case 0:
-                        DrawObsGuideInstall();
+                    case LiveStreamGuideKind.ObsStudio:
+                        if (CurrentSession is { } session)
+                        {
+                            DrawDjGuideShell(
+                                "OBS Studio Setup",
+                                "Configure OBS Studio to send live video to your Alpha Channel TV.",
+                                5,
+                                ref obsSetupGuideStep,
+                                step =>
+                                {
+                                    switch (step)
+                                    {
+                                        case 0:
+                                            DrawObsGuideInstall();
+
+                                            break;
+
+                                        case 1:
+                                            DrawObsGuideSource();
+
+                                            break;
+
+                                        case 2:
+                                            DrawObsGuideOutput();
+
+                                            break;
+
+                                        case 3:
+                                            DrawObsGuideConnection(
+                                                session);
+
+                                            break;
+
+                                        case 4:
+                                            DrawObsGuideGoLive();
+
+                                            break;
+                                    }
+                                },
+                                CloseLiveStreamGuide);
+                        }
+
                         break;
 
-                    case 1:
-                        DrawObsGuideSource();
-                        break;
+                    case LiveStreamGuideKind.GenericRtmp:
+                        DrawDjGuideShell(
+                            "Other RTMP App Setup",
+                            "Connect another RTMP-compatible broadcasting app to Alpha Channel.",
+                            4,
+                            ref genericStreamGuideStep,
+                            step =>
+                            {
+                                switch (step)
+                                {
+                                    case 0:
+                                        DrawGenericStreamGuideChooseApp();
 
-                    case 2:
-                        DrawObsGuideOutput();
-                        break;
+                                        break;
 
-                    case 3:
-                        DrawObsGuideConnection(
-                            session);
-                        break;
+                                    case 1:
+                                        DrawGenericStreamGuideConnection();
 
-                    case 4:
-                        DrawObsGuideGoLive();
+                                        break;
+
+                                    case 2:
+                                        DrawGenericStreamGuideQuality();
+
+                                        break;
+
+                                    case 3:
+                                        DrawGenericStreamGuideGoLive();
+
+                                        break;
+                                }
+                            },
+                            CloseLiveStreamGuide);
+
                         break;
                 }
-
-                // Extra breathing room after the final
-                // item when scrolled to the bottom.
-                ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        6f));
             }
         }
 
-        // -----------------------------------------------------
-        // Fixed navigation footer
-        // -----------------------------------------------------
+        ImGui.End();
+    }
 
-        ImGui.Separator();
+    private void CloseLiveStreamGuide()
+    {
+        liveStreamGuideKind =
+            LiveStreamGuideKind.None;
+    }
+
+    private void DrawGenericStreamGuideChooseApp()
+    {
+        DrawObsGuideHeading(
+            "1. Choose a broadcasting app",
+            "Use software that supports a custom RTMP server and stream key.");
+
+        ImGui.TextWrapped(
+            "Alpha Channel is not limited to OBS Studio. Any broadcasting application that can publish to a custom RTMP destination may be compatible.");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 14f));
 
-        if (obsSetupGuideStep > 0)
+        DrawObsGuideBullet(
+            "Streamlabs Desktop",
+            "A streaming-focused application based on OBS.");
+
+        DrawObsGuideBullet(
+            "XSplit Broadcaster",
+            "A commercial broadcasting and scene-production application.");
+
+        DrawObsGuideBullet(
+            "vMix",
+            "A production suite for advanced live-video workflows.");
+
+        DrawObsGuideBullet(
+            "FFmpeg",
+            "A command-line option for sending existing video or generated output.");
+
+        ImGui.Dummy(
+            UiVec(0f, 14f));
+
+        ImGui.TextColored(
+            Gold,
+            "Look for Custom RTMP or Custom Streaming Service.");
+
+        ImGui.Dummy(
+            UiVec(0f, 5f));
+
+        ImGui.TextWrapped(
+            "The exact wording and location varies between applications. If the app cannot accept both a server URL and stream key, it may not be suitable.");
+    }
+
+    private void DrawGenericStreamGuideConnection()
+    {
+        DrawObsGuideHeading(
+            "2. Enter the connection details",
+            "Copy Alpha Channel's server URL and stream key into your broadcasting app.");
+
+        ImGui.TextWrapped(
+            "Open your application's streaming, broadcast or output settings. Choose its Custom RTMP option, then enter the following values.");
+
+        ImGui.Dummy(
+            UiVec(0f, 14f));
+
+        var server =
+            BuildRtmpServer();
+
+        DrawObsGuideCopyField(
+            "Server URL",
+            server,
+            "##genericGuideServer");
+
+        ImGui.Dummy(
+            UiVec(0f, 12f));
+
+        var key =
+            CurrentSession is { } session
+                ? Plugin.Cfg.StreamKeys.GetValueOrDefault(
+                    session.AccountId)
+                : null;
+
+        if (key is { Length: > 0 })
         {
-            if (ImGui.Button(
-                "Back",
-                new Vector2(
-                    90f,
-                    32f)))
-            {
-                obsSetupGuideStep--;
-            }
+            DrawObsGuideCopyField(
+                "Stream Key",
+                key,
+                "##genericGuideKey");
+
+            ImGui.Dummy(
+                UiVec(0f, 10f));
+
+            ImGui.TextColored(
+                Gold,
+                "Keep your stream key private.");
+
+            ImGui.Dummy(
+                UiVec(0f, 4f));
+
+            SetUiFontScale(
+                0.80f);
+
+            ImGui.TextWrapped(
+                "Anyone with this key may be able to publish video to your Alpha Channel stream.");
+
+            SetUiFontScale(
+                1f);
         }
         else
         {
+            ImGui.TextColored(
+                Gold,
+                "No stream key is saved on this installation.");
+
             ImGui.Dummy(
-                new Vector2(
-                    90f,
-                    32f));
+                UiVec(0f, 6f));
+
+            ImGui.TextWrapped(
+                "Close this guide and generate a stream key from Settings > Account.");
         }
-
-        ImGui.SameLine();
-
-        var rightButtonWidth =
-            100f;
-
-        ImGui.SetCursorPosX(
-            ImGui.GetWindowWidth() -
-            rightButtonWidth -
-            16f);
-
-        using (ImRaii.PushStyle(
-            ImGuiStyleVar.FrameRounding,
-            7f))
-        using (ImRaii.PushColor(
-            ImGuiCol.Button,
-            Accent)
-            .Push(
-                ImGuiCol.ButtonHovered,
-                AccentHover)
-            .Push(
-                ImGuiCol.ButtonActive,
-                AccentActive))
-        {
-            if (obsSetupGuideStep < 4)
-            {
-                if (ImGui.Button(
-                    "Next",
-                    new Vector2(
-                        rightButtonWidth,
-                        32f)))
-                {
-                    obsSetupGuideStep++;
-                }
-            }
-            else
-            {
-                if (ImGui.Button(
-                    "Done",
-                    new Vector2(
-                        rightButtonWidth,
-                        32f)))
-                {
-                    ImGui.CloseCurrentPopup();
-                }
-            }
-        }
-
-        ImGui.EndPopup();
     }
+
+    private void DrawGenericStreamGuideQuality()
+    {
+        DrawObsGuideHeading(
+            "3. Configure video and audio",
+            "Use broadly compatible settings for reliable playback.");
+
+        ImGui.TextWrapped(
+            "The option names vary between applications. Use the closest available equivalents to these recommended settings.");
+
+        ImGui.Dummy(
+            UiVec(0f, 14f));
+
+        DrawObsGuideSetting(
+            "Output Resolution",
+            "1280 x 720");
+
+        DrawObsGuideSetting(
+            "Frame Rate",
+            "30 FPS");
+
+        DrawObsGuideSetting(
+            "Video Encoder",
+            "H.264");
+
+        DrawObsGuideSetting(
+            "Rate Control",
+            "CBR");
+
+        DrawObsGuideSetting(
+            "Video Bitrate",
+            "4000 Kbps");
+
+        DrawObsGuideSetting(
+            "Keyframe Interval",
+            "2 seconds");
+
+        DrawObsGuideSetting(
+            "Audio Encoder",
+            "AAC");
+
+        DrawObsGuideSetting(
+            "Audio Bitrate",
+            "160 Kbps");
+
+        ImGui.Dummy(
+            UiVec(0f, 12f));
+
+        SetUiFontScale(
+            0.80f);
+
+        ImGui.TextColored(
+            MutedText,
+            "Higher resolutions and bitrates may work, but can take longer to load or cause buffering for viewers.");
+
+        SetUiFontScale(
+            1f);
+    }
+
+    private void DrawGenericStreamGuideGoLive()
+    {
+        DrawObsGuideHeading(
+            "4. Start broadcasting",
+            "Start the external stream, confirm it reaches Alpha Channel, then broadcast it to your TV.");
+
+        DrawObsGuideNumberedLine(
+            "1",
+            "Start streaming or broadcasting from your chosen application.");
+
+        DrawObsGuideNumberedLine(
+            "2",
+            "Return to Alpha Channel and open Media Player > Add Media > Stream Live.");
+
+        DrawObsGuideNumberedLine(
+            "3",
+            "Press Check connection.");
+
+        DrawObsGuideNumberedLine(
+            "4",
+            "Wait for the status card to show STREAM DETECTED.");
+
+        DrawObsGuideNumberedLine(
+            "5",
+            "Press Broadcast to TV.");
+
+        ImGui.Dummy(
+            UiVec(0f, 14f));
+
+        using (ImRaii.PushColor(
+                   ImGuiCol.ChildBg,
+                   new Vector4(
+                       0.055f,
+                       0.07f,
+                       0.115f,
+                       1f)))
+        using (var note = ImRaii.Child(
+                   "##genericStreamGuideFinalNote",
+                   new Vector2(
+                       -1f,
+                       Ui(76f)),
+                   false,
+                   ImGuiWindowFlags.NoScrollbar |
+                   ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            if (note)
+            {
+                ImGui.SetCursorPos(
+                    new Vector2(
+                        Ui(12f),
+                        Ui(10f)));
+
+                ImGui.TextColored(
+                    Gold,
+                    "Connecting and broadcasting are separate steps.");
+
+                ImGui.SetCursorPosX(
+                    Ui(12f));
+
+                ImGui.PushTextWrapPos(
+                    ImGui.GetWindowWidth() -
+                    Ui(12f));
+
+                ImGui.TextWrapped(
+                    "Starting your broadcasting app sends the stream to Alpha Channel. Broadcast to TV then shares it through your Watch Party.");
+
+                ImGui.PopTextWrapPos();
+            }
+        }
+    }
+
+    
 
     private void DrawObsGuideInstall()
     {
@@ -1188,9 +1953,7 @@ internal sealed partial class MainWindow
             "Download and install OBS Studio. If you already have OBS installed, you can skip this step.");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                16f));
+            UiVec(0f, 16f));
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.FrameRounding,
@@ -1207,9 +1970,7 @@ internal sealed partial class MainWindow
         {
             if (ImGui.Button(
                 "Open OBS Website",
-                new Vector2(
-                    170f,
-                    36f)))
+                UiVec(170f, 36f)))
             {
                 Dalamud.Utility.Util.OpenLink(
                     "https://obsproject.com/");
@@ -1217,18 +1978,16 @@ internal sealed partial class MainWindow
         }
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             0.82f);
 
         ImGui.TextColored(
             MutedText,
             "OBS Studio is free and open source.");
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
     }
 
@@ -1242,9 +2001,7 @@ internal sealed partial class MainWindow
             "In the main OBS window, use the Sources panel at the bottom and press + to add your video source.");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                12f));
+            UiVec(0f, 12f));
 
         DrawObsGuideBullet(
             "Game Capture",
@@ -1263,26 +2020,20 @@ internal sealed partial class MainWindow
             "Useful for broadcasting a local video file.");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
         ImGui.TextColored(
             Gold,
             "Don't forget your audio.");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                4f));
+            UiVec(0f, 4f));
 
         ImGui.TextWrapped(
             "Check the OBS Audio Mixer and make sure Desktop Audio, your media source, or whichever audio source you want to broadcast is moving when sound plays.");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 8f));
 
         ImGui.TextWrapped(
             "If no sound is being picked up then you'll need to check the Audio tab in the OBS settings.");
@@ -1298,17 +2049,13 @@ internal sealed partial class MainWindow
             "These are only our recommendations. You are able to stream at higher quality levels, but you'll likely want to check that it's loading okay for your viewers.");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                10f));
+            UiVec(0f, 10f));
 
         ImGui.TextWrapped(
             "Open OBS Settings, then configure the following:");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                12f));
+            UiVec(0f, 12f));
 
         DrawObsGuideSetting(
             "Video > Base Canvas",
@@ -1366,9 +2113,7 @@ internal sealed partial class MainWindow
             "Open OBS Settings > Stream. Set Service to Custom, then enter the Server and Stream Key shown below.");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
         var server =
             BuildRtmpServer();
@@ -1379,9 +2124,7 @@ internal sealed partial class MainWindow
             "##guideServer");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                12f));
+            UiVec(0f, 12f));
 
         var key =
             Plugin.Cfg.StreamKeys.GetValueOrDefault(
@@ -1395,18 +2138,16 @@ internal sealed partial class MainWindow
                 "##guideKey");
 
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    8f));
+                UiVec(0f, 8f));
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 0.80f);
 
             ImGui.TextColored(
                 Gold,
                 "Keep your stream key private. Anyone with it could publish to your stream.");
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
         }
         else
@@ -1416,9 +2157,7 @@ internal sealed partial class MainWindow
                 "You don't currently have a stream key on this installation.");
 
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    6f));
+                UiVec(0f, 6f));
 
             ImGui.TextWrapped(
                 "Close this guide and use Generate under OBS setup, then return to this step.");
@@ -1437,7 +2176,7 @@ internal sealed partial class MainWindow
 
         DrawObsGuideNumberedLine(
             "2",
-            "Return to Alpha Channel and open Player > Go Live.");
+            "Return to this page on Alpha Channel.");
 
         DrawObsGuideNumberedLine(
             "3",
@@ -1452,9 +2191,7 @@ internal sealed partial class MainWindow
             "Press Broadcast Stream to TV.");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
@@ -1475,9 +2212,7 @@ internal sealed partial class MainWindow
             if (note)
             {
                 ImGui.SetCursorPos(
-                    new Vector2(
-                        12f,
-                        10f));
+                    UiVec(12f, 10f));
 
                 ImGui.TextColored(
                     Gold,
@@ -1496,35 +2231,31 @@ internal sealed partial class MainWindow
     string title,
     string subtitle)
     {
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1.08f);
 
         ImGui.TextColored(
             Vector4.One,
             title);
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                4f));
+            UiVec(0f, 4f));
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             0.82f);
 
         ImGui.TextColored(
             MutedText,
             subtitle);
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                16f));
+            UiVec(0f, 16f));
     }
 
     private void DrawObsGuideBullet(
@@ -1548,9 +2279,7 @@ internal sealed partial class MainWindow
             $"— {description}");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                5f));
+            UiVec(0f, 5f));
     }
 
     private void DrawObsGuideSetting(
@@ -1574,9 +2303,7 @@ internal sealed partial class MainWindow
             value);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                5f));
+            UiVec(0f, 5f));
     }
 
     private void DrawObsGuideNumberedLine(
@@ -1595,9 +2322,7 @@ internal sealed partial class MainWindow
             text);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 8f));
     }
 
     private void DrawObsGuideCopyField(
@@ -1605,20 +2330,18 @@ internal sealed partial class MainWindow
         string value,
         string id)
     {
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             0.82f);
 
         ImGui.TextColored(
             MutedText,
             label);
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                4f));
+            UiVec(0f, 4f));
 
         ImGui.SetNextItemWidth(
             -90f);
@@ -1638,9 +2361,7 @@ internal sealed partial class MainWindow
 
         if (ImGui.Button(
             $"Copy##{id}",
-            new Vector2(
-                78f,
-                0f)))
+            UiVec(78f, 0f)))
         {
             ImGui.SetClipboardText(
                 value);
@@ -1651,6 +2372,92 @@ internal sealed partial class MainWindow
     {
         var host = new Uri(Plugin.Cfg.RelayServerUrl).Host;
         return $"rtmp://{host}:1935/live";
+    }
+
+    private void BeginLiveWatchPartyBroadcast(
+    CharacterSession session)
+    {
+        if (!HasConfirmedPatreonAccess())
+        {
+            obsConnectionError =
+                "A Patreon membership is required to broadcast live streams.";
+
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] A Patreon membership is required to broadcast live streams.");
+
+            return;
+        }
+
+        if (!obsConnectionOnline)
+        {
+            return;
+        }
+
+        if (stream.Mode ==
+            StreamMode.Viewing)
+        {
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] Leave your current Watch Party before broadcasting your live stream.");
+
+            return;
+        }
+
+        if (stream.Mode ==
+            StreamMode.Hosting)
+        {
+            StartLiveBroadcastInHostedRoom();
+
+            return;
+        }
+
+        pendingWatchPartyMediaKind =
+            PendingWatchPartyMediaKind.LiveStreamBroadcast;
+
+        watchPartyCreationPopupOpen =
+            true;
+
+        createRoomPassword =
+            string.Empty;
+
+        createLockedRoomPasswordError =
+            null;
+    }
+
+    private void StartLiveBroadcastInHostedRoom(
+        bool navigateToWatchParty = false)
+    {
+        if (!HasConfirmedPatreonAccess() ||
+            CurrentSession is not { } session ||
+            !obsConnectionOnline)
+        {
+            return;
+        }
+
+        var hlsUrl =
+            BuildMyHlsUrl(
+                session);
+
+        queue.PlayTransient(
+            new VideoQueueEntry(
+                hlsUrl,
+                "Live Streaming",
+                "Live Stream",
+                null,
+                null,
+                0d,
+                true));
+
+        if (navigateToWatchParty)
+        {
+            currentPage =
+                HomePage.WatchAlong;
+
+            partyPanelTab =
+                PartyPanelTab.NowPlaying;
+        }
+
+        Plugin.ChatGui.Print(
+            "[AlphaChannel] Now broadcasting live stream to Watch Party");
     }
 
     private string BuildMyHlsUrl(CharacterSession session)
@@ -1666,6 +2473,14 @@ internal sealed partial class MainWindow
 
     private void CheckObsConnection(CharacterSession session)
     {
+        if (!HasConfirmedPatreonAccess())
+        {
+            obsConnectionOnline = false;
+            obsConnectionError =
+                "Unlock live streaming to check your connection.";
+            return;
+        }
+
         if (obsConnectionChecking)
         {
             return;
@@ -1681,12 +2496,12 @@ internal sealed partial class MainWindow
         {
             try
             {
+                using var timeout =
+                    new CancellationTokenSource(
+                        TimeSpan.FromSeconds(5));
+
                 using var http =
-                    new HttpClient
-                    {
-                        Timeout =
-                            TimeSpan.FromSeconds(5),
-                    };
+                    Net.PluginHttpClients.CreateProbeClient();
 
                 using var request =
                     new HttpRequestMessage(
@@ -1696,7 +2511,8 @@ internal sealed partial class MainWindow
                 using var response =
                     await http.SendAsync(
                         request,
-                        HttpCompletionOption.ResponseHeadersRead);
+                        HttpCompletionOption.ResponseHeadersRead,
+                        timeout.Token);
 
                 obsConnectionOnline =
                     response.IsSuccessStatusCode;
@@ -1720,6 +2536,7 @@ internal sealed partial class MainWindow
         });
     }
 
+
     private void RotateStreamKey(CharacterSession session)
     {
         keyRotating = true;
@@ -1732,7 +2549,9 @@ internal sealed partial class MainWindow
             keyRotating = false;
             if (key is null)
             {
-                keyError = "Couldn't generate a stream key.";
+                keyError =
+                    liveClient.LastFailure?.UserMessage ??
+                    "Couldn't generate a stream key.";
                 return;
             }
 

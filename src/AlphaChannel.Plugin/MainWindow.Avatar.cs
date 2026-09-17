@@ -7,7 +7,7 @@ using Dalamud.Interface.Utility.Raii;
 namespace AlphaChannel.Plugin;
 
 // Avatar rendering + the curated icon/color picker - shared by Settings' profile editor and every
-// place an avatar chip shows up (Friends list, Alpha Chat, Tweeter, the profile popup). Custom
+// place an avatar chip shows up (Friends list, Alpha Chat, and the profile popup). Custom
 // uploaded pictures (AvatarImageUrl) take priority when the texture is loaded; icon+color is the
 // fallback while loading or when no picture is set.
 internal sealed partial class MainWindow
@@ -76,21 +76,55 @@ internal sealed partial class MainWindow
     // space with Dummy. Custom pictures load through ThumbnailCache (same as video thumbs).
     private void DrawAvatarChip(string? iconName, string? colorHex, float diameter, string? imageUrl = null)
     {
-        var topLeft = ImGui.GetCursorScreenPos();
-        var drawList = ImGui.GetWindowDrawList();
-        var size = new Vector2(diameter, diameter);
+        var cursorPosition =
+            ImGui.GetCursorScreenPos();
+
+        //
+        // Drawing a small texture at fractional coordinates makes GPU
+        // filtering soften it across neighbouring pixels.
+        //
+        var topLeft =
+            new Vector2(
+                MathF.Round(
+                    cursorPosition.X),
+                MathF.Round(
+                    cursorPosition.Y));
+
+        var renderedDiameter =
+            MathF.Max(
+                1f,
+                MathF.Round(
+                    diameter));
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        var size =
+            new Vector2(
+                renderedDiameter,
+                renderedDiameter);
         var center = topLeft + size / 2f;
-        var radius = diameter / 2f;
+        var radius =
+            renderedDiameter /
+            2f;
 
         var absoluteUrl = ResolveAvatarUrl(imageUrl);
         var texture = absoluteUrl is null ? null : thumbnails.Get(absoluteUrl);
         if (texture is not null)
         {
-            var (uv0, uv1) = CoverUvs(texture.Width, texture.Height, diameter, diameter);
+            var (uv0, uv1) =
+    CoverUvs(
+        texture.Width,
+        texture.Height,
+        renderedDiameter,
+        renderedDiameter);
             drawList.AddImageRounded(texture.Handle, topLeft, topLeft + size, uv0, uv1,
                 ImGui.GetColorU32(Vector4.One), radius);
             drawList.AddCircle(center, radius, ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.12f)), 0, 1.25f);
-            ImGui.Dummy(size);
+            ImGui.Dummy(
+         new Vector2(
+             diameter,
+             diameter));
             return;
         }
 
@@ -102,11 +136,14 @@ internal sealed partial class MainWindow
             {
                 var glyph = icon.ToIconString();
                 var textSize = ImGui.CalcTextSize(glyph);
-                drawList.AddText(center - textSize / 2, ImGui.GetColorU32(Vector4.One), glyph);
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), center - textSize / 2, ImGui.GetColorU32(Vector4.One), glyph);
             }
         }
 
-        ImGui.Dummy(size);
+        ImGui.Dummy(
+    new Vector2(
+        diameter,
+        diameter));
     }
 
     // Draws an avatar at an explicit screen position without changing
@@ -121,20 +158,34 @@ internal sealed partial class MainWindow
         float diameter,
         string? imageUrl = null)
     {
+        topLeft =
+            new Vector2(
+                MathF.Round(
+                    topLeft.X),
+                MathF.Round(
+                    topLeft.Y));
+
+        var renderedDiameter =
+            MathF.Max(
+                1f,
+                MathF.Round(
+                    diameter));
+
         var drawList =
             ImGui.GetWindowDrawList();
 
         var size =
             new Vector2(
-                diameter,
-                diameter);
+                renderedDiameter,
+                renderedDiameter);
 
         var center =
             topLeft +
             size * 0.5f;
 
         var radius =
-            diameter * 0.5f;
+            renderedDiameter *
+            0.5f;
 
         var absoluteUrl =
             ResolveAvatarUrl(
@@ -152,8 +203,8 @@ internal sealed partial class MainWindow
                 CoverUvs(
                     texture.Width,
                     texture.Height,
-                    diameter,
-                    diameter);
+                    renderedDiameter,
+                    renderedDiameter);
 
             drawList.AddImageRounded(
                 texture.Handle,
@@ -202,7 +253,7 @@ internal sealed partial class MainWindow
                     ImGui.CalcTextSize(
                         glyph);
 
-                drawList.AddText(
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                     center -
                     textSize * 0.5f,
                     ImGui.GetColorU32(
@@ -218,7 +269,7 @@ internal sealed partial class MainWindow
     {
         var changed = false;
 
-        const float buttonSize = 32f;
+        var buttonSize = Ui(32f);
         const float gap = 8f;
 
         var availableWidth =
@@ -310,7 +361,7 @@ internal sealed partial class MainWindow
                         ImGui.CalcTextSize(
                             glyph);
 
-                    drawList.AddText(
+                    drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                         origin +
                         (size - glyphSize) * 0.5f,
                         ImGui.GetColorU32(
@@ -337,7 +388,7 @@ internal sealed partial class MainWindow
     {
         var changed = false;
 
-        const float buttonSize = 32f;
+        var buttonSize = Ui(32f);
         const float gap = 8f;
 
         var availableWidth =
@@ -439,7 +490,7 @@ internal sealed partial class MainWindow
                         ImGui.CalcTextSize(
                             glyph);
 
-                    drawList.AddText(
+                    drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                         origin +
                         (size - glyphSize) * 0.5f,
                         ImGui.GetColorU32(

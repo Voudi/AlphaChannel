@@ -44,12 +44,14 @@ internal static class WebMediaUrlResolver
 
 
     internal static async Task<(
-        string? Url,
-        string? Error,
-        string? Method)> ResolveAsync(
-        Resources resources,
-        string inputUrl,
-        CancellationToken token)
+     string? Url,
+     string? Error,
+     string? Method)> ResolveAsync(
+     Resources resources,
+     string inputUrl,
+     CancellationToken token,
+     bool usePoTokens = true,
+     string? youtubeCookiesPath = null)
     {
         if (!Uri.TryCreate(
                 inputUrl,
@@ -120,11 +122,13 @@ internal static class WebMediaUrlResolver
         //
 
         var ytDlpResult =
-            await TryResolveWithYtDlpAsync(
-                resources,
-                inputUri.ToString(),
-                token)
-            .ConfigureAwait(false);
+     await TryResolveWithYtDlpAsync(
+         resources,
+         inputUri.ToString(),
+         token,
+         usePoTokens,
+         youtubeCookiesPath)
+     .ConfigureAwait(false);
 
         if (ytDlpResult.Url is not null)
         {
@@ -152,6 +156,17 @@ internal static class WebMediaUrlResolver
     }
 
 
+    private static void AddAndroidClientArgument(
+    ProcessStartInfo startInfo)
+    {
+        startInfo.ArgumentList.Add(
+            "--extractor-args");
+
+        startInfo.ArgumentList.Add(
+            "youtube:player_client=android");
+    }
+
+
     // ---------------------------------------------------------
     // yt-dlp
     // ---------------------------------------------------------
@@ -161,7 +176,9 @@ internal static class WebMediaUrlResolver
         string? Error)> TryResolveWithYtDlpAsync(
         Resources resources,
         string pageUrl,
-        CancellationToken token)
+        CancellationToken token,
+        bool usePoTokens,
+        string? youtubeCookiesPath)
     {
         var ytDlpPath =
             resources.GetLocationYTDLP();
@@ -229,11 +246,69 @@ internal static class WebMediaUrlResolver
             process.StartInfo.ArgumentList.Add(
                 "--get-url");
 
+            var poTokenAvailable =
+                false;
+
+            if (usePoTokens)
+            {
+                //
+                // Compatibility mode uses mweb with the BgUtils provider.
+                // If its files are unavailable, retain Android as a safe
+                // fallback rather than making resolution impossible.
+                //
+                poTokenAvailable =
+                    YouTubePoTokenSupport.AddProcessArguments(
+                        resources,
+                        process.StartInfo);
+
+                if (poTokenAvailable)
+                {
+                    AepLog.Info(
+                        "[WebResolver] Resolving YouTube with PO-token compatibility mode.");
+                }
+                else
+                {
+                    AepLog.Warning(
+                        "[WebResolver] PO-token files are unavailable. " +
+                        "Using Android instead.");
+
+                    AddAndroidClientArgument(
+                        process.StartInfo);
+                }
+            }
+            else
+            {
+                AepLog.Info(
+                    "[WebResolver] Resolving YouTube with the Android client.");
+
+                AddAndroidClientArgument(
+                    process.StartInfo);
+            }
+
+            //
+            // Preserve the resolver's generic-page impersonation option.
+            // --extractor-args is repeatable, so this coexists with the
+            // YouTube and PO-provider arguments in the generated config.
+            //
             process.StartInfo.ArgumentList.Add(
                 "--extractor-args");
 
             process.StartInfo.ArgumentList.Add(
                 "generic:impersonate");
+
+            if (poTokenAvailable &&
+                !string.IsNullOrWhiteSpace(youtubeCookiesPath) &&
+                File.Exists(youtubeCookiesPath))
+            {
+                process.StartInfo.ArgumentList.Add(
+                    "--cookies");
+                process.StartInfo.ArgumentList.Add(
+                    youtubeCookiesPath);
+
+                AepLog.Info(
+                    "[YouTube/Account] Resolver retry is using the connected " +
+                    "embedded-browser session with PO tokens.");
+            }
 
             process.StartInfo.ArgumentList.Add(
                 pageUrl);
@@ -245,7 +320,6 @@ internal static class WebMediaUrlResolver
                     null,
                     "yt-dlp could not be started.");
             }
-
 
             var stdoutTask =
                 process.StandardOutput

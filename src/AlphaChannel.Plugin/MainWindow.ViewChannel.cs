@@ -1,4 +1,4 @@
-﻿using AlphaChannel.Contracts;
+using AlphaChannel.Contracts;
 using AlphaChannel.Plugin.Auth;
 using AlphaChannel.Plugin.Video;
 using Dalamud.Bindings.ImGui;
@@ -98,9 +98,7 @@ internal sealed partial class MainWindow
         }
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                12f));
+            UiVec(0f, 12f));
 
         // ---------------------------------------------------------
         // Header
@@ -118,7 +116,7 @@ internal sealed partial class MainWindow
             0f,
             8f);
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1.1f);
 
         ImGui.TextColored(
@@ -129,23 +127,21 @@ internal sealed partial class MainWindow
     0f,
     12f);
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             0.85f);
 
         ImGui.TextColored(
             MutedText,
             "Showing last 15 uploads");
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                12f));
+            UiVec(0f, 12f));
 
 
         // ---------------------------------------------------------
@@ -180,7 +176,7 @@ internal sealed partial class MainWindow
 
         const int columns = 5;
         const float gap = 12f;
-        const float rowGap = 16f;
+        var rowGap = Ui(16f);
         var cardHeight = Ui(224f);
 
         var contentWidth =

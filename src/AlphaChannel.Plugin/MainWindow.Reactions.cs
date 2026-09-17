@@ -13,8 +13,7 @@ internal sealed partial class MainWindow
 {
     private sealed record ReactionDefinition(
         FontAwesomeIcon Icon,
-        string Name,
-        bool PatreonOnly = false);
+        string Name);
 
     private static readonly ReactionDefinition[] Reactions =
     [
@@ -68,16 +67,16 @@ internal sealed partial class MainWindow
     FontAwesomeIcon.Bolt,
     "React Live");
 
-        ImGui.SetWindowFontScale(0.82f);
+        SetUiFontScale(0.82f);
 
         ImGui.TextColored(
             MutedText,
             "Like what you see? React directly on the screen!");
 
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(1f);
 
         ImGui.Dummy(
-            new Vector2(0f, 6f));
+            UiVec(0f, 6f));
 
         if (stream.Mode == StreamMode.None)
         {
@@ -92,15 +91,13 @@ internal sealed partial class MainWindow
 
 
         var buttonSize =
-            new Vector2(
-                48f,
-                48f);
+            UiVec(48f, 48f);
 
 
 
         var panelSize = new Vector2(
             ImGui.GetContentRegionAvail().X,
-            72f);
+            Ui(72f));
 
 
 
@@ -152,12 +149,6 @@ internal sealed partial class MainWindow
      ReactionDefinition reaction,
      Vector2 size)
     {
-        var locked =
-            reaction.PatreonOnly &&
-            CurrentSession?.PatreonTier is not (PatreonTier.Tier1 or PatreonTier.Tier2 or PatreonTier.Tier3);
-
-        using (ImRaii.Disabled(
-            locked))
         using (ImRaii.PushStyle(
             ImGuiStyleVar.FrameRounding,
             14f))
@@ -176,9 +167,6 @@ internal sealed partial class MainWindow
 
         var min =
             ImGui.GetItemRectMin();
-
-        var max =
-            ImGui.GetItemRectMax();
 
         var iconText =
             reaction.Icon.ToIconString();
@@ -200,48 +188,16 @@ internal sealed partial class MainWindow
                     min.Y +
                     ((size.Y - textSize.Y) * 0.5f));
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 pos,
                 ImGui.GetColorU32(
-                    locked
-                        ? MutedText
-                        : Vector4.One),
+                    Vector4.One),
                 iconText);
         }
 
-        if (locked)
+        if (ImGui.IsItemHovered())
         {
-            using (ImRaii.PushFont(
-                UiBuilder.IconFont))
-            {
-                var lockText =
-                    FontAwesomeIcon.Lock.ToIconString();
-
-                var lockSize =
-                    ImGui.CalcTextSize(
-                        lockText);
-
-                drawList.AddText(
-                    new Vector2(
-                        max.X -
-                        lockSize.X -
-                        4f,
-                        max.Y -
-                        lockSize.Y -
-                        3f),
-                    ImGui.GetColorU32(
-                        Gold),
-                    lockText);
-            }
-        }
-
-        if (ImGui.IsItemHovered(
-                ImGuiHoveredFlags.AllowWhenDisabled))
-        {
-            ImGui.SetTooltip(
-                locked
-                    ? $"{reaction.Name} — Patreon reaction"
-                    : reaction.Name);
+            ImGui.SetTooltip(reaction.Name);
         }
     }
 
@@ -253,9 +209,9 @@ internal sealed partial class MainWindow
             return;
         }
 
-        const float reactionSize = 28f;
-        const float reactionGap = 5f;
-        const float arrowWidth = 26f;
+        var reactionSize = Ui(28f);
+        var reactionGap = Ui(5f);
+        var arrowWidth = Ui(26f);
 
         var maxPage =
             Math.Max(

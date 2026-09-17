@@ -41,9 +41,9 @@ internal sealed partial class MainWindow
         DrawStage("##nowPlaying", () =>
         {
             ImGui.TextColored(Accent, "NOW PLAYING");
-            ImGui.SetWindowFontScale(1.25f);
+            SetUiFontScale(1.25f);
             ImGui.TextWrapped(current.Title);
-            ImGui.SetWindowFontScale(1f);
+            SetUiFontScale(1f);
 
             if (!seekDragging)
             {
@@ -56,7 +56,10 @@ internal sealed partial class MainWindow
             seekDragging = ImGui.IsItemActive();
             if (ImGui.IsItemDeactivatedAfterEdit())
             {
-                video.Seek(seekPreview);
+                video.Seek(
+    seekPreview);
+
+                queue.SaveCurrentProgress();
             }
 
             var (streamWidth, streamHeight) = video.GetResolution();
@@ -85,7 +88,10 @@ internal sealed partial class MainWindow
                 }
                 else
                 {
-                    video.Pause(!isPaused);
+                    video.Pause(
+    !isPaused);
+
+                    queue.SaveCurrentProgress();
                 }
             }
 
@@ -240,7 +246,7 @@ internal sealed partial class MainWindow
         drawList.AddRectFilled(
             min,
             new Vector2(
-                min.X + 4f,
+                min.X + Ui(4f),
                 max.Y),
             ImGui.GetColorU32(border),
             9f);
@@ -251,10 +257,10 @@ internal sealed partial class MainWindow
 
         var titlePos =
             new Vector2(
-                min.X + 18f,
-                min.Y + 13f);
+                min.X + Ui(18f),
+                min.Y + Ui(13f));
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             titlePos,
             ImGui.GetColorU32(
                 new Vector4(
@@ -274,10 +280,10 @@ internal sealed partial class MainWindow
                 message[..87] + "...";
         }
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
-                min.X + 18f,
-                min.Y + 40f),
+                min.X + Ui(18f),
+                min.Y + Ui(40f)),
             ImGui.GetColorU32(
                 new Vector4(
                     MutedText.X,
@@ -329,8 +335,16 @@ internal sealed partial class MainWindow
     double positionSeconds,
     double durationSeconds)
     {
-        AepLog.Warning(
-    $"[Recently Watched] Saving {entry.Title} at {positionSeconds:F0}s");
+        if (!IsResumableHistoryMedia(
+                entry.Url,
+                entry.Source,
+                durationSeconds) ||
+            entry.IsTransient)
+        {
+            return;
+        }
+
+    
         var existing =
             Plugin.Cfg.RecentlyWatchedVideos
                 .FirstOrDefault(
@@ -372,5 +386,51 @@ internal sealed partial class MainWindow
 
         Plugin.Cfg.Save();
     }
+
+    private static bool IsResumableHistoryMedia(
+        string url,
+        string source,
+        double durationSeconds)
+    {
+        // Resume history is only useful for finite media. Live services commonly
+        // report no duration (or an infinite duration), while Alpha Channel's own
+        // broadcast feeds use HLS/RTMP endpoints.
+        if (durationSeconds <= 0d ||
+            double.IsNaN(durationSeconds) ||
+            double.IsInfinity(durationSeconds))
+        {
+            return false;
+        }
+
+        if (string.Equals(source, "Radio", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(source, "Music / DJ", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(source, "Live Stream", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (url.Contains(".m3u8", StringComparison.OrdinalIgnoreCase) ||
+            url.StartsWith("rtmp://", StringComparison.OrdinalIgnoreCase) ||
+            url.StartsWith("rtmps://", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+            (string.Equals(uri.Host, "twitch.tv", StringComparison.OrdinalIgnoreCase) ||
+             uri.Host.EndsWith(".twitch.tv", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsResumableHistoryMedia(
+        RecentlyWatchedVideoRecord record) =>
+        IsResumableHistoryMedia(
+            record.Url,
+            record.ChannelName,
+            record.DurationSeconds);
 
 }

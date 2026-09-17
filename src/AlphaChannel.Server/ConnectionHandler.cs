@@ -8,11 +8,10 @@ using AlphaChannel.Server.Social;
 
 namespace AlphaChannel.Server;
 
-// One instance handles one socket's whole lifetime. viewingHostId is a local, not a field, so this
-// class itself is stateless and safe to register as a DI singleton - see the plan's v1 auth note:
-// userId here is just whatever the client's Authorization: Bearer header claims, no verification
-// against a real identity. Room ownership itself (who's currently hosting) is NOT tracked in a
-// local anymore - see the finally block's comment for why a stream.transferHost made that unsafe.
+// Each RunAsync invocation handles one WebSocket connection. Connection-specific state
+// stays local to the invocation, allowing this handler to be registered as a singleton.
+// Program.cs validates the bearer token and supplies the authenticated account ID.
+// RoomManager tracks current room ownership so host transfers are respected during cleanup.
 internal sealed class ConnectionHandler(
     RoomManager rooms, UserDirectory directory, PresenceService presence, ActivityService activity, ILogger<ConnectionHandler> logger)
 {
@@ -93,7 +92,14 @@ internal sealed class ConnectionHandler(
                     // message.HostId carries the host's typed display name here, not their real
                     // UserId - players never see or type each other's UserId, see UserDirectory.
                     case SignalType.StreamJoin when message.HostId is { Length: > 0 } hostName:
-                        if (!directory.TryResolveUserId(hostName, out var resolvedHostId))
+                        // Character context-menu joins resolve to the host's account ID via REST.
+                        // Existing manual joins continue to resolve the typed display name.
+                        var resolvedHostId = directory.TryGetSocket(hostName, out _)
+                            ? hostName
+                            : directory.TryResolveUserId(hostName, out var displayNameUserId)
+                                ? displayNameUserId
+                                : string.Empty;
+                        if (resolvedHostId.Length == 0)
                         {
                             await SendAsync(socket, new StreamControl { Type = SignalType.StreamDeclined, Reason = "Host not found." },
                                 token).ConfigureAwait(false);
@@ -166,15 +172,66 @@ internal sealed class ConnectionHandler(
                         break;
 
                     case SignalType.StreamLeave:
-                        if (viewingHostId is { } leaveRoomKey && rooms.GetRoom(leaveRoomKey) is { } leaveRoom)
                         {
-                            leaveRoom.Viewers.TryRemove(userId, out _);
-                            viewingHostId = null;
-                            await BroadcastRosterAsync(leaveRoom, token).ConfigureAwait(false);
-                            await presence.NotifyAsync(userId, online: true, token).ConfigureAwait(false);
-                        }
+                            //
+                            // A host leaving closes their room. Remove it before
+                            // broadcasting StreamEnded so it disappears from the
+                            // directory immediately and cannot accept new joins.
+                            //
+                            if (rooms.FindRoomHostedBy(userId) is { } hostedRoom)
+                            {
+                                rooms.RemoveRoom(
+                                    hostedRoom.RoomKey);
 
-                        break;
+                                await BroadcastAsync(
+                                        hostedRoom,
+                                        new StreamControl
+                                        {
+                                            Type =
+                                                SignalType.StreamEnded,
+
+                                            HostId =
+                                                userId,
+                                        },
+                                        token)
+                                    .ConfigureAwait(false);
+
+                                await presence.NotifyAsync(
+                                        userId,
+                                        online: true,
+                                        token)
+                                    .ConfigureAwait(false);
+
+                                break;
+                            }
+
+                            //
+                            // An ordinary viewer leaving only removes that viewer.
+                            //
+                            if (viewingHostId is { } leaveRoomKey &&
+                                rooms.GetRoom(leaveRoomKey) is { } leaveRoom)
+                            {
+                                leaveRoom.Viewers.TryRemove(
+                                    userId,
+                                    out _);
+
+                                viewingHostId =
+                                    null;
+
+                                await BroadcastRosterAsync(
+                                        leaveRoom,
+                                        token)
+                                    .ConfigureAwait(false);
+
+                                await presence.NotifyAsync(
+                                        userId,
+                                        online: true,
+                                        token)
+                                    .ConfigureAwait(false);
+                            }
+
+                            break;
+                        }
 
                     // message.HostId carries the target viewer's real UserId here - the host already
                     // has it from their own roster (ParticipantInfo.UserId), no name lookup needed.
@@ -358,8 +415,40 @@ internal sealed class ConnectionHandler(
         }
     }
 
-    private static StreamControl SanitizeState(StreamControl message) =>
-        message with { Password = null };
+    private static StreamControl SanitizeState(
+         StreamControl message)
+    {
+        var mediaTitle =
+            string.IsNullOrWhiteSpace(
+                message.MediaTitle)
+                ? null
+                : message.MediaTitle.Trim();
+
+        if (mediaTitle is { Length: > 160 })
+        {
+            mediaTitle =
+                mediaTitle[..160];
+        }
+
+        var mediaThumbnailUrl =
+            string.IsNullOrWhiteSpace(
+                message.MediaThumbnailUrl)
+                ? null
+                : message.MediaThumbnailUrl.Trim();
+
+        if (mediaThumbnailUrl is { Length: > 2048 })
+        {
+            mediaThumbnailUrl =
+                mediaThumbnailUrl[..2048];
+        }
+
+        return message with
+        {
+            Password = null,
+            MediaTitle = mediaTitle,
+            MediaThumbnailUrl = mediaThumbnailUrl,
+        };
+    }
 
     private static string HashPassword(string password) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(password)));

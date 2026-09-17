@@ -72,7 +72,7 @@ internal sealed class FriendService(
 
         if (viewerId == targetId)
         {
-            return ToProfileDto(target, null);
+            return await ToProfileDtoAsync(db, target, null, cancellationToken);
         }
 
         var friendship = await db.Friendships.FirstOrDefaultAsync(f =>
@@ -91,13 +91,26 @@ internal sealed class FriendService(
             return null;
         }
 
-        return ToProfileDto(target, ToUnixSeconds(friendship.RespondedAtUtc ?? friendship.CreatedAtUtc));
+        return await ToProfileDtoAsync(
+            db, target, ToUnixSeconds(friendship.RespondedAtUtc ?? friendship.CreatedAtUtc), cancellationToken);
     }
 
-    private static AccountProfileDto ToProfileDto(Account a, long? friendsSinceUnix) => new(
-        a.Id.ToString(), a.Handle, a.DisplayName, a.AvatarIcon, a.AvatarColorHex, a.Bio, a.StatusMessage,
-        friendsSinceUnix, AvatarStorage.ToPublicUrl(a.AvatarImagePath),
-        a.IsDeveloper, a.PatreonTier);
+    private static async Task<AccountProfileDto> ToProfileDtoAsync(
+        AlphaChannelDbContext db, Account account, long? friendsSinceUnix,
+        CancellationToken cancellationToken)
+    {
+        var character = await db.AccountCharacters
+            .Where(c => c.AccountId == account.Id)
+            .OrderByDescending(c => c.IsPrimary)
+            .ThenBy(c => c.LinkedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return new AccountProfileDto(
+            account.Id.ToString(), account.Handle, account.DisplayName, account.AvatarIcon,
+            account.AvatarColorHex, account.Bio, account.StatusMessage, friendsSinceUnix,
+            AvatarStorage.ToPublicUrl(account.AvatarImagePath), account.IsDeveloper,
+            account.PatreonTier, character?.CharacterName, character?.World);
+    }
 
     public async Task<List<FriendDto>> GetFriendsAsync(Guid accountId, CancellationToken cancellationToken)
     {
@@ -116,10 +129,26 @@ internal sealed class FriendService(
 
         return accounts
             .Where(a => !LalafellVisibility.IsHiddenFrom(caller, a, settings))
-            .Select(a => new FriendDto(a.Id.ToString(), a.Handle, a.DisplayName,
-                directory.TryGetSocket(a.Id.ToString(), out _),
-                PresenceLabels.WatchingLabel(a.Id.ToString(), rooms, directory, liveDirectory),
-                a.AvatarIcon, a.AvatarColorHex, a.StatusMessage, AvatarStorage.ToPublicUrl(a.AvatarImagePath)))
+                    .Select(a => new FriendDto(
+                a.Id.ToString(),
+                a.Handle,
+                a.DisplayName,
+                directory.TryGetSocket(
+                    a.Id.ToString(),
+                    out _),
+                PresenceLabels.WatchingLabel(
+                    a.Id.ToString(),
+                    rooms,
+                    directory,
+                    liveDirectory),
+                a.AvatarIcon,
+                a.AvatarColorHex,
+                a.StatusMessage,
+                AvatarStorage.ToPublicUrl(
+                    a.AvatarImagePath),
+                PresenceLabels.HostingJoinableWatchParty(
+                    a.Id.ToString(),
+                    rooms)))
             .ToList();
     }
 
@@ -232,6 +261,40 @@ internal sealed class FriendService(
             ? null
             : await db.Accounts.FirstOrDefaultAsync(a => a.Id == character.AccountId, cancellationToken);
         return await SendRequestToAccountAsync(db, requesterId, recipient, cancellationToken);
+    }
+
+    public async Task<CharacterStreamDto?> FindJoinableStreamByCharacterAsync(
+        Guid callerId, string characterName, string world, CancellationToken cancellationToken)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        var character = await db.AccountCharacters
+            .FirstOrDefaultAsync(c => c.CharacterName == characterName && c.World == world, cancellationToken);
+        if (character is null || character.AccountId == callerId)
+        {
+            return null;
+        }
+
+        var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == character.AccountId, cancellationToken);
+        if (account is null ||
+            await IsBlockedEitherWayAsync(db, callerId, account.Id, cancellationToken))
+        {
+            return null;
+        }
+
+        var caller = await db.Accounts.FirstAsync(a => a.Id == callerId, cancellationToken);
+        var visibilitySettings = await GetSettingsAsync(db, cancellationToken);
+        if (LalafellVisibility.IsHiddenFrom(caller, account, visibilitySettings))
+        {
+            return null;
+        }
+
+        var room = rooms.FindRoomHostedBy(account.Id.ToString());
+        if (room is null || room.IsPrivate)
+        {
+            return null;
+        }
+
+        return new CharacterStreamDto(account.Id.ToString(), account.DisplayName, room.Kind);
     }
 
     private async Task<SendFriendRequestResult> SendRequestToAccountAsync(

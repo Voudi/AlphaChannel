@@ -4,6 +4,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Config;
 using Dalamud.Interface;
 using Dalamud.Interface.Utility.Raii;
+using Org.BouncyCastle.Tls;
 
 namespace AlphaChannel.Plugin;
 
@@ -38,6 +39,22 @@ internal sealed partial class MainWindow
     private readonly List<PartyChatItem>
         partyChatItems = [];
 
+    private enum VideoRequestPermission
+    {
+        Allow,
+        AutoAccept,
+        NotAllowed,
+    }
+
+    private readonly Dictionary<string, VideoRequestPermission> videoRequestPermissions =
+        new(StringComparer.Ordinal);
+
+    private readonly Dictionary<string, Queue<DateTime>> videoRequestTimes =
+        new(StringComparer.Ordinal);
+
+    private const string VideoRequestsUnavailableMessage =
+        "The host is not currently accepting video requests";
+
     private sealed record PartyAvatarInfo(
         string? AvatarIcon,
         string? AvatarColorHex,
@@ -59,6 +76,9 @@ internal sealed partial class MainWindow
 
     private string partyChatInput = string.Empty;
     private bool partyChatStickToBottom = true;
+    private string? publishedNextQueueSignature;
+    private VideoQueueEntry? viewerPartyNextQueueEntry;
+    private int viewerPartyQueueCount;
 
     internal void AddPartyReactionToFeed(
       string userId,
@@ -101,16 +121,31 @@ internal sealed partial class MainWindow
 
     private PartyPanelTab partyPanelTab = PartyPanelTab.Watching;
     private bool gameplayStreamOfferDismissed;
+    private bool browserStreamOfferDismissed;
 
-    // Local UI state for the new Now Playing / TV dashboard.
-    // Backend host-placement sync will be connected later.
     private bool partySyncTvPlacement = true;
+    internal bool PartySyncTvPlacement => partySyncTvPlacement;
+
+    private AudioVisualizerMode partyVisualizerMode =
+     AudioVisualizerMode.ClassicBars;
+
+    private AudioVisualizerTheme partyVisualizerTheme =
+        AudioVisualizerTheme.AlphaPurple;
+
+    private string? partyVisualizerMediaUrl;
+
+    internal AudioVisualizerMode PartyVisualizerMode =>
+        partyVisualizerMode;
+
+    internal AudioVisualizerTheme PartyVisualizerTheme =>
+        partyVisualizerTheme;
 
     private bool ShouldShowBottomPlaybackBar =>
         currentPage is
             HomePage.Home or
             HomePage.Player or
-            HomePage.VideoGrid;
+            HomePage.VideoGrid or
+            HomePage.InternetArchive;
 
     private void EnsurePartyAvatarLoaded(
      string userId,
@@ -206,6 +241,18 @@ internal sealed partial class MainWindow
                     if (string.IsNullOrWhiteSpace(
                             displayName))
                     {
+                        //
+                        // Cache the missing result too. Home room cards
+                        // render every frame, so an unavailable avatar
+                        // must not cause continuous profile requests.
+                        //
+                        partyAvatarCache[userId] =
+                            new PartyAvatarInfo(
+                                null,
+                                null,
+                                null,
+                                DateTime.UtcNow);
+
                         return;
                     }
 
@@ -216,6 +263,13 @@ internal sealed partial class MainWindow
 
                     if (results is null)
                     {
+                        partyAvatarCache[userId] =
+                            new PartyAvatarInfo(
+                                null,
+                                null,
+                                null,
+                                DateTime.UtcNow);
+
                         return;
                     }
 
@@ -229,6 +283,13 @@ internal sealed partial class MainWindow
 
                     if (match is null)
                     {
+                        partyAvatarCache[userId] =
+                            new PartyAvatarInfo(
+                                null,
+                                null,
+                                null,
+                                DateTime.UtcNow);
+
                         return;
                     }
 
@@ -253,8 +314,364 @@ internal sealed partial class MainWindow
             });
     }
 
+    private void DrawPartyVisualizerSelector(
+    Video.VideoQueueEntry current,
+    Vector2 origin,
+    float thumbnailWidth,
+    float thumbnailHeight)
+    {
+        if (stream.Mode != StreamMode.Hosting ||
+            !video.IsAudioOnly)
+        {
+            return;
+        }
+
+        var selection =
+            AudioVisualizerSelection.Parse(
+                current.Url);
+
+        //
+        // When genuinely changing media, adopt the visualizer and theme encoded
+        // in the new URL. Fragment-only changes do not reset the local controls.
+        //
+        if (!string.Equals(
+                partyVisualizerMediaUrl,
+                selection.MediaUrl,
+                StringComparison.Ordinal))
+        {
+            partyVisualizerMediaUrl =
+                selection.MediaUrl;
+
+            partyVisualizerMode =
+                selection.Mode;
+
+            partyVisualizerTheme =
+                selection.Theme;
+        }
+
+        var dropdownGap =
+            Ui(6f);
+
+        var dropdownWidth =
+            (thumbnailWidth - dropdownGap) /
+            2f;
+
+        var labelY =
+            origin.Y +
+            thumbnailHeight +
+            Ui(24f);
+
+        var dropdownY =
+            labelY + Ui(20f);
+
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.FrameRounding,
+                   Ui(7f)))
+        using (ImRaii.PushColor(
+                   ImGuiCol.FrameBg,
+                   new Vector4(
+                       0.055f,
+                       0.065f,
+                       0.11f,
+                       1f))
+                   .Push(
+                       ImGuiCol.FrameBgHovered,
+                       new Vector4(
+                           0.075f,
+                           0.085f,
+                           0.14f,
+                           1f))
+                   .Push(
+                       ImGuiCol.FrameBgActive,
+                       new Vector4(
+                           0.09f,
+                           0.075f,
+                           0.16f,
+                           1f))
+                   .Push(
+                       ImGuiCol.Header,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.72f))
+                   .Push(
+                       ImGuiCol.HeaderHovered,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.88f)))
+        {
+            //
+            // Visualizer dropdown.
+            //
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    origin.X,
+                    labelY));
+
+            SetUiFontScale(0.76f);
+            ImGui.TextColored(MutedText, "Visualizer");
+            SetUiFontScale(1f);
+
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    origin.X,
+                    dropdownY));
+
+            ImGui.SetNextItemWidth(
+                dropdownWidth);
+
+            var visualizerPreview =
+                AudioVisualizerSelection.GetDisplayName(
+                    partyVisualizerMode);
+
+            if (ImGui.BeginCombo(
+                    "##partyVisualizer",
+                    visualizerPreview))
+            {
+                DrawPartyVisualizerOption(
+                    current,
+                    AudioVisualizerMode.ClassicBars);
+
+                DrawPartyVisualizerOption(
+                    current,
+                    AudioVisualizerMode.FfmpegSpectrum);
+
+                DrawPartyVisualizerOption(
+                    current,
+                    AudioVisualizerMode.MirrorSpectrum);
+
+                DrawPartyVisualizerOption(
+    current,
+    AudioVisualizerMode.Waterfall);
+
+                DrawPartyVisualizerOption(
+    current,
+    AudioVisualizerMode.NeonWave);
+
+                DrawPartyVisualizerOption(
+    current,
+    AudioVisualizerMode.OrbitalScope);
+
+                ImGui.EndCombo();
+            }
+
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip(
+                    "Choose the audio visualizer used by everyone in the Watch Party.");
+            }
+
+            //
+            // Theme dropdown.
+            //
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    origin.X +
+                    dropdownWidth +
+                    dropdownGap,
+                    labelY));
+
+            SetUiFontScale(0.76f);
+            ImGui.TextColored(MutedText, "Colour");
+            SetUiFontScale(1f);
+
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    origin.X +
+                    dropdownWidth +
+                    dropdownGap,
+                    dropdownY));
+
+            ImGui.SetNextItemWidth(
+                dropdownWidth);
+
+            var themeDisabled =
+                partyVisualizerMode ==
+                AudioVisualizerMode.ClassicBars;
+
+            using (ImRaii.Disabled(
+                       themeDisabled))
+            {
+                var themePreview =
+                    AudioVisualizerSelection.GetThemeDisplayName(
+                        partyVisualizerTheme);
+
+                if (ImGui.BeginCombo(
+                        "##partyVisualizerTheme",
+                        themePreview))
+                {
+                    DrawPartyVisualizerThemeOption(
+                        current,
+                        AudioVisualizerTheme.AlphaPurple);
+
+                    DrawPartyVisualizerThemeOption(
+                        current,
+                        AudioVisualizerTheme.ElectricBlue);
+
+                    DrawPartyVisualizerThemeOption(
+                        current,
+                        AudioVisualizerTheme.NeonCyan);
+
+                    DrawPartyVisualizerThemeOption(
+                        current,
+                        AudioVisualizerTheme.Emerald);
+
+                    DrawPartyVisualizerThemeOption(
+                        current,
+                        AudioVisualizerTheme.HotPink);
+
+                    DrawPartyVisualizerThemeOption(
+                        current,
+                        AudioVisualizerTheme.SunsetOrange);
+
+                    DrawPartyVisualizerThemeOption(
+                        current,
+                        AudioVisualizerTheme.Crimson);
+
+                    DrawPartyVisualizerThemeOption(
+                        current,
+                        AudioVisualizerTheme.White);
+
+                    ImGui.Separator();
+
+                    DrawPartyVisualizerThemeOption(
+                        current,
+                        AudioVisualizerTheme.PurplePink);
+
+                    DrawPartyVisualizerThemeOption(
+                        current,
+                        AudioVisualizerTheme.BlueCyan);
+
+                    DrawPartyVisualizerThemeOption(
+                        current,
+                        AudioVisualizerTheme.Sunset);
+
+                    DrawPartyVisualizerThemeOption(
+                        current,
+                        AudioVisualizerTheme.Rainbow);
+
+                    ImGui.EndCombo();
+                }
+            }
+
+            if (ImGui.IsItemHovered(
+                    ImGuiHoveredFlags.AllowWhenDisabled))
+            {
+                ImGui.SetTooltip(
+                    themeDisabled
+                        ? "Classic Bars is a less CPU-intensive visualizer which only monitors the audio volume and does not provide colour selection."
+                        : "Choose the visualizer colour or gradient used by everyone in the Watch Party.");
+            }
+        }
+    }
+
+    private void DrawPartyVisualizerOption(
+    Video.VideoQueueEntry current,
+    AudioVisualizerMode mode)
+    {
+        var selected =
+            partyVisualizerMode ==
+            mode;
+
+        var label =
+            AudioVisualizerSelection.GetDisplayName(
+                mode);
+
+        if (ImGui.Selectable(
+                label,
+                selected))
+        {
+            partyVisualizerMode =
+                mode;
+
+            var transmittedUrl =
+                AudioVisualizerSelection.AddToUrl(
+                    current.Url,
+                    mode,
+                    partyVisualizerTheme);
+
+            //
+            // VideoPlayer recognizes this as a presentation-only fragment
+            // change and does not restart the audio.
+            //
+            video.Play(
+                transmittedUrl);
+
+            AepLog.Info(
+                $"[WatchParty] Host selected visualizer: {label}");
+        }
+
+        if (selected)
+        {
+            ImGui.SetItemDefaultFocus();
+        }
+    }
+
+    private void DrawPartyVisualizerThemeOption(
+    Video.VideoQueueEntry current,
+    AudioVisualizerTheme theme)
+    {
+        var selected =
+            partyVisualizerTheme ==
+            theme;
+
+        var label =
+            AudioVisualizerSelection.GetThemeDisplayName(
+                theme);
+
+        if (ImGui.Selectable(
+                label,
+                selected))
+        {
+            partyVisualizerTheme =
+                theme;
+
+            var transmittedUrl =
+                AudioVisualizerSelection.AddToUrl(
+                    current.Url,
+                    partyVisualizerMode,
+                    theme);
+
+            //
+            // The normalized media URL remains unchanged, so only the FFmpeg
+            // visualizer graph is rebuilt.
+            //
+            video.Play(
+                transmittedUrl);
+
+            AepLog.Info(
+                $"[WatchParty] Host selected visualizer theme: {label}");
+        }
+
+        if (selected)
+        {
+            ImGui.SetItemDefaultFocus();
+        }
+    }
+
     private void DrainPartyChat()
     {
+        PublishPartyNextQueueIfChanged();
+
+        while (stream.IncomingNextQueueSnapshots.TryDequeue(out var nextSnapshot))
+        {
+            viewerPartyQueueCount = Math.Max(0, nextSnapshot.Count);
+            viewerPartyNextQueueEntry = nextSnapshot.Count > 0 &&
+                !string.IsNullOrWhiteSpace(nextSnapshot.Title)
+                ? new VideoQueueEntry(
+                    string.Empty,
+                    nextSnapshot.Title,
+                    nextSnapshot.Source ?? string.Empty,
+                    nextSnapshot.DurationSeconds is { } seconds
+                        ? TimeSpan.FromSeconds(Math.Max(0d, seconds))
+                        : null,
+                    nextSnapshot.ThumbnailUrl)
+                : null;
+        }
+
         // ---------------------------------------------------------
         // Apply completed local metadata lookups.
         //
@@ -314,6 +731,68 @@ internal sealed partial class MainWindow
         // Metadata is resolved independently by each local client.
         // ---------------------------------------------------------
 
+        while (stream.PendingHostMediaRequests.TryDequeue(out var pendingRequest))
+        {
+            if (stream.Mode != StreamMode.Hosting)
+            {
+                continue;
+            }
+
+            var permission = videoRequestPermissions.TryGetValue(pendingRequest.UserId, out var savedPermission)
+                ? savedPermission
+                : VideoRequestPermission.Allow;
+
+            if (CurrentMediaDisallowsVideoRequests() || permission == VideoRequestPermission.NotAllowed)
+            {
+                _ = stream.SendMediaRequestDeniedAsync(
+                    pendingRequest.UserId,
+                    VideoRequestsUnavailableMessage);
+                continue;
+            }
+
+            var now = DateTime.UtcNow;
+            if (!videoRequestTimes.TryGetValue(pendingRequest.UserId, out var recentRequests))
+            {
+                recentRequests = new Queue<DateTime>();
+                videoRequestTimes[pendingRequest.UserId] = recentRequests;
+            }
+
+            while (recentRequests.Count > 0 && now - recentRequests.Peek() >= TimeSpan.FromSeconds(60))
+            {
+                recentRequests.Dequeue();
+            }
+
+            if (recentRequests.Count >= 3)
+            {
+                _ = stream.SendMediaRequestDeniedAsync(
+                    pendingRequest.UserId,
+                    "You can send up to 3 video requests every 60 seconds.");
+                continue;
+            }
+
+            recentRequests.Enqueue(now);
+
+            _ = stream.PublishMediaRequestAsync(
+                pendingRequest.UserId,
+                pendingRequest.DisplayName,
+                pendingRequest.RequestId);
+
+            if (permission == VideoRequestPermission.AutoAccept)
+            {
+                queue.Add(new VideoQueueEntry(
+                    pendingRequest.Url,
+                    pendingRequest.Url,
+                    string.Empty,
+                    null,
+                    null));
+
+                _ = stream.SendMediaRequestResultAsync(
+                    pendingRequest.RequestId,
+                    false,
+                    queue.Entries.Count);
+            }
+        }
+
         while (stream.IncomingMediaRequests.TryDequeue(
                    out var request))
         {
@@ -340,7 +819,8 @@ internal sealed partial class MainWindow
                     request.Url,
                     string.Empty,
                     null,
-                    null));
+                    null,
+                    UserId: request.UserId));
 
             partyChatStickToBottom =
                 true;
@@ -421,6 +901,48 @@ internal sealed partial class MainWindow
         {
             partyChatItems.Clear();
         }
+
+        if (stream.Mode == StreamMode.None)
+        {
+            videoRequestPermissions.Clear();
+            videoRequestTimes.Clear();
+            publishedNextQueueSignature = null;
+            viewerPartyNextQueueEntry = null;
+            viewerPartyQueueCount = 0;
+        }
+    }
+
+    private void PublishPartyNextQueueIfChanged()
+    {
+        if (stream.Mode != StreamMode.Hosting)
+        {
+            publishedNextQueueSignature = null;
+            return;
+        }
+
+        var next = queue.Entries.FirstOrDefault();
+        var rosterSignature = string.Join(',', stream.Roster.Select(member => member.UserId));
+        var signature = string.Join('|',
+            queue.Entries.Count,
+            next?.Id.ToString() ?? string.Empty,
+            next?.Title ?? string.Empty,
+            next?.Source ?? string.Empty,
+            next?.Duration?.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+            next?.ThumbnailUrl ?? string.Empty,
+            rosterSignature);
+
+        if (string.Equals(signature, publishedNextQueueSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        publishedNextQueueSignature = signature;
+        _ = stream.SendNextQueueSnapshotAsync(new PartyNextQueueSnapshot(
+            queue.Entries.Count,
+            next?.Title,
+            next?.Source,
+            next?.Duration?.TotalSeconds,
+            next?.ThumbnailUrl));
     }
 
     private async Task ResolvePartyMediaMetadataAsync(
@@ -473,9 +995,7 @@ internal sealed partial class MainWindow
         DrawPartyTabButtons();
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                10f));
+            UiVec(0f, 10f));
 
         switch (partyPanelTab)
         {
@@ -493,7 +1013,7 @@ internal sealed partial class MainWindow
         }
     }
 
-    private void DrawGameplayStreamOffer()
+    private void DrawExclusivePlaybackStreamOffer()
     {
         if (stream.Mode != StreamMode.Hosting)
         {
@@ -504,20 +1024,47 @@ internal sealed partial class MainWindow
             screenController.Engine;
 
         var gameplayActive =
-            engine.IsPlayingSnes ||
-            engine.IsPlayingGameBoy;
+            engine.IsPlayingGame;
 
-        var alreadyBroadcasting =
+        var browserActive =
+            engine.IsPlayingBrowser;
+
+        var gameplayAlreadyBroadcasting =
+            gameBroadcastArmed ||
             engine.IsSnesBroadcasting ||
-            engine.IsGameBoyBroadcasting;
+            engine.IsGameBoyBroadcasting ||
+            engine.IsNesBroadcasting ||
+            engine.IsGameBoyAdvanceBroadcasting ||
+            engine.IsMasterSystemBroadcasting ||
+            engine.IsGameGearBroadcasting;
+
+        var browserAlreadyBroadcasting =
+            browserBroadcastArmed ||
+            engine.IsBrowserBroadcasting;
+
+        var offeringBrowser =
+            browserActive &&
+            !browserAlreadyBroadcasting;
+
+        var offeringGameplay =
+            gameplayActive &&
+            !gameplayAlreadyBroadcasting;
 
 
-        if (!gameplayActive ||
-            alreadyBroadcasting ||
-            gameplayStreamOfferDismissed)
+        if ((!offeringGameplay ||
+             gameplayStreamOfferDismissed) &&
+            (!offeringBrowser ||
+             browserStreamOfferDismissed))
         {
             return;
         }
+
+        var isBrowserOffer =
+            offeringBrowser &&
+            !browserStreamOfferDismissed;
+
+        var exclusiveOfferLocked =
+            !HasConfirmedPatreonAccess();
 
 
         using (ImRaii.PushStyle(
@@ -525,10 +1072,12 @@ internal sealed partial class MainWindow
             10f))
         using (var card =
             ImRaii.Child(
-                "##gameplayStreamOffer",
+                "##exclusivePlaybackStreamOffer",
                 new Vector2(
                     -1f,
-                    Ui(105f)),
+                    exclusiveOfferLocked
+                        ? Ui(140f)
+                        : Ui(105f)),
                 false))
         {
             if (!card)
@@ -547,7 +1096,9 @@ internal sealed partial class MainWindow
                 min +
                 new Vector2(
                     ImGui.GetContentRegionAvail().X,
-                    105f);
+                    exclusiveOfferLocked
+                        ? Ui(140f)
+                        : Ui(105f));
 
 
             drawList.AddRect(
@@ -569,7 +1120,9 @@ internal sealed partial class MainWindow
                 Accent))
             {
                 ImGui.Text(
-                    "ⓘ   GAMEPLAY STREAM AVAILABLE");
+                    isBrowserOffer
+                        ? "ⓘ   BROWSER STREAM AVAILABLE"
+                        : "ⓘ   GAMEPLAY STREAM AVAILABLE");
             }
 
 
@@ -577,33 +1130,98 @@ internal sealed partial class MainWindow
 
 
             ImGui.TextWrapped(
-                "Games run locally unless you choose to stream them. Would you like to share your gameplay with this Watch Party?");
+                isBrowserOffer
+                    ? exclusiveOfferLocked
+                        ? "Browser broadcasting is a Patreon feature. Your browser will continue running locally while broadcast access remains locked."
+                        : "The browser runs locally unless you choose to stream it. Would you like to share your browser with this Watch Party?"
+                    : exclusiveOfferLocked
+                        ? "Gameplay broadcasting is a Patreon feature. Your game will continue playing locally while broadcast access remains locked."
+                        : "Games run locally unless you choose to stream them. Would you like to share your gameplay with this Watch Party?");
 
 
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    5f));
+                UiVec(0f, 5f));
 
 
-            if (ImGui.Button(
-                    "Start Gameplay Stream"))
+            if (exclusiveOfferLocked)
             {
-                StartGameWatchPartyBroadcast();
+                using (ImRaii.PushColor(ImGuiCol.Button, PatreonOrange)
+                           .Push(ImGuiCol.ButtonHovered, PatreonOrangeHover)
+                           .Push(ImGuiCol.ButtonActive, new Vector4(0.92f, 0.42f, 0.08f, 1f)))
+                {
+                    if (ImGui.Button("Unlock with Patreon"))
+                    {
+                        patreonPopupOpen = true;
+                    }
+                }
 
-                gameplayStreamOfferDismissed =
-                    true;
+                ImGui.SameLine();
+
+                if (ImGui.Button("Refresh access"))
+                {
+                    if (isBrowserOffer)
+                        RefreshBrowserPatreonAccess();
+                    else
+                        RefreshGamePatreonAccess();
+                }
+
+                ImGui.SameLine();
+
+                if (ImGui.Button("Not Now"))
+                {
+                    if (isBrowserOffer)
+                        browserStreamOfferDismissed = true;
+                    else
+                        gameplayStreamOfferDismissed = true;
+                }
+
+                var accessMessage = isBrowserOffer
+                    ? browserPatreonAccessMessage
+                    : gamePatreonAccessMessage;
+                if (accessMessage is not null)
+                {
+                    ImGui.TextColored(
+                        Danger,
+                        accessMessage);
+                }
             }
-
-
-            ImGui.SameLine();
-
-
-            if (ImGui.Button(
-                    "Not Now"))
+            else
             {
-                gameplayStreamOfferDismissed =
-                    true;
+                if (ImGui.Button(
+                        isBrowserOffer
+                            ? "Start Browser Stream"
+                            : "Start Gameplay Stream"))
+                {
+                    if (isBrowserOffer)
+                    {
+                        StartBrowserWatchPartyBroadcast();
+                        browserStreamOfferDismissed =
+                            true;
+                    }
+                    else
+                    {
+                        StartGameWatchPartyBroadcast();
+                        gameplayStreamOfferDismissed =
+                            true;
+                    }
+                }
+
+                ImGui.SameLine();
+
+                if (ImGui.Button(
+                        "Not Now"))
+                {
+                    if (isBrowserOffer)
+                    {
+                        browserStreamOfferDismissed =
+                            true;
+                    }
+                    else
+                    {
+                        gameplayStreamOfferDismissed =
+                            true;
+                    }
+                }
             }
         }
     }
@@ -611,41 +1229,53 @@ internal sealed partial class MainWindow
     private void DrawPartyHeaderCard()
     {
         var isHost =
-            stream.Mode == StreamMode.Hosting;
+            stream.Mode ==
+            StreamMode.Hosting;
 
         var hostName =
             isHost
-                ? CurrentDisplayName ?? "You"
-                : joinedHostDisplayName ?? "Host";
+                ? CurrentDisplayName ??
+                  CurrentSession?.DisplayName ??
+                  "You"
+                : joinedHostDisplayName ??
+                  "Host";
 
-        // TEMP: room name is still visual-only until real room metadata exists.
-        var roomName =
-            $"{hostName}'s Watch Party";
+        ReadActivePartyRoomMetadata(
+                   out var visibleDescription,
+                   out var categoryIndex,
+                   out var adultOnly,
+                   out var serverName);
 
-        // TEMP: description backend field does not exist yet.
-        const string roomDescription =
-            "Just hanging out watching together.";
-
-        var isPrivate =
-            stream.IsPrivate;
-
-        var cardHeight = Ui(150f);
+        var cardHeight =
+            partyRoomEditing &&
+            isHost
+                ? Ui(440f)
+                : Ui(300f);
 
         using (ImRaii.PushStyle(
-            ImGuiStyleVar.ChildRounding,
-            14f))
+                ImGuiStyleVar.ChildRounding,
+                Ui(14f)))
         using (ImRaii.PushStyle(
-            ImGuiStyleVar.WindowPadding,
-            UiVec(20f, 16f)))
+                   ImGuiStyleVar.WindowPadding,
+                   UiVec(
+                       20f,
+                       0f)))
         using (ImRaii.PushColor(
-            ImGuiCol.ChildBg,
-            new Vector4(0.045f, 0.05f, 0.09f, 1f)))
-        using (var card = ImRaii.Child(
-            "##partyHeaderCard",
-            new Vector2(-1f, cardHeight),
-            false,
-            ImGuiWindowFlags.NoScrollbar |
-            ImGuiWindowFlags.NoScrollWithMouse))
+                   ImGuiCol.ChildBg,
+                   new Vector4(
+                       0.035f,
+                       0.040f,
+                       0.070f,
+                       1f)))
+        using (var card =
+               ImRaii.Child(
+                   "##partyRoomDetailsCard",
+                   new Vector2(
+                       -1f,
+                       cardHeight),
+                   false,
+                   ImGuiWindowFlags.NoScrollbar |
+                   ImGuiWindowFlags.NoScrollWithMouse))
         {
             if (!card)
             {
@@ -658,189 +1288,1187 @@ internal sealed partial class MainWindow
             var cardSize =
                 ImGui.GetWindowSize();
 
-            ImGui.GetWindowDrawList().AddRect(
+            var cardMax =
+                cardPos +
+                cardSize;
+
+            var drawList =
+                ImGui.GetWindowDrawList();
+
+            drawList.AddRect(
                 cardPos,
-                cardPos + cardSize,
+                cardMax,
                 ImGui.GetColorU32(
                     new Vector4(
                         Accent.X,
                         Accent.Y,
                         Accent.Z,
-                        0.40f)),
-                14f,
+                        0.42f)),
+                Ui(14f),
                 ImDrawFlags.RoundCornersAll,
-                1.2f);
+                Ui(1.2f));
 
             //
-            // Room title
+            // Card heading.
             //
-            ImGui.SetWindowFontScale(1.45f);
+            ImGui.SetCursorScreenPos(
+                cardPos +
+                UiVec(
+                    20f,
+                    17f));
+
+            SetUiFontScale(
+                1.18f);
 
             ImGui.TextColored(
                 Vector4.One,
-                roomName);
+                partyRoomEditing
+                    ? "Edit room details"
+                    : "Room details");
 
-            ImGui.SetWindowFontScale(1f);
+            SetUiFontScale(
+                1f);
 
-            //
-            // Leave button - always visible.
-            //
-            var leaveWidth = Ui(132f);
+            if (partyRoomEditing &&
+                isHost)
+            {
+                DrawPartyRoomEditForm(
+                    cardPos,
+                    cardSize);
 
-            ImGui.SetCursorPos(
+                return;
+            }
+
+            DrawPartyRoomView(
+                drawList,
+                cardPos,
+                cardSize,
+                hostName,
+                visibleDescription,
+                categoryIndex,
+                adultOnly,
+                serverName,
+                isHost);
+        }
+    }
+
+    private void DrawPartyRoomView(
+        ImDrawListPtr drawList,
+        Vector2 cardPos,
+        Vector2 cardSize,
+        string hostName,
+        string visibleDescription,
+        int categoryIndex,
+        bool adultOnly,
+        string serverName,
+        bool isHost)
+    {
+        var rightPadding =
+            Ui(20f);
+
+        var leaveWidth =
+            Ui(154f);
+
+        var editWidth =
+            Ui(155f);
+
+        var buttonHeight =
+            Ui(36f);
+
+        var buttonY =
+            cardPos.Y +
+            Ui(14f);
+
+        //
+        // Leave button.
+        //
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                cardPos.X +
+                cardSize.X -
+                rightPadding -
+                leaveWidth,
+                buttonY));
+
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.FrameRounding,
+                   Ui(7f)))
+        using (ImRaii.PushColor(
+                   ImGuiCol.Button,
+                   new Vector4(
+                       Danger.X,
+                       Danger.Y,
+                       Danger.Z,
+                       0.16f)))
+        using (ImRaii.PushColor(
+                   ImGuiCol.ButtonHovered,
+                   new Vector4(
+                       Danger.X,
+                       Danger.Y,
+                       Danger.Z,
+                       0.28f)))
+        using (ImRaii.PushColor(
+                   ImGuiCol.ButtonActive,
+                   new Vector4(
+                       Danger.X,
+                       Danger.Y,
+                       Danger.Z,
+                       0.38f)))
+        {
+            if (ImGui.Button(
+                    "Leave Watch Party",
+                    new Vector2(
+                        leaveWidth,
+                        buttonHeight)))
+            {
+                RequestLeaveWatchParty();
+                partyChatItems.Clear();
+                return;
+            }
+        }
+
+        //
+        // Host-only edit button.
+        //
+        if (isHost)
+        {
+            ImGui.SetCursorScreenPos(
                 new Vector2(
-                    ImGui.GetWindowWidth() - leaveWidth - Ui(18f),
-                    Ui(14f)));
+                    cardPos.X +
+                    cardSize.X -
+                    rightPadding -
+                    leaveWidth -
+                    Ui(10f) -
+                    editWidth,
+                    buttonY));
 
             using (ImRaii.PushStyle(
-                ImGuiStyleVar.FrameRounding,
-                7f))
+                       ImGuiStyleVar.FrameRounding,
+                       Ui(7f)))
             using (ImRaii.PushColor(
-                ImGuiCol.Button,
-                new Vector4(
-                    Danger.X,
-                    Danger.Y,
-                    Danger.Z,
-                    0.16f))
-                .Push(
-                    ImGuiCol.ButtonHovered,
-                    new Vector4(
-                        Danger.X,
-                        Danger.Y,
-                        Danger.Z,
-                        0.28f))
-                .Push(
-                    ImGuiCol.ButtonActive,
-                    new Vector4(
-                        Danger.X,
-                        Danger.Y,
-                        Danger.Z,
-                        0.38f)))
+                       ImGuiCol.Button,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.12f)))
+            using (ImRaii.PushColor(
+                       ImGuiCol.ButtonHovered,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.24f)))
+            using (ImRaii.PushColor(
+                       ImGuiCol.ButtonActive,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.34f)))
+            using (ImRaii.PushColor(
+                       ImGuiCol.Border,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.65f)))
+            using (ImRaii.PushStyle(
+                       ImGuiStyleVar.FrameBorderSize,
+                       Ui(1f)))
             {
                 if (ImGui.Button(
-                    "Leave Watch Party",
-                    new Vector2(leaveWidth, 32f)))
+                        "Edit room details",
+                        new Vector2(
+                            editWidth,
+                            buttonHeight)))
                 {
-                    LeaveStream();
-                    partyChatItems.Clear();
-                    return;
-                }
-            }
-
-            //
-            // Host identity row
-            //
-            ImGui.SetCursorPos(
-                new Vector2(20f, 52f));
-
-            if (isHost)
-            {
-                DrawAvatarChip(
-                    CurrentSession.AvatarIcon,
-                    CurrentSession.AvatarColorHex,
-                    42,
-                    CurrentSession.AvatarImageUrl);
-            }
-            else
-            {
-                // TEMP: the watch-party realtime roster currently does not
-                // expose the host's Alpha Channel avatar.
-                var avatarOrigin =
-                    ImGui.GetCursorScreenPos();
-
-                ImGui.GetWindowDrawList().AddCircleFilled(
-                    avatarOrigin + new Vector2(21f, 21f),
-                    21f,
-                    ImGui.GetColorU32(
-                        new Vector4(
-                            Accent.X,
-                            Accent.Y,
-                            Accent.Z,
-                            0.20f)));
-
-                ImGui.SetCursorScreenPos(
-                    avatarOrigin + new Vector2(12f, 11f));
-
-                using (ImRaii.PushFont(
-                    UiBuilder.IconFont))
-                {
-                    ImGui.TextColored(
-                        Accent,
-                        FontAwesomeIcon.User.ToIconString());
-                }
-
-                ImGui.SetCursorScreenPos(
-                    avatarOrigin + new Vector2(42f, 0f));
-            }
-
-            ImGui.SameLine(0f, 10f);
-
-            ImGui.BeginGroup();
-
-            ImGui.TextColored(
-                Vector4.One,
-                $"Hosted by {hostName}");
-
-            ImGui.SetWindowFontScale(0.88f);
-
-            ImGui.TextColored(
-                Good,
-                $"● {stream.Roster.Length} watching");
-
-            ImGui.SetWindowFontScale(1f);
-
-            ImGui.EndGroup();
-
-            //
-            // Privacy
-            //
-            ImGui.SetCursorPos(
-                new Vector2(
-                    ImGui.GetWindowWidth() - 158f,
-                    63f));
-
-            if (isHost)
-            {
-                if (ImGui.Checkbox(
-                    "Private party",
-                    ref isPrivate))
-                {
-                    stream.IsPrivate =
-                        isPrivate;
-                }
-            }
-            else
-            {
-                ImGui.TextColored(
-                    MutedText,
-                    isPrivate
-                        ? "Private party"
-                        : "Public party");
-            }
-
-            //
-            // Description
-            //
-            ImGui.SetCursorPos(
-                new Vector2(20f, 112f));
-
-            ImGui.TextColored(
-                MutedText,
-                roomDescription);
-
-            if (isHost)
-            {
-                ImGui.SameLine(0f, 8f);
-
-                using (ImRaii.PushFont(
-                    UiBuilder.IconFont))
-                {
-                    ImGui.TextColored(
-                        Accent,
-                        FontAwesomeIcon.PencilAlt.ToIconString());
+                    BeginPartyRoomEditing();
                 }
             }
         }
+
+        //
+        // Host avatar.
+        //
+        var avatarOrigin =
+            cardPos +
+            UiVec(
+                20f,
+                54f);
+
+        var avatarSize =
+            Ui(58f);
+
+        DrawPartyRoomHostAvatar(
+            drawList,
+            avatarOrigin,
+            avatarSize,
+            hostName);
+
+        //
+        // Room name and hosting state.
+        //
+        var identityX =
+            avatarOrigin.X +
+            avatarSize +
+            Ui(14f);
+
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            new Vector2(
+                identityX,
+                avatarOrigin.Y +
+                Ui(2f)),
+            ImGui.GetColorU32(
+                Vector4.One),
+            $"{hostName}'s Watch Party");
+
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            new Vector2(
+                identityX,
+                avatarOrigin.Y +
+                Ui(25f)),
+            ImGui.GetColorU32(
+                AccentHover),
+            isHost
+                ? "● HOSTING"
+                : $"Hosted by {hostName}");
+
+        //
+        // Room tags.
+        //
+        //
+        // Leave a clear gap beneath the HOSTING line before the
+        // room badges begin.
+        //
+        var tagsY =
+            avatarOrigin.Y +
+            Ui(49f);
+
+        var tagX =
+            identityX;
+
+        tagX +=
+            DrawWatchPartyTag(
+                drawList,
+                new Vector2(
+                    tagX,
+                    tagsY),
+                WatchPartyVisibilityIcon(
+                    stream.RoomKind),
+                WatchPartyVisibilityText(
+                    stream.RoomKind),
+                WatchPartyVisibilityColor(
+                    stream.RoomKind)) +
+            Ui(7f);
+
+        tagX +=
+            DrawWatchPartyTag(
+                drawList,
+                new Vector2(
+                    tagX,
+                    tagsY),
+                PartyRoomCategoryIcon(
+                    categoryIndex),
+                PartyRoomCategoryName(
+                    categoryIndex)
+                    .ToUpperInvariant(),
+                AccentHover) +
+            Ui(7f);
+
+        if (adultOnly)
+        {
+            DrawWatchPartyAdultTag(
+                drawList,
+                new Vector2(
+                    tagX,
+                    tagsY));
+        }
+
+        //
+        // Divider below the complete identity area.
+        //
+        var dividerY =
+            cardPos.Y +
+            Ui(134f);
+
+        drawList.AddLine(
+            new Vector2(
+                cardPos.X +
+                Ui(20f),
+                dividerY),
+            new Vector2(
+                cardPos.X +
+                cardSize.X -
+                Ui(20f),
+                dividerY),
+            ImGui.GetColorU32(
+                BorderSubtle),
+            Ui(1f));
+
+        //
+        // Fixed three-column detail grid.
+        //
+        var contentLeft =
+            cardPos.X +
+            Ui(20f);
+
+        var contentWidth =
+            cardSize.X -
+            Ui(40f);
+
+        var columnGap =
+            Ui(18f);
+
+        var columnWidth =
+            (
+                contentWidth -
+                columnGap * 2f
+            ) /
+            3f;
+
+        var firstRowY =
+            dividerY +
+            Ui(16f);
+
+        var secondRowY =
+            firstRowY +
+            Ui(72f);
+
+        DrawPartyRoomDetailCell(
+            "description",
+            FontAwesomeIcon.CommentAlt,
+            "Description",
+            string.IsNullOrWhiteSpace(
+                visibleDescription)
+                ? "No description set"
+                : visibleDescription,
+            new Vector2(
+                contentLeft,
+                firstRowY),
+            columnWidth);
+
+        DrawPartyRoomDetailCell(
+            "location",
+            FontAwesomeIcon.MapMarkerAlt,
+            "Location",
+            string.IsNullOrWhiteSpace(
+                stream.RoomLocation)
+                ? "Location not specified"
+                : stream.RoomLocation!,
+            new Vector2(
+                contentLeft +
+                columnWidth +
+                columnGap,
+                firstRowY),
+            columnWidth);
+
+        DrawPartyRoomDetailCell(
+            "server",
+            FontAwesomeIcon.Server,
+            "Server",
+            string.IsNullOrWhiteSpace(
+                serverName)
+                ? "Server not available"
+                : serverName,
+            new Vector2(
+                contentLeft +
+                (
+                    columnWidth +
+                    columnGap
+                ) *
+                Ui(2f),
+                firstRowY),
+            columnWidth);
+
+        DrawPartyRoomDetailCell(
+            "category",
+            PartyRoomCategoryIcon(
+                categoryIndex),
+            "Category",
+            PartyRoomCategoryName(
+                categoryIndex),
+            new Vector2(
+                contentLeft,
+                secondRowY),
+            columnWidth);
+
+        DrawPartyRoomDetailCell(
+            "type",
+            WatchPartyVisibilityIcon(
+                stream.RoomKind),
+            "Type",
+            PartyRoomTypeName(
+                stream.RoomKind),
+            new Vector2(
+                contentLeft +
+                columnWidth +
+                columnGap,
+                secondRowY),
+            columnWidth);
+
+        DrawPartyRoomDetailCell(
+            "rating",
+            adultOnly
+                ? FontAwesomeIcon.ExclamationTriangle
+                : FontAwesomeIcon.Users,
+            "Rating",
+            adultOnly
+                ? "18+ adult-only"
+                : "Everyone",
+            new Vector2(
+                contentLeft +
+                (
+                    columnWidth +
+                    columnGap
+                ) *
+                Ui(2f),
+                secondRowY),
+            columnWidth);
+    }
+
+    private void DrawPartyRoomEditForm(
+        Vector2 cardPos,
+        Vector2 cardSize)
+    {
+        ImGui.SetCursorScreenPos(
+            cardPos +
+            UiVec(
+                20f,
+                53f));
+
+        ImGui.TextColored(
+            MutedText,
+            "Update the current room without ending the Watch Party.");
+
+        var formOrigin =
+            cardPos +
+            UiVec(
+                20f,
+                80f);
+
+        var formWidth =
+            cardSize.X -
+            Ui(40f);
+
+        ImGui.SetCursorScreenPos(
+            formOrigin);
+
+        //
+        // Give the editable controls a visible border against the
+        // dark Room Details panel.
+        //
+        using (ImRaii.PushColor(
+                   ImGuiCol.Border,
+                   new Vector4(
+                       Accent.X,
+                       Accent.Y,
+                       Accent.Z,
+                       0.32f)))
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.FrameBorderSize,
+                   Ui(1f)))
+        {
+            DrawCreateRoomFields(
+                formWidth);
+        }
+
+        //
+        // Dedicated settings row below Category and Type.
+        //
+        var settingsY =
+            cardPos.Y +
+            cardSize.Y -
+            Ui(100f);
+
+        var settingsLabelY =
+            settingsY +
+            Ui(4f);
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                cardPos.X +
+                Ui(20f),
+                settingsLabelY));
+
+        DrawWatchPartyAdultToggle();
+
+        if (createRoomKindIndex == 1)
+        {
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    cardPos.X +
+                    Ui(104f),
+                    settingsY));
+
+            using (ImRaii.PushStyle(
+                       ImGuiStyleVar.FrameRounding,
+                       Ui(7f)))
+            using (ImRaii.PushColor(
+                       ImGuiCol.Button,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.12f)))
+            using (ImRaii.PushColor(
+                       ImGuiCol.ButtonHovered,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.25f)))
+            using (ImRaii.PushColor(
+                       ImGuiCol.ButtonActive,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.36f)))
+            using (ImRaii.PushColor(
+                       ImGuiCol.Border,
+                       new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.50f)))
+            using (ImRaii.PushStyle(
+                       ImGuiStyleVar.FrameBorderSize,
+                       Ui(1f)))
+            {
+                if (ImGui.Button(
+                        "Set new password",
+                        new Vector2(
+                            Ui(142f),
+                            Ui(30f))))
+                {
+                    createRoomPassword =
+                        string.Empty;
+
+                    createLockedRoomPasswordError =
+                        null;
+
+                    createLockedRoomPasswordForRoomEdit =
+                        true;
+
+                    createLockedRoomPasswordPopupRequested =
+                        true;
+                }
+            }
+        }
+
+        var serverText =
+            "Server: information coming soon";
+
+        var serverTextSize =
+            ImGui.CalcTextSize(
+                serverText);
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                cardPos.X +
+                cardSize.X -
+                Ui(20f) -
+                serverTextSize.X,
+                settingsLabelY));
+
+        ImGui.TextColored(
+            MutedText,
+            serverText);
+
+        //
+        // Footer controls.
+        //
+        var buttonWidth =
+            Ui(140f);
+
+        var buttonGap =
+            Ui(10f);
+
+        var buttonY =
+            cardPos.Y +
+            cardSize.Y -
+            Ui(48f);
+
+        var firstButtonX =
+            cardPos.X +
+            cardSize.X -
+            Ui(20f) -
+            buttonWidth * 2f -
+            buttonGap;
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                firstButtonX,
+                buttonY));
+
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.FrameRounding,
+                   Ui(7f)))
+        using (ImRaii.PushColor(
+                   ImGuiCol.Button,
+                   new Vector4(
+                       0.08f,
+                       0.08f,
+                       0.14f,
+                       1f)))
+        using (ImRaii.PushColor(
+                   ImGuiCol.ButtonHovered,
+                   new Vector4(
+                       0.14f,
+                       0.11f,
+                       0.22f,
+                       1f)))
+        using (ImRaii.PushColor(
+                   ImGuiCol.Border,
+                   new Vector4(
+                       Accent.X,
+                       Accent.Y,
+                       Accent.Z,
+                       0.55f)))
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.FrameBorderSize,
+                   Ui(1f)))
+        {
+            if (ImGui.Button(
+                    "Cancel",
+                    new Vector2(
+                        buttonWidth,
+                        Ui(36f))))
+            {
+                partyRoomEditing =
+                    false;
+            }
+        }
+
+        ImGui.SameLine(
+            0f,
+            buttonGap);
+
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.FrameRounding,
+                   Ui(7f)))
+        using (ImRaii.PushColor(
+                   ImGuiCol.Button,
+                   Accent))
+        using (ImRaii.PushColor(
+                   ImGuiCol.ButtonHovered,
+                   AccentHover))
+        using (ImRaii.PushColor(
+                   ImGuiCol.ButtonActive,
+                   AccentActive))
+        {
+            if (ImGui.Button(
+                    "Save changes",
+                    new Vector2(
+                        buttonWidth,
+                        Ui(36f))))
+            {
+                RequestSavePartyRoomDetails();
+            }
+        }
+    }
+
+    private void DrawPartyRoomHostAvatar(
+        ImDrawListPtr drawList,
+        Vector2 avatarOrigin,
+        float avatarSize,
+        string hostName)
+    {
+        var drewAvatar =
+            false;
+
+        if (stream.Mode ==
+                StreamMode.Hosting &&
+            CurrentSession is not null)
+        {
+            DrawAvatarAt(
+                avatarOrigin,
+                CurrentSession.AvatarIcon,
+                CurrentSession.AvatarColorHex,
+                avatarSize,
+                CurrentSession.AvatarImageUrl);
+
+            drewAvatar =
+                true;
+        }
+        else if (!string.IsNullOrWhiteSpace(
+                     stream.HostId))
+        {
+            EnsurePartyAvatarLoaded(
+                stream.HostId,
+                hostName);
+
+            if (partyAvatarCache.TryGetValue(
+                    stream.HostId,
+                    out var avatar))
+            {
+                DrawAvatarAt(
+                    avatarOrigin,
+                    avatar.AvatarIcon,
+                    avatar.AvatarColorHex,
+                    avatarSize,
+                    avatar.AvatarImageUrl);
+
+                drewAvatar =
+                    true;
+            }
+        }
+
+        if (drewAvatar)
+        {
+            return;
+        }
+
+        var center =
+            avatarOrigin +
+            new Vector2(
+                avatarSize * 0.5f,
+                avatarSize * 0.5f);
+
+        drawList.AddCircleFilled(
+            center,
+            avatarSize * 0.5f,
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.20f)));
+
+        drawList.AddCircle(
+            center,
+            avatarSize * 0.5f,
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.60f)),
+            24,
+            Ui(1f));
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            var glyph =
+                FontAwesomeIcon.User
+                    .ToIconString();
+
+            var glyphSize =
+                ImGui.CalcTextSize(
+                    glyph);
+
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                center -
+                glyphSize *
+                0.5f,
+                ImGui.GetColorU32(
+                    Accent),
+                glyph);
+        }
+    }
+
+    private void DrawPartyRoomDetailCell(
+        string id,
+        FontAwesomeIcon icon,
+        string label,
+        string value,
+        Vector2 origin,
+        float width)
+    {
+        ImGui.PushID(
+            id);
+
+        var iconColor =
+            label == "Rating" &&
+            value.StartsWith(
+                "18+",
+                StringComparison.Ordinal)
+                ? Danger
+                : AccentHover;
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    origin.X,
+                    origin.Y +
+                    Ui(8f)));
+
+            ImGui.TextColored(
+                iconColor,
+                icon.ToIconString());
+        }
+
+        var textX =
+            origin.X +
+            Ui(29f);
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                textX,
+                origin.Y));
+
+        SetUiFontScale(
+            0.80f);
+
+        ImGui.TextColored(
+            MutedText,
+            label);
+
+        SetUiFontScale(
+            1f);
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                textX,
+                origin.Y +
+                Ui(21f)));
+
+        ImGui.PushTextWrapPos(
+            ImGui.GetCursorPosX() +
+            Math.Max(
+                Ui(50f),
+                width -
+                Ui(29f)));
+
+        ImGui.TextColored(
+            Vector4.One,
+            value);
+
+        ImGui.PopTextWrapPos();
+
+        if (ImGui.IsItemHovered() &&
+            ImGui.CalcTextSize(
+                value).X >
+            width -
+            Ui(29f))
+        {
+            ImGui.SetTooltip(
+                value);
+        }
+
+        ImGui.PopID();
+    }
+
+    private void BeginPartyRoomEditing()
+    {
+        if (stream.Mode !=
+            StreamMode.Hosting)
+        {
+            return;
+        }
+
+        ReadActivePartyRoomMetadata(
+            out var visibleDescription,
+            out var categoryIndex,
+            out var adultOnly,
+            out _);
+
+        createRoomDescription =
+            visibleDescription;
+
+        createRoomLocation =
+            stream.RoomLocation ??
+            string.Empty;
+
+        createRoomCategoryIndex =
+            categoryIndex;
+
+        createRoomAdultOnly =
+            adultOnly;
+
+        createRoomKindIndex =
+            stream.RoomKind switch
+            {
+                RoomKind.Locked =>
+                    1,
+
+                RoomKind.Venue =>
+                    2,
+
+                _ =>
+                    0,
+            };
+
+        createRoomPassword =
+            stream.RoomPassword ??
+            string.Empty;
+
+        partyRoomEditing =
+            true;
+    }
+
+    private void RequestSavePartyRoomDetails()
+    {
+        if (stream.Mode !=
+            StreamMode.Hosting)
+        {
+            partyRoomEditing =
+                false;
+
+            return;
+        }
+
+        if (createRoomKindIndex == 1 &&
+            string.IsNullOrWhiteSpace(
+                createRoomPassword))
+        {
+            createLockedRoomPasswordError =
+                null;
+
+            createLockedRoomPasswordForRoomEdit =
+                true;
+
+            createLockedRoomPasswordPopupRequested =
+                true;
+
+            return;
+        }
+
+        SavePartyRoomDetails();
+    }
+
+    private void SavePartyRoomDetails()
+    {
+        if (stream.Mode !=
+            StreamMode.Hosting)
+        {
+            partyRoomEditing =
+                false;
+
+            return;
+        }
+
+        ApplyCreateRoomToStream();
+
+        _ =
+            stream.PublishRoomDetailsAsync();
+
+        partyRoomEditing =
+            false;
+
+        Plugin.ChatGui.Print(
+            "[AlphaChannel] Watch Party room details updated.");
+    }
+
+    private void ReadActivePartyRoomMetadata(
+       out string visibleDescription,
+       out int categoryIndex,
+       out bool adultOnly,
+       out string serverName)
+    {
+        var rawDescription =
+            stream.RoomDescription ??
+            string.Empty;
+
+        visibleDescription =
+            rawDescription.Trim();
+
+        categoryIndex =
+            0;
+
+        adultOnly =
+            false;
+
+        serverName =
+            string.Empty;
+
+        var tokenStart =
+            rawDescription.IndexOf(
+                "<#",
+                StringComparison.Ordinal);
+
+        if (tokenStart < 0)
+        {
+            return;
+        }
+
+        var tokenEnd =
+            rawDescription.IndexOf(
+                "#>",
+                tokenStart + 2,
+                StringComparison.Ordinal);
+
+        if (tokenEnd < 0)
+        {
+            return;
+        }
+
+        var tokenContents =
+            rawDescription.Substring(
+                tokenStart + 2,
+                tokenEnd -
+                tokenStart -
+                2);
+
+        var tokenParts =
+            tokenContents.Split(
+                '#',
+                StringSplitOptions.TrimEntries);
+
+        if (tokenParts.Length < 2)
+        {
+            return;
+        }
+
+        var matchedCategory =
+            Array.FindIndex(
+                WatchPartyCategoryOptions,
+                option =>
+                    string.Equals(
+                        option,
+                        tokenParts[0],
+                        StringComparison.OrdinalIgnoreCase));
+
+        if (matchedCategory >= 0)
+        {
+            categoryIndex =
+                matchedCategory;
+        }
+
+        adultOnly =
+            tokenParts[1] == "1";
+
+        if (tokenParts.Length >= 3)
+        {
+            serverName =
+                tokenParts[2].Trim();
+        }
+
+        visibleDescription =
+            (
+                rawDescription[..tokenStart] +
+                rawDescription[(tokenEnd + 2)..]
+            ).Trim();
+    }
+
+    internal void RefreshHostedRoomWorldMetadata()
+    {
+        if (stream.Mode !=
+            StreamMode.Hosting)
+        {
+            return;
+        }
+
+        var currentWorld =
+            CurrentWorldName?
+                .Trim();
+
+        if (string.IsNullOrWhiteSpace(
+                currentWorld))
+        {
+            return;
+        }
+
+        ReadActivePartyRoomMetadata(
+            out var visibleDescription,
+            out var categoryIndex,
+            out var adultOnly,
+            out var publishedWorld);
+
+        if (string.Equals(
+                currentWorld,
+                publishedWorld,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var category =
+            WatchPartyCategoryOptions[
+                Math.Clamp(
+                    categoryIndex,
+                    0,
+                    WatchPartyCategoryOptions.Length - 1)];
+
+        var rating =
+            adultOnly
+                ? 1
+                : 0;
+
+        var metadata =
+            $"<#{category}#{rating}#{currentWorld}#>";
+
+        stream.RoomDescription =
+            string.IsNullOrWhiteSpace(
+                visibleDescription)
+                ? metadata
+                : $"{metadata} {visibleDescription.Trim()}";
+
+        _ =
+            stream.PublishRoomDetailsAsync();
+    }
+
+    private static string PartyRoomCategoryName(
+        int categoryIndex)
+    {
+        return WatchPartyCategoryOptions[
+            Math.Clamp(
+                categoryIndex,
+                0,
+                WatchPartyCategoryOptions.Length - 1)];
+    }
+
+    private static FontAwesomeIcon PartyRoomCategoryIcon(
+        int categoryIndex)
+    {
+        return categoryIndex switch
+        {
+            0 =>
+                FontAwesomeIcon.PlayCircle,
+
+            1 =>
+                FontAwesomeIcon.Film,
+
+            2 =>
+                FontAwesomeIcon.Tv,
+
+            3 =>
+                FontAwesomeIcon.CommentDots,
+
+            4 =>
+                FontAwesomeIcon.Smile,
+
+            5 =>
+                FontAwesomeIcon.BroadcastTower,
+
+            6 =>
+                FontAwesomeIcon.Gamepad,
+
+            7 =>
+                FontAwesomeIcon.Headphones,
+
+            8 =>
+                FontAwesomeIcon.Music,
+
+            9 =>
+                FontAwesomeIcon.Images,
+
+            10 =>
+                FontAwesomeIcon.Bullhorn,
+
+            _ =>
+                FontAwesomeIcon.Video,
+        };
+    }
+
+    private static string PartyRoomTypeName(
+        RoomKind kind)
+    {
+        return kind switch
+        {
+            RoomKind.Locked =>
+                "Locked",
+
+            RoomKind.Venue =>
+                "Venue",
+
+            _ =>
+                "Public",
+        };
     }
 
     private void DrawPartyTabButtons()
@@ -901,7 +2529,7 @@ internal sealed partial class MainWindow
             8f)
             .Push(
                 ImGuiStyleVar.FramePadding,
-                new Vector2(12f, 9f)))
+                UiVec(12f, 9f)))
         using (ImRaii.PushColor(
             ImGuiCol.Button,
             selected
@@ -935,7 +2563,7 @@ internal sealed partial class MainWindow
             //
             if (ImGui.Button(
                 $"##partyTab_{tab}",
-                new Vector2(width, 40f)))
+                new Vector2(width, Ui(40f))))
             {
                 partyPanelTab = tab;
             }
@@ -1098,8 +2726,8 @@ internal sealed partial class MainWindow
             if (!ImGui.Button(
                     label,
                     new Vector2(
-                        170f,
-                        40f)))
+                        Ui(210f),
+                        Ui(42f))))
             {
                 return;
             }
@@ -1112,10 +2740,9 @@ internal sealed partial class MainWindow
             {
                 if (ViewerTvEnabled)
                 {
-                    ViewerTvEnabled =
-                        false;
-
-                    video.Stop();
+                    DespawnViewerTv(
+                        stopPlayback:
+                            !(IsMiniPlayerOpen?.Invoke() ?? false));
                 }
                 else
                 {
@@ -1164,15 +2791,62 @@ internal sealed partial class MainWindow
 
     private void DrawPartyNowPlayingTab()
     {
-        DrawGameplayStreamOffer();
+        DrawExclusivePlaybackStreamOffer();
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                12f));
+            UiVec(0f, 12f));
 
         var current =
-            queue.Current;
+       queue.Current;
+
+        var roomState =
+            stream.CurrentRoomState;
+
+        //
+        // Gameplay and local-video broadcasts do not belong to the saved
+        // video queue. Build a temporary display entry from stream.state so
+        // the Watch Party page can still describe what is being shared.
+        //
+
+        if (roomState is
+            {
+                Url: { Length: > 0 } roomUrl,
+                MediaTitle: { Length: > 0 } roomTitle
+            } &&
+       (
+           current is null ||
+           !AudioVisualizerSelection.IsSameMedia(
+               current.Url,
+               roomUrl)
+       ))
+        {
+            var source =
+                roomTitle.StartsWith(
+                    "Local Video",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? "Local Video"
+                    : roomTitle.StartsWith(
+                        "Playing:",
+                        StringComparison.OrdinalIgnoreCase) ||
+                      roomTitle.EndsWith(
+                          "Gameplay",
+                          StringComparison.OrdinalIgnoreCase)
+                        ? "Gameplay"
+                        : string.Equals(
+                            roomTitle,
+                            "Live Streaming",
+                            StringComparison.OrdinalIgnoreCase)
+                            ? "Live Stream"
+                            : "Broadcast";
+
+            current =
+                new Video.VideoQueueEntry(
+                    roomUrl,
+                    roomTitle,
+                    source,
+                    null,
+                    roomState.MediaThumbnailUrl);
+        }
 
         var (position, duration, isPaused) =
             video.GetProgress();
@@ -1212,7 +2886,7 @@ internal sealed partial class MainWindow
             // ROW 1 — NOW PLAYING
             // =========================================================
 
-            var heroHeight = Ui(225f);
+            var heroHeight = Ui(330f);
 
             ImGui.SetCursorPos(
                 Vector2.Zero);
@@ -1226,75 +2900,30 @@ internal sealed partial class MainWindow
                 heroHeight);
 
             // =========================================================
-            // ROW 2 — UP NEXT / YOUR TV
+            // ROW 2 — UNIFIED SCREEN CONTROLLER
             // =========================================================
 
-            var secondRowHeight = Ui(156f);
-
-            var secondRowY =
+            var controllerY =
                 heroHeight +
                 gap;
 
-            const float leftRatio = 0.52f;
-            var leftWidth =
-                (width - gap) *
-                leftRatio;
+            var footerY =
+                MathF.Max(
+                    controllerY + Ui(174f) + gap,
+                    height - footerHeight);
 
-            var rightWidth =
-                width -
-                leftWidth -
-                gap;
+            var controllerHeight = Ui(190f);
 
             ImGui.SetCursorPos(
                 new Vector2(
                     0f,
-                    secondRowY));
+                    controllerY));
 
-            DrawPartyUpNextCard(
-                leftWidth,
-                secondRowHeight);
-
-            ImGui.SetCursorPos(
-                new Vector2(
-                    leftWidth +
-                    gap,
-                    secondRowY));
-
-            DrawPartyTvCard(
+            DrawPartyScreenControllerCard(
                 current,
                 isPaused,
-                rightWidth,
-                secondRowHeight);
-
-            // =========================================================
-            // ROW 3 — AUDIO / SCREEN PLACEMENT
-            // =========================================================
-
-            var thirdRowHeight = Ui(148f);
-
-            var thirdRowY =
-                secondRowY +
-                secondRowHeight +
-                gap;
-
-            ImGui.SetCursorPos(
-                new Vector2(
-                    0f,
-                    thirdRowY));
-
-            DrawPartyAudioCard(
-                leftWidth,
-                thirdRowHeight);
-
-            ImGui.SetCursorPos(
-                new Vector2(
-                    leftWidth +
-                    gap,
-                    thirdRowY));
-
-            DrawPartyScreenPlacementCard(
-                rightWidth,
-                thirdRowHeight);
+                width,
+                controllerHeight);
 
             // =========================================================
             // FIXED SESSION FOOTER
@@ -1307,12 +2936,156 @@ internal sealed partial class MainWindow
                     0f,
                     MathF.Max(
                         0f,
-                        height -
-                        footerHeight)));
+                        footerY)));
 
             DrawPartyNowPlayingFooter(
                 width);
         }
+    }
+
+    private void DrawPartyDjMutedNotice(
+        Video.VideoQueueEntry current,
+        Vector2 origin,
+        float thumbnailHeight)
+    {
+        if (!djAutoMuteNoticeVisible ||
+            stream.Mode != StreamMode.Hosting)
+        {
+            return;
+        }
+
+        //
+        // Hide a stale notice if playback has moved on from the DJ stream.
+        //
+        if (string.IsNullOrWhiteSpace(
+                djAutoMutedStreamUrl) ||
+            !AudioVisualizerSelection.IsSameMedia(
+                current.Url,
+                djAutoMutedStreamUrl))
+        {
+            djAutoMuteNoticeVisible =
+                false;
+
+            djAutoMutedStreamUrl =
+                null;
+
+            return;
+        }
+
+        //
+        // If the host unmuted through the regular Audio card, the notice
+        // is no longer needed.
+        //
+        if (!Plugin.Cfg.Muted)
+        {
+            djAutoMuteNoticeVisible =
+                false;
+
+            djAutoMutedStreamUrl =
+                null;
+
+            return;
+        }
+
+        var noticePosition =
+            new Vector2(
+                origin.X,
+                origin.Y +
+                thumbnailHeight +
+                Ui(
+                    video.IsAudioOnly
+                        ? 78f
+                        : 10f));
+
+        ImGui.SetCursorScreenPos(
+            noticePosition);
+
+        SetUiFontScale(
+            0.82f);
+
+        ImGui.TextColored(
+            MutedText,
+            "Host TV is muted when playing a DJ stream, click");
+
+        ImGui.SameLine(
+            0f,
+            Ui(4f));
+
+        var linkOrigin =
+            ImGui.GetCursorScreenPos();
+
+        const string linkText =
+            "here";
+
+        var linkSize =
+            ImGui.CalcTextSize(
+                linkText);
+
+        if (ImGui.InvisibleButton(
+                "##unmuteDjHostTv",
+                linkSize))
+        {
+            Plugin.Cfg.Muted =
+                false;
+
+            video.SetOutputMuted(
+                false);
+
+            video.SetVolume(
+                Plugin.Cfg.Volume);
+
+            Plugin.Cfg.Save();
+
+            djAutoMuteNoticeVisible =
+                false;
+
+            djAutoMutedStreamUrl =
+                null;
+        }
+
+        var hovered =
+            ImGui.IsItemHovered();
+
+        ImGui.GetWindowDrawList()
+            .AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                linkOrigin,
+                ImGui.GetColorU32(
+                    hovered
+                        ? AccentHover
+                        : Accent),
+                linkText);
+
+        if (hovered)
+        {
+            ImGui.SetMouseCursor(
+                ImGuiMouseCursor.Hand);
+
+            ImGui.GetWindowDrawList()
+                .AddLine(
+                    new Vector2(
+                        linkOrigin.X,
+                        linkOrigin.Y +
+                        linkSize.Y),
+                    new Vector2(
+                        linkOrigin.X +
+                        linkSize.X,
+                        linkOrigin.Y +
+                        linkSize.Y),
+                    ImGui.GetColorU32(
+                        AccentHover),
+                    Ui(1f));
+        }
+
+        ImGui.SameLine(
+            0f,
+            0f);
+
+        ImGui.TextColored(
+            MutedText,
+            " to unmute.");
+
+        SetUiFontScale(
+            1f);
     }
 
     private void DrawPartyNowPlayingHero(
@@ -1328,9 +3101,7 @@ internal sealed partial class MainWindow
             12f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(
-                    18f,
-                    15f)))
+                UiVec(18f, 15f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(
@@ -1373,31 +3144,31 @@ internal sealed partial class MainWindow
             // LEFT — NOW PLAYING
             // =====================================================
 
+            SetUiFontScale(1.10f);
+
             DrawSectionTitle(
                 FontAwesomeIcon.PlayCircle,
                 "Now Playing");
 
+            SetUiFontScale(1f);
+
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    8f));
+                UiVec(0f, 8f));
 
             if (current is null)
             {
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     1.12f);
 
                 ImGui.TextColored(
                     Vector4.One,
                     "Nothing is playing");
 
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     1f);
 
                 ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        5f));
+                    UiVec(0f, 5f));
 
                 ImGui.TextColored(
                     MutedText,
@@ -1413,8 +3184,8 @@ internal sealed partial class MainWindow
                 var drawList =
                     ImGui.GetWindowDrawList();
 
-                var thumbWidth = Ui(205f);
-                var thumbHeight = Ui(115f);
+                var thumbWidth = Ui(245f);
+                var thumbHeight = Ui(145f);
 
                 var thumbMin =
                     origin;
@@ -1453,27 +3224,142 @@ internal sealed partial class MainWindow
                 }
                 else
                 {
+                    var isGameplay =
+                        string.Equals(
+                            current.Source,
+                            "Gameplay",
+                            StringComparison.OrdinalIgnoreCase);
+
+                    var isLocalVideo =
+                        string.Equals(
+                            current.Source,
+                            "Local Video",
+                            StringComparison.OrdinalIgnoreCase);
+
+                    var isLiveStream =
+                        string.Equals(
+                            current.Source,
+                            "Live Stream",
+                            StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(
+                            current.Source,
+                            "Broadcast",
+                            StringComparison.OrdinalIgnoreCase);
+
+                    var fallbackColor =
+                        isGameplay
+                            ? new Vector4(
+                                0.20f,
+                                0.42f,
+                                0.72f,
+                                1f)
+                            : isLocalVideo
+                                ? new Vector4(
+                                    0.55f,
+                                    0.25f,
+                                    0.68f,
+                                    1f)
+                                : isLiveStream
+                                    ? new Vector4(
+                                        0.72f,
+                                        0.20f,
+                                        0.30f,
+                                        1f)
+                                    : new Vector4(
+                                        Accent.X,
+                                        Accent.Y,
+                                        Accent.Z,
+                                        1f);
+
+                    drawList.AddRectFilled(
+                        thumbMin,
+                        thumbMax,
+                        ImGui.GetColorU32(
+                            new Vector4(
+                                fallbackColor.X,
+                                fallbackColor.Y,
+                                fallbackColor.Z,
+                                0.25f)),
+                        9f);
+
+                    drawList.AddRect(
+                        thumbMin,
+                        thumbMax,
+                        ImGui.GetColorU32(
+                            new Vector4(
+                                fallbackColor.X,
+                                fallbackColor.Y,
+                                fallbackColor.Z,
+                                0.70f)),
+                        9f,
+                        ImDrawFlags.None,
+                        Ui(1f));
+
+                    var fallbackIcon =
+                        isGameplay
+                            ? FontAwesomeIcon.Gamepad
+                            : isLocalVideo
+                                ? FontAwesomeIcon.Film
+                                : isLiveStream
+                                    ? FontAwesomeIcon.BroadcastTower
+                                    : FontAwesomeIcon.Play;
+
                     using (ImRaii.PushFont(
-                        UiBuilder.IconFont))
+                               UiBuilder.IconFont))
                     {
+                        SetUiFontScale(
+                            2.2f);
+
                         var icon =
-                            FontAwesomeIcon.Play
+                            fallbackIcon
                                 .ToIconString();
 
                         var iconSize =
                             ImGui.CalcTextSize(
                                 icon);
 
-                        drawList.AddText(
+                        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                             thumbMin +
                             (thumbMax -
                              thumbMin -
                              iconSize) *
                             0.5f,
                             ImGui.GetColorU32(
-                                Accent),
+                                fallbackColor),
                             icon);
+
+                        SetUiFontScale(
+                            1f);
                     }
+                }
+
+                var contextDividerY =
+                    cardScreenPos.Y +
+                    height -
+                    Ui(96f);
+
+                var contextAnchorHeight =
+                    contextDividerY -
+                    origin.Y -
+                    Ui(6f);
+
+                DrawPartyVisualizerSelector(
+                    current,
+                    origin,
+                    MathF.Min(
+                        Ui(430f),
+                        mediaWidth - Ui(155f)),
+                    contextAnchorHeight);
+
+                if (!video.IsAudioOnly)
+                {
+                    DrawPartyInlineUpNext(
+                        origin,
+                        thumbWidth,
+                        contextAnchorHeight,
+                        MathF.Max(
+                            Ui(250f),
+                            mediaWidth - Ui(165f)));
                 }
 
                 var contentX =
@@ -1488,6 +3374,12 @@ internal sealed partial class MainWindow
                         thumbWidth -
                         42f);
 
+                DrawPartyMediaBadge(
+                    current,
+                    new Vector2(
+                        contentX,
+                        origin.Y));
+
                 // -------------------------------------------------
                 // Title
                 // -------------------------------------------------
@@ -1495,23 +3387,39 @@ internal sealed partial class MainWindow
                 ImGui.SetCursorScreenPos(
                     new Vector2(
                         contentX,
-                        origin.Y + 2f));
+                        origin.Y + Ui(30f)));
 
-                ImGui.SetWindowFontScale(
-                    1.13f);
-
-                ImGui.PushTextWrapPos(
-                    ImGui.GetCursorPosX() +
-                    contentWidth);
+                SetUiFontScale(
+                    1.28f);
 
                 ImGui.TextColored(
-                    Vector4.One,
-                    current.Title);
+         Vector4.One,
+         FitPartyTextToWidth(
+             PrepareTwitchDisplayText(
+                 current.Title),
+             contentWidth));
 
-                ImGui.PopTextWrapPos();
-
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     1f);
+
+                if (!IsPartyLiveMedia(current) &&
+                    duration > 0f)
+                {
+                    ImGui.SetCursorScreenPos(
+                        new Vector2(
+                            contentX,
+                            origin.Y + Ui(124f)));
+
+                    ImGui.ProgressBar(
+                        Math.Clamp(
+                            position / duration,
+                            0f,
+                            1f),
+                        new Vector2(
+                            contentWidth,
+                            Ui(7f)),
+                        string.Empty);
+                }
 
                 // -------------------------------------------------
                 // Source
@@ -1523,16 +3431,16 @@ internal sealed partial class MainWindow
                     ImGui.SetCursorScreenPos(
                         new Vector2(
                             contentX,
-                            origin.Y + 54f));
+                            origin.Y + Ui(68f)));
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         0.82f);
 
                     ImGui.TextColored(
                         MutedText,
                         current.Source);
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         1f);
                 }
 
@@ -1543,7 +3451,7 @@ internal sealed partial class MainWindow
                 ImGui.SetCursorScreenPos(
                     new Vector2(
                         contentX,
-                        origin.Y + 84f));
+                        origin.Y + Ui(94f)));
 
                 using (ImRaii.PushFont(
                     UiBuilder.IconFont))
@@ -1575,29 +3483,48 @@ internal sealed partial class MainWindow
                     0f,
                     18f);
 
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     0.80f);
 
                 ImGui.TextColored(
                     MutedText,
+                    !IsPartyLiveMedia(current) &&
                     duration > 0f
                         ? $"{FormatTime(position)} / {FormatTime(duration)}"
-                        : "Live");
+                        : "LIVE");
 
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     1f);
+
+                DrawPartyDjMutedNotice(
+    current,
+    origin,
+    thumbHeight);
+
+                ImGui.GetWindowDrawList()
+                    .AddLine(
+                        new Vector2(
+                            origin.X,
+                            contextDividerY),
+                        new Vector2(
+                            cardScreenPos.X +
+                            mediaWidth -
+                            Ui(18f),
+                            contextDividerY),
+                        ImGui.GetColorU32(
+                            new Vector4(
+                                1f,
+                                1f,
+                                1f,
+                                0.09f)),
+                        Ui(1f));
 
                 // =================================================
                 // TRANSPORT / PROGRESS
                 // =================================================
 
-                var progressY =
-                    origin.Y +
-                    thumbHeight +
-                    Ui(43f);
-
-                var transportSize = Ui(30f);
-                var transportGap = Ui(7f);
+                var transportSize = Ui(42f);
+                var transportGap = Ui(9f);
 
                 var controlsWidth =
                     transportSize * 3f +
@@ -1610,9 +3537,8 @@ internal sealed partial class MainWindow
                     18f;
 
                 var controlsY =
-                    progressY -
-                    transportSize -
-                    8f;
+                    contextDividerY +
+                    Ui(18f);
 
                 var isHost =
                     stream.Mode ==
@@ -1665,7 +3591,7 @@ internal sealed partial class MainWindow
                         controlsX +
                         (transportSize +
                          transportGap) *
-                        2f,
+                        Ui(2f),
                         controlsY));
 
                 DrawPartyTransportNextButton(
@@ -1677,31 +3603,6 @@ internal sealed partial class MainWindow
                 // PLACEHOLDER:
                 // queue advance later.
 
-                // -------------------------------------------------
-                // Progress
-                // -------------------------------------------------
-
-                ImGui.SetCursorScreenPos(
-                    new Vector2(
-                        origin.X,
-                        progressY));
-
-                var progress =
-                    duration > 0f
-                        ? Math.Clamp(
-                            position /
-                            duration,
-                            0f,
-                            1f)
-                        : 1f;
-
-                ImGui.ProgressBar(
-                    progress,
-                    new Vector2(
-                        mediaWidth -
-                        18f,
-                        6f),
-                    string.Empty);
             }
 
             // =====================================================
@@ -1717,12 +3618,12 @@ internal sealed partial class MainWindow
                     new Vector2(
                         dividerX,
                         cardScreenPos.Y +
-                        17f),
+                        Ui(17f)),
                     new Vector2(
                         dividerX,
                         cardScreenPos.Y +
                         height -
-                        17f),
+                        Ui(17f)),
                     ImGui.GetColorU32(
                         new Vector4(
                             1f,
@@ -1738,26 +3639,24 @@ internal sealed partial class MainWindow
             ImGui.SetCursorScreenPos(
                 new Vector2(
                     dividerX +
-                    20f,
+                    Ui(20f),
                     cardScreenPos.Y +
-                    20f));
+                    Ui(20f)));
 
             ImGui.BeginGroup();
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 0.80f);
 
             ImGui.TextColored(
                 Accent,
                 "PLAYBACK SYNC");
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
 
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    10f));
+                UiVec(0f, 10f));
 
             ImGui.TextColored(
                 Good,
@@ -1767,7 +3666,7 @@ internal sealed partial class MainWindow
                 0f,
                 7f);
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1.10f);
 
             ImGui.TextColored(
@@ -1777,15 +3676,13 @@ internal sealed partial class MainWindow
                     ? "Hosting playback"
                     : "In sync");
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
 
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    4f));
+                UiVec(0f, 4f));
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 0.76f);
 
             ImGui.TextColored(
@@ -1795,13 +3692,11 @@ internal sealed partial class MainWindow
                     ? "Everyone follows your playback."
                     : "You're synced with the host.");
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
 
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    17f));
+                UiVec(0f, 17f));
 
             using (ImRaii.Disabled(
                 stream.Mode ==
@@ -1810,8 +3705,8 @@ internal sealed partial class MainWindow
                 if (ImGui.Button(
                     "Re-sync##partyResync",
                     new Vector2(
-                        124f,
-                        34f)))
+                        Ui(170f),
+                        Ui(38f))))
                 {
                     // PLACEHOLDER:
                     // apply/request latest host timestamp.
@@ -1833,6 +3728,734 @@ internal sealed partial class MainWindow
     }
 
 
+
+    private static bool IsPartyLiveMedia(
+        Video.VideoQueueEntry current)
+    {
+        if (current.IsTransient)
+        {
+            return true;
+        }
+
+        return current.Source.Equals(
+                   "Radio",
+                   StringComparison.OrdinalIgnoreCase) ||
+               current.Source.Equals(
+                   "Broadcast",
+                   StringComparison.OrdinalIgnoreCase) ||
+               current.Source.Equals(
+                   "Live Stream",
+                   StringComparison.OrdinalIgnoreCase) ||
+               current.Source.Equals(
+                   "Gameplay",
+                   StringComparison.OrdinalIgnoreCase) ||
+               current.Title.Contains(
+                   "Live DJ",
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void DrawPartyMediaBadge(
+        Video.VideoQueueEntry current,
+        Vector2 thumbnailOrigin)
+    {
+        var label =
+            current.Source.Equals(
+                "YouTube",
+                StringComparison.OrdinalIgnoreCase)
+                ? "YOUTUBE"
+                : current.Source.Equals(
+                    "Radio",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? "RADIO"
+                    : current.Title.Contains(
+                        "DJ",
+                        StringComparison.OrdinalIgnoreCase)
+                        ? "LIVE DJ"
+                        : IsPartyLiveMedia(current)
+                            ? "LIVE"
+                            : string.IsNullOrWhiteSpace(current.Source)
+                                ? "MEDIA"
+                                : current.Source.ToUpperInvariant();
+
+        var textSize =
+            ImGui.CalcTextSize(label);
+
+        var badgeSize =
+            new Vector2(
+                textSize.X + Ui(14f),
+                textSize.Y + Ui(7f));
+
+        var badgeMin =
+            thumbnailOrigin;
+
+        var isYouTube =
+            label == "YOUTUBE";
+
+        var fill =
+            isYouTube
+                ? new Vector4(
+                    0.82f,
+                    0.08f,
+                    0.12f,
+                    0.94f)
+                : IsPartyLiveMedia(current)
+                    ? new Vector4(
+                        0.62f,
+                        0.10f,
+                        0.20f,
+                        0.94f)
+                    : new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        0.90f);
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        drawList.AddRectFilled(
+            badgeMin,
+            badgeMin + badgeSize,
+            ImGui.GetColorU32(fill),
+            Ui(5f));
+
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            badgeMin +
+            (badgeSize - textSize) * 0.5f,
+            ImGui.GetColorU32(Vector4.One),
+            label);
+    }
+
+    private void DrawPartyInlineUpNext(
+        Vector2 mediaOrigin,
+        float thumbnailWidth,
+        float thumbnailHeight,
+        float availableWidth)
+    {
+        var origin =
+            new Vector2(
+                mediaOrigin.X,
+                mediaOrigin.Y +
+                thumbnailHeight +
+                Ui(25f));
+
+        ImGui.SetCursorScreenPos(origin);
+
+        SetUiFontScale(1.00f);
+
+        ImGui.TextColored(
+            Accent,
+            "UP NEXT");
+
+        SetUiFontScale(1f);
+
+        var viewing = stream.Mode == StreamMode.Viewing;
+        var queueCount = viewing ? viewerPartyQueueCount : queue.Entries.Count;
+
+        var queueLabel =
+            $"Queue ({queueCount})";
+
+        var queueLabelSize =
+            ImGui.CalcTextSize(queueLabel);
+
+        var badgeMin =
+            new Vector2(
+                origin.X +
+                availableWidth -
+                queueLabelSize.X -
+                Ui(18f),
+                origin.Y - Ui(3f));
+
+        ImGui.GetWindowDrawList()
+            .AddRectFilled(
+                badgeMin,
+                badgeMin +
+                new Vector2(
+                    queueLabelSize.X + Ui(14f),
+                    queueLabelSize.Y + Ui(6f)),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        0.085f,
+                        0.095f,
+                        0.15f,
+                        1f)),
+                Ui(10f));
+
+        ImGui.GetWindowDrawList()
+            .AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                badgeMin +
+                new Vector2(
+                    Ui(7f),
+                    Ui(3f)),
+                ImGui.GetColorU32(MutedText),
+                queueLabel);
+
+        if (queueCount == 0)
+        {
+            ImGui.SetCursorScreenPos(
+                origin +
+                new Vector2(
+                    0f,
+                    Ui(28f)));
+
+            ImGui.TextColored(
+                MutedText,
+                "Nothing queued next");
+
+            return;
+        }
+
+        var next = viewing ? viewerPartyNextQueueEntry : queue.Entries[0];
+        if (next is null)
+        {
+            ImGui.SetCursorScreenPos(origin + new Vector2(0f, Ui(28f)));
+            ImGui.TextColored(MutedText, "Nothing queued next");
+            return;
+        }
+
+        var itemOrigin =
+            origin +
+            new Vector2(
+                Ui(126f),
+                0f);
+
+        var itemThumbWidth = Ui(105f);
+        var itemThumbHeight = Ui(56f);
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        drawList.AddRectFilled(
+            itemOrigin,
+            itemOrigin +
+            new Vector2(
+                itemThumbWidth,
+                itemThumbHeight),
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.025f,
+                    0.03f,
+                    0.05f,
+                    1f)),
+            Ui(6f));
+
+        var thumbnail =
+            thumbnails.Get(next.ThumbnailUrl);
+
+        if (thumbnail is not null)
+        {
+            drawList.AddImageRounded(
+                thumbnail.Handle,
+                itemOrigin,
+                itemOrigin +
+                new Vector2(
+                    itemThumbWidth,
+                    itemThumbHeight),
+                Vector2.Zero,
+                Vector2.One,
+                uint.MaxValue,
+                Ui(6f));
+        }
+
+        var contentX =
+            itemOrigin.X +
+            itemThumbWidth +
+            Ui(10f);
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                contentX,
+                itemOrigin.Y));
+
+        ImGui.TextColored(
+            Vector4.One,
+            FitPartyTextToWidth(
+                PrepareTwitchDisplayText(
+                    next.Title),
+                MathF.Max(
+                    Ui(90f),
+                    badgeMin.X -
+                    contentX -
+                    Ui(12f))));
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                contentX,
+                itemOrigin.Y +
+                Ui(31f)));
+
+        SetUiFontScale(0.72f);
+
+        ImGui.TextColored(
+            MutedText,
+            next.Duration is { } nextDuration
+                ? $"{next.Source}  •  {FormatTime((float)nextDuration.TotalSeconds)}"
+                : next.Source);
+
+        SetUiFontScale(1f);
+    }
+
+    private static string FitPartyTextToWidth(
+        string text,
+        float maximumWidth)
+    {
+        if (string.IsNullOrEmpty(text) ||
+            ImGui.CalcTextSize(text).X <= maximumWidth)
+        {
+            return text;
+        }
+
+        const string ellipsis = "…";
+
+        var low = 0;
+        var high = text.Length;
+
+        while (low < high)
+        {
+            var middle =
+                (low + high + 1) / 2;
+
+            var candidate =
+                text[..middle].TrimEnd() +
+                ellipsis;
+
+            if (ImGui.CalcTextSize(candidate).X <= maximumWidth)
+            {
+                low = middle;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+
+        return text[..low].TrimEnd() + ellipsis;
+    }
+
+    private void DrawPartyScreenControllerCard(
+        Video.VideoQueueEntry? current,
+        bool isPaused,
+        float width,
+        float height)
+    {
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.ChildRounding,
+                   Ui(12f))
+               .Push(
+                   ImGuiStyleVar.WindowPadding,
+                   new Vector2(
+                       Ui(18f),
+                       Ui(14f))))
+        using (ImRaii.PushColor(
+                   ImGuiCol.ChildBg,
+                   new Vector4(
+                       0.035f,
+                       0.04f,
+                       0.07f,
+                       1f)))
+        using (var card =
+               ImRaii.Child(
+                   "##partyScreenControllerCard",
+                   new Vector2(
+                       width,
+                       height),
+                   false,
+                   ImGuiWindowFlags.NoScrollbar |
+                   ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            if (!card)
+            {
+                return;
+            }
+
+            SetUiFontScale(1.10f);
+
+            DrawSectionTitle(
+                FontAwesomeIcon.Tv,
+                "Screen Controller");
+
+            SetUiFontScale(1f);
+
+            var contentWidth =
+                ImGui.GetContentRegionAvail().X;
+
+            var gap = Ui(28f);
+            var leftWidth =
+                contentWidth * 0.38f;
+
+            var rightWidth =
+                contentWidth - leftWidth - gap;
+
+            var windowOrigin =
+                ImGui.GetWindowPos();
+
+            var contentOrigin =
+                ImGui.GetWindowContentRegionMin() +
+                windowOrigin;
+
+            var sectionY =
+                contentOrigin.Y + Ui(37f);
+
+            var leftX =
+                contentOrigin.X;
+
+            var rightX =
+                leftX + leftWidth + gap;
+
+            var drawList =
+                ImGui.GetWindowDrawList();
+
+            drawList.AddLine(
+                new Vector2(
+                    rightX - gap * 0.5f,
+                    sectionY),
+                new Vector2(
+                    rightX - gap * 0.5f,
+                    windowOrigin.Y + height - Ui(16f)),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        1f,
+                        1f,
+                        1f,
+                        0.07f)));
+
+            DrawPartyScreenControllerTv(
+                current,
+                isPaused,
+                leftX,
+                sectionY,
+                leftWidth);
+
+            DrawPartyScreenControllerAudio(
+                rightX,
+                sectionY,
+                rightWidth);
+
+            DrawPartyScreenControllerPlacement(
+                rightX,
+                sectionY + Ui(104f),
+                rightWidth);
+        }
+    }
+
+    private void DrawPartyScreenControllerTv(
+        Video.VideoQueueEntry? current,
+        bool isPaused,
+        float x,
+        float y,
+        float width)
+    {
+        var tvSpawned =
+            stream.Mode == StreamMode.Hosting
+                ? screenController.Engine.IsActive
+                : ViewerTvEnabled;
+
+        var statusText =
+            !tvSpawned
+                ? "TV not spawned"
+                : current is null
+                    ? "TV is ready"
+                    : isPaused
+                        ? "TV is paused"
+                        : "TV is playing";
+
+        var iconCenter =
+            new Vector2(
+                x + Ui(55f),
+                y + Ui(54f));
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        drawList.AddCircle(
+            iconCenter,
+            Ui(37f),
+            ImGui.GetColorU32(
+                tvSpawned
+                    ? Accent
+                    : MutedText),
+            0,
+            Ui(2f));
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            SetUiFontScale(1.45f);
+
+            var icon =
+                FontAwesomeIcon.Tv.ToIconString();
+
+            var iconSize =
+                ImGui.CalcTextSize(icon);
+
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                iconCenter - iconSize * 0.5f,
+                ImGui.GetColorU32(
+                    tvSpawned
+                        ? Accent
+                        : MutedText),
+                icon);
+
+            SetUiFontScale(1f);
+        }
+
+        var detailsX =
+            x + Ui(120f);
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                detailsX,
+                y + Ui(18f)));
+
+        ImGui.TextColored(
+            tvSpawned
+                ? Good
+                : MutedText,
+            tvSpawned
+                ? "●"
+                : "○");
+
+        ImGui.SameLine(0f, Ui(7f));
+
+        ImGui.TextColored(
+            Vector4.One,
+            statusText);
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                detailsX,
+                y + Ui(45f)));
+
+        SetUiFontScale(0.75f);
+
+        ImGui.TextColored(
+            MutedText,
+            tvSpawned
+                ? "Your watch-party screen is active."
+                : "Spawn your TV to start watching.");
+
+        SetUiFontScale(1f);
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                detailsX,
+                y + Ui(78f)));
+
+        DrawPartyTvSpawnButton();
+    }
+
+    private void DrawPartyScreenControllerAudio(
+        float x,
+        float y,
+        float width)
+    {
+        var volume =
+            Plugin.Cfg.Volume;
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                x,
+                y + Ui(2f)));
+
+        ImGui.TextColored(
+            Vector4.One,
+            "TV Volume");
+
+        var percent =
+            $"{volume}%";
+
+        var percentSize =
+            ImGui.CalcTextSize(percent);
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                x + width - percentSize.X,
+                y + Ui(2f)));
+
+        ImGui.TextColored(
+            volume > 100
+                ? Gold
+                : Vector4.One,
+            percent);
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                x,
+                y + Ui(28f)));
+
+        ImGui.SetNextItemWidth(width);
+
+        if (ImGui.SliderInt(
+                "##partyControllerVolume",
+                ref volume,
+                0,
+                130,
+                ""))
+        {
+            Plugin.Cfg.Volume =
+                volume;
+
+            video.SetVolume(
+                Plugin.Cfg.Muted
+                    ? 0
+                    : volume);
+        }
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            Plugin.Cfg.Save();
+        }
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                x,
+                y + Ui(67f)));
+
+        var muted =
+            Plugin.Cfg.Muted;
+
+        var buttonGap = Ui(8f);
+        var buttonWidth =
+            MathF.Min(
+                Ui(155f),
+                (width - buttonGap) * 0.44f);
+
+        var ffxivButtonWidth =
+            MathF.Min(
+                Ui(190f),
+                width - buttonWidth - buttonGap);
+
+        if (ImGui.Button(
+                muted
+                    ? "Unmute TV"
+                    : "Mute TV",
+                new Vector2(
+                    buttonWidth,
+                    Ui(32f))))
+        {
+            muted =
+                !muted;
+
+            Plugin.Cfg.Muted =
+                muted;
+
+            video.SetVolume(
+                muted
+                    ? 0
+                    : Plugin.Cfg.Volume);
+
+            Plugin.Cfg.Save();
+        }
+
+        ImGui.SameLine(0f, buttonGap);
+
+        var ffxivMuted =
+            IsFfxivSoundMuted();
+
+        if (ImGui.Button(
+                ffxivMuted
+                    ? "Restore FFXIV Sounds"
+                    : "Mute FFXIV Sounds",
+                new Vector2(
+                    ffxivButtonWidth,
+                    Ui(32f))))
+        {
+            SetFfxivSoundMuted(
+                !ffxivMuted);
+        }
+    }
+
+    private void DrawPartyScreenControllerPlacement(
+        float x,
+        float y,
+        float width)
+    {
+        var isHost =
+            stream.Mode == StreamMode.Hosting;
+
+        var syncEnabled =
+            isHost || partySyncTvPlacement;
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                x,
+                y + Ui(6f)));
+
+        var wasSyncEnabled = partySyncTvPlacement;
+
+        DrawPartyPlacementToggle(
+            ref syncEnabled,
+            isHost);
+
+        if (!isHost)
+        {
+            partySyncTvPlacement =
+                syncEnabled;
+
+            if (wasSyncEnabled && !partySyncTvPlacement)
+            {
+                ApplySavedViewerScreenPlacement();
+            }
+        }
+
+        ImGui.SameLine(0f, Ui(9f));
+
+        ImGui.TextColored(
+            Vector4.One,
+            "Match TV position & size with host");
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                x,
+                y + Ui(35f)));
+
+        SetUiFontScale(0.75f);
+
+        ImGui.PushTextWrapPos(
+            x + width - Ui(180f));
+
+        ImGui.TextColored(
+            MutedText,
+            isHost
+                ? "Disable to adjust tv position and size manually"
+                : partySyncTvPlacement
+                    ? "Following the host's TV position and size."
+                    : "Placement sync is disabled.");
+
+        ImGui.PopTextWrapPos();
+
+        SetUiFontScale(1f);
+
+        var canOpenSettings =
+            isHost ||
+            !partySyncTvPlacement;
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                x + width - Ui(164f),
+                y));
+
+        using (ImRaii.Disabled(
+                   !canOpenSettings))
+        {
+            if (ImGui.Button(
+                    "Screen Settings",
+                    new Vector2(
+                        Ui(164f),
+                        Ui(32f))))
+            {
+                currentPage = HomePage.Screen;
+            }
+        }
+
+        if (!canOpenSettings &&
+            ImGui.IsItemHovered(
+                ImGuiHoveredFlags.AllowWhenDisabled))
+        {
+            ImGui.SetTooltip(
+                "Disable TV position sync to customize your screen.");
+        }
+    }
 
     private void DrawPartyTransportPlayPauseButton(
      string id,
@@ -1891,13 +4514,13 @@ internal sealed partial class MainWindow
             // Play triangle.
             drawList.AddTriangleFilled(
                 new Vector2(
-                    center.X - 4f,
-                    center.Y - 6f),
+                    center.X - Ui(4f),
+                    center.Y - Ui(6f)),
                 new Vector2(
-                    center.X - 4f,
-                    center.Y + 6f),
+                    center.X - Ui(4f),
+                    center.Y + Ui(6f)),
                 new Vector2(
-                    center.X + 6f,
+                    center.X + Ui(6f),
                     center.Y),
                 color);
         }
@@ -1906,21 +4529,21 @@ internal sealed partial class MainWindow
             // Pause bars.
             drawList.AddRectFilled(
                 new Vector2(
-                    center.X - 5f,
-                    center.Y - 6f),
+                    center.X - Ui(5f),
+                    center.Y - Ui(6f)),
                 new Vector2(
-                    center.X - 1.5f,
-                    center.Y + 6f),
+                    center.X - Ui(1.5f),
+                    center.Y + Ui(6f)),
                 color,
                 1f);
 
             drawList.AddRectFilled(
                 new Vector2(
-                    center.X + 1.5f,
-                    center.Y - 6f),
+                    center.X + Ui(1.5f),
+                    center.Y - Ui(6f)),
                 new Vector2(
-                    center.X + 5f,
-                    center.Y + 6f),
+                    center.X + Ui(5f),
+                    center.Y + Ui(6f)),
                 color,
                 1f);
         }
@@ -2003,23 +4626,23 @@ internal sealed partial class MainWindow
 
         drawList.AddLine(
             new Vector2(
-                center.X - 5f,
-                center.Y - 6f),
+                center.X - Ui(5f),
+                center.Y - Ui(6f)),
             new Vector2(
-                center.X - 5f,
-                center.Y + 6f),
+                center.X - Ui(5f),
+                center.Y + Ui(6f)),
             color,
             2f);
 
         drawList.AddTriangleFilled(
             new Vector2(
-                center.X + 5f,
-                center.Y - 6f),
+                center.X + Ui(5f),
+                center.Y - Ui(6f)),
             new Vector2(
-                center.X + 5f,
-                center.Y + 6f),
+                center.X + Ui(5f),
+                center.Y + Ui(6f)),
             new Vector2(
-                center.X - 3f,
+                center.X - Ui(3f),
                 center.Y),
             color);
 
@@ -2087,12 +4710,12 @@ internal sealed partial class MainWindow
 
         // Draw a proper "next track" icon manually:
         // triangle + vertical stop line.
-        const float triangleHalfHeight = 5f;
-        const float triangleWidth = 7f;
+        var triangleHalfHeight = Ui(5f);
+        var triangleWidth = Ui(7f);
 
         var triangleCenter =
             new Vector2(
-                center.X - 2f,
+                center.X - Ui(2f),
                 center.Y);
 
         drawList.AddTriangleFilled(
@@ -2114,11 +4737,11 @@ internal sealed partial class MainWindow
 
         drawList.AddLine(
             new Vector2(
-                center.X + 5f,
-                center.Y - 5f),
+                center.X + Ui(5f),
+                center.Y - Ui(5f)),
             new Vector2(
-                center.X + 5f,
-                center.Y + 5f),
+                center.X + Ui(5f),
+                center.Y + Ui(5f)),
             color,
             2f);
 
@@ -2141,9 +4764,7 @@ internal sealed partial class MainWindow
             12f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(
-                    18f,
-                    14f)))
+                UiVec(18f, 14f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(
@@ -2187,16 +4808,16 @@ internal sealed partial class MainWindow
             var badgeSize =
                 new Vector2(
                     queueTextSize.X +
-                    18f,
-                    25f);
+                    Ui(18f),
+                    Ui(25f));
 
             var badgeMin =
                 ImGui.GetWindowPos() +
                 new Vector2(
                     ImGui.GetWindowWidth() -
                     badgeSize.X -
-                    16f,
-                    10f);
+                    Ui(16f),
+                    Ui(10f));
 
             ImGui.GetWindowDrawList()
                 .AddRectFilled(
@@ -2212,7 +4833,7 @@ internal sealed partial class MainWindow
                     12f);
 
             ImGui.GetWindowDrawList()
-                .AddText(
+                .AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                     badgeMin +
                     (badgeSize -
                      queueTextSize) *
@@ -2222,9 +4843,7 @@ internal sealed partial class MainWindow
                     queueLabel);
 
             ImGui.SetCursorPos(
-                new Vector2(
-                    18f,
-                    48f));
+                UiVec(18f, 48f));
 
             if (queueCount == 0)
             {
@@ -2233,18 +4852,16 @@ internal sealed partial class MainWindow
                     "Nothing queued next");
 
                 ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        3f));
+                    UiVec(0f, 3f));
 
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     0.76f);
 
                 ImGui.TextColored(
                     MutedText,
                     "New party media will appear here.");
 
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     1f);
 
                 return;
@@ -2309,7 +4926,7 @@ internal sealed partial class MainWindow
                     contentX,
                     origin.Y));
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1.00f);
 
             ImGui.PushTextWrapPos(
@@ -2322,19 +4939,20 @@ internal sealed partial class MainWindow
 
             ImGui.TextColored(
                 Vector4.One,
-                next.Title);
+                PrepareTwitchDisplayText(
+                    next.Title));
 
             ImGui.PopTextWrapPos();
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
 
             ImGui.SetCursorScreenPos(
                 new Vector2(
                     contentX,
-                    origin.Y + 48f));
+                    origin.Y + Ui(48f)));
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 0.76f);
 
             var source =
@@ -2352,7 +4970,7 @@ internal sealed partial class MainWindow
                 MutedText,
                 metadata);
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
         }
     }
@@ -2368,9 +4986,7 @@ internal sealed partial class MainWindow
             12f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(
-                    18f,
-                    14f)))
+                UiVec(18f, 14f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(
@@ -2423,12 +5039,9 @@ internal sealed partial class MainWindow
 
             var iconCenter =
                 windowOrigin +
-                new Vector2(
-                    56f,
-                    91f);
+                UiVec(56f, 91f);
 
-            const float circleRadius =
-                31f;
+            var circleRadius = Ui(31f);
 
             drawList.AddCircle(
                 iconCenter,
@@ -2451,7 +5064,7 @@ internal sealed partial class MainWindow
             using (ImRaii.PushFont(
                 UiBuilder.IconFont))
             {
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     1.35f);
 
                 var glyph =
@@ -2462,7 +5075,7 @@ internal sealed partial class MainWindow
                     ImGui.CalcTextSize(
                         glyph);
 
-                drawList.AddText(
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                     iconCenter -
                     glyphSize *
                     0.5f,
@@ -2472,7 +5085,7 @@ internal sealed partial class MainWindow
                             : MutedText),
                     glyph);
 
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     1f);
             }
 
@@ -2481,9 +5094,7 @@ internal sealed partial class MainWindow
             // =====================================================
 
             ImGui.SetCursorPos(
-                new Vector2(
-                    104f,
-                    58f));
+                UiVec(104f, 58f));
 
             ImGui.TextColored(
                 tvSpawned
@@ -2502,11 +5113,9 @@ internal sealed partial class MainWindow
                 statusText);
 
             ImGui.SetCursorPos(
-                new Vector2(
-                    104f,
-                    84f));
+                UiVec(104f, 84f));
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 0.76f);
 
             ImGui.TextColored(
@@ -2515,7 +5124,7 @@ internal sealed partial class MainWindow
                     ? "Your watch-party screen is active."
                     : "Spawn your TV to start watching.");
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
 
             // =====================================================
@@ -2525,8 +5134,8 @@ internal sealed partial class MainWindow
             ImGui.SetCursorPos(
                 new Vector2(
                     ImGui.GetWindowWidth() -
-                    188f,
-                    72f));
+                    Ui(188f),
+                    Ui(72f)));
 
             DrawPartyTvSpawnButton();
         }
@@ -2541,9 +5150,7 @@ internal sealed partial class MainWindow
             12f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(
-                    18f,
-                    14f)))
+                UiVec(18f, 14f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(
@@ -2578,9 +5185,7 @@ internal sealed partial class MainWindow
             // =====================================================
 
             ImGui.SetCursorPos(
-                new Vector2(
-                    18f,
-                    39f));
+                UiVec(18f, 39f));
 
             ImGui.TextColored(
                 Vector4.One,
@@ -2592,14 +5197,14 @@ internal sealed partial class MainWindow
                     0f,
                     10f);
 
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     0.68f);
 
                 ImGui.TextColored(
                     Gold,
                     "Volume levels higher than 100% may distort audio quality");
 
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     1f);
             }
 
@@ -2614,8 +5219,8 @@ internal sealed partial class MainWindow
                 new Vector2(
                     ImGui.GetWindowWidth() -
                     percentSize.X -
-                    18f,
-                    39f));
+                    Ui(18f),
+                    Ui(39f)));
 
             ImGui.TextColored(
                 volume > 100
@@ -2628,9 +5233,7 @@ internal sealed partial class MainWindow
             // =====================================================
 
             ImGui.SetCursorPos(
-                new Vector2(
-                    18f,
-                    61f));
+                UiVec(18f, 61f));
 
             ImGui.SetNextItemWidth(
                 ImGui.GetWindowWidth() -
@@ -2664,9 +5267,7 @@ internal sealed partial class MainWindow
             // =====================================================
 
             ImGui.SetCursorPos(
-                new Vector2(
-                    18f,
-                    103f));
+                UiVec(18f, 103f));
 
             var muted =
                 Plugin.Cfg.Muted;
@@ -2679,9 +5280,7 @@ internal sealed partial class MainWindow
                     muted
                         ? "Unmute TV"
                         : "Mute TV",
-                    new Vector2(
-                        128f,
-                        32f)))
+                    UiVec(128f, 32f)))
                 {
                     muted =
                         !muted;
@@ -2708,15 +5307,14 @@ internal sealed partial class MainWindow
                     ffxivMuted
                         ? "Restore FFXIV Sounds"
                         : "Mute FFXIV Sounds",
-                    new Vector2(
-                        170f,
-                        32f)))
+                    UiVec(170f, 32f)))
                 {
                     SetFfxivSoundMuted(
                         !ffxivMuted);
                 }
             }
         }
+
     }
 
     private void DrawPartyScreenPlacementCard(
@@ -2728,9 +5326,7 @@ internal sealed partial class MainWindow
             12f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(
-                    18f,
-                    14f)))
+                UiVec(18f, 14f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(
@@ -2771,9 +5367,7 @@ internal sealed partial class MainWindow
             // =====================================================
 
             ImGui.SetCursorPos(
-                new Vector2(
-                    18f,
-                    48f));
+                UiVec(18f, 48f));
 
             DrawPartyPlacementToggle(
                 ref syncEnabled,
@@ -2797,11 +5391,9 @@ internal sealed partial class MainWindow
                 "Match TV position & size with host");
 
             ImGui.SetCursorPos(
-                new Vector2(
-                    18f,
-                    78f));
+                UiVec(18f, 78f));
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 0.76f);
 
             ImGui.TextColored(
@@ -2812,7 +5404,7 @@ internal sealed partial class MainWindow
                         ? "Disable to manually resize / position the TV"
                         : "Placement sync is disabled.");
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
 
             var canOpenSettings =
@@ -2822,17 +5414,15 @@ internal sealed partial class MainWindow
             ImGui.SetCursorPos(
                 new Vector2(
                     ImGui.GetWindowWidth() -
-                    166f,
-                    99f));
+                    Ui(166f),
+                    Ui(99f)));
 
             using (ImRaii.Disabled(
                 !canOpenSettings))
             {
                 if (ImGui.Button(
                     "Screen Settings",
-                    new Vector2(
-                        148f,
-                        34f)))
+                    UiVec(148f, 34f)))
                 {
                     // PLACEHOLDER:
                     // navigate directly to Screen settings.
@@ -2871,6 +5461,11 @@ internal sealed partial class MainWindow
                 value =
                     !value;
             }
+        }
+
+        if (disabled && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+        {
+            ImGui.SetTooltip("Can not be changed as host");
         }
 
         var drawList =
@@ -2928,17 +5523,14 @@ internal sealed partial class MainWindow
     private void DrawPartyNowPlayingFooter(
         float width)
     {
-        const float footerHeight =
-            50f;
+        var footerHeight = Ui(50f);
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.ChildRounding,
             12f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(
-                    18f,
-                    9f)))
+                UiVec(18f, 9f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(
@@ -3013,15 +5605,14 @@ internal sealed partial class MainWindow
                     ? "End Watch Party"
                     : "Leave Watch Party";
 
-            const float actionWidth =
-                154f;
+            var actionWidth = Ui(154f);
 
             ImGui.SetCursorPos(
                 new Vector2(
                     ImGui.GetWindowWidth() -
                     actionWidth -
-                    12f,
-                    8f));
+                    Ui(12f),
+                    Ui(8f)));
 
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.FrameRounding,
@@ -3054,10 +5645,10 @@ internal sealed partial class MainWindow
                     actionLabel,
                     new Vector2(
                         actionWidth,
-                        34f)))
+                        Ui(34f))))
                 {
                     // Host confirmation can be added before shipping.
-                    LeaveStream();
+                    RequestLeaveWatchParty();
 
                     partyChatItems.Clear();
                 }
@@ -3126,9 +5717,7 @@ internal sealed partial class MainWindow
                 12f)
                 .Push(
                     ImGuiStyleVar.WindowPadding,
-                    new Vector2(
-                        16f,
-                        14f)))
+                    UiVec(16f, 14f)))
             using (ImRaii.PushColor(
                 ImGuiCol.ChildBg,
                 new Vector4(
@@ -3166,6 +5755,46 @@ internal sealed partial class MainWindow
         }
     }
 
+    private bool CurrentMediaDisallowsVideoRequests()
+    {
+        var engine = screenController.Engine;
+        if (engine.IsPlayingGame ||
+            gameBroadcastArmed ||
+            localVideoBroadcastArmed ||
+            djBroadcastingToWatchParty)
+        {
+            return true;
+        }
+
+        var current = queue.Current;
+        if (current is null)
+        {
+            return false;
+        }
+
+        if (ImageMediaSelection.IsImageMediaUrl(current.Url))
+        {
+            return true;
+        }
+
+        return current.Source.Equals("DJ Live", StringComparison.OrdinalIgnoreCase) ||
+               current.Source.Equals("Radio", StringComparison.OrdinalIgnoreCase) ||
+               current.Source.Equals("Live Stream", StringComparison.OrdinalIgnoreCase) ||
+               current.Source.Equals("Broadcast", StringComparison.OrdinalIgnoreCase) ||
+               current.Source.Equals("Local Video", StringComparison.OrdinalIgnoreCase) ||
+               current.Source.Equals("Gameplay", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ApplySavedViewerScreenPlacement()
+    {
+        screenController.Engine.SetScreenTransform(
+            Plugin.Cfg.ScreenPosition,
+            Plugin.Cfg.ScreenYaw,
+            Plugin.Cfg.DisableFixedScreenScaleRatio,
+            Plugin.Cfg.ScreenWidthScale,
+            Plugin.Cfg.ScreenHeightScale);
+    }
+
     private void DrawPartyWatchingTab()
     {
         // =========================================================
@@ -3183,9 +5812,7 @@ internal sealed partial class MainWindow
         DrawPartyHeaderCard();
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                12f));
+            UiVec(0f, 12f));
 
         // =========================================================
         // PARTICIPANTS PANEL
@@ -3199,9 +5826,7 @@ internal sealed partial class MainWindow
             12f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(
-                    18f,
-                    16f)))
+                UiVec(18f, 16f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(
@@ -3229,28 +5854,55 @@ internal sealed partial class MainWindow
             // -----------------------------------------------------
 
             DrawSectionTitle(
-                FontAwesomeIcon.UserFriends,
-                $"Watching ({participantCount})");
+               FontAwesomeIcon.UserFriends,
+               "Room members");
 
-            ImGui.Dummy(
+            var countText =
+                $"{participantCount} " +
+                (
+                    participantCount == 1
+                        ? "person"
+                        : "people"
+                );
+
+            var countSize =
+                ImGui.CalcTextSize(
+                    countText);
+
+            ImGui.SetCursorPos(
                 new Vector2(
-                    0f,
-                    5f));
+                    ImGui.GetWindowWidth() -
+                    Ui(18f) -
+                    countSize.X,
+                    Ui(17f)));
 
-            ImGui.SetWindowFontScale(
+            ImGui.TextColored(
+                MutedText,
+                countText);
+
+            //
+            // Restore an explicit left-side cursor after drawing the
+            // independently positioned count.
+            //
+            ImGui.SetCursorPos(
+                UiVec(
+                    18f,
+                    45f));
+
+            SetUiFontScale(
                 0.82f);
 
             ImGui.TextColored(
                 MutedText,
-                "Members currently in this Watch Party.");
+                "People currently in this Watch Party.");
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
 
-            ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    14f));
+            ImGui.SetCursorPos(
+                UiVec(
+                    18f,
+                    72f));
 
             // =====================================================
             // HOST
@@ -3301,9 +5953,7 @@ internal sealed partial class MainWindow
                      stream.Roster)
             {
                 ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        7f));
+                    UiVec(0f, 7f));
 
                 ImGui.PushID(
                     participant.UserId);
@@ -3490,7 +6140,7 @@ internal sealed partial class MainWindow
                     ImGui.CalcTextSize(
                         initial);
 
-                drawList.AddText(
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                     avatarCenter -
                     initialSize * 0.5f,
                     ImGui.GetColorU32(
@@ -3516,7 +6166,7 @@ internal sealed partial class MainWindow
                     nameX,
                     nameY));
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 0.98f);
 
             ImGui.TextColored(
@@ -3525,80 +6175,8 @@ internal sealed partial class MainWindow
                     : Vector4.One,
                 displayName);
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
-
-            // =====================================================
-            // DEVELOPER BADGE
-            //
-            // Same visual language as the Host badge.
-            // =====================================================
-
-            if (UserRoles.IsDeveloper(displayName))
-            {
-                ImGui.SameLine(
-                    0f,
-                    8f);
-
-                const string badgeText =
-                    "Developer";
-
-                var badgeTextSize =
-                    ImGui.CalcTextSize(
-                        badgeText);
-
-                const float badgePadX =
-                    7f;
-
-                const float badgePadY =
-                    3f;
-
-                var badgeMin =
-                    ImGui.GetCursorScreenPos();
-
-                var badgeSize =
-                    new Vector2(
-                        badgeTextSize.X +
-                        badgePadX * 2f,
-                        badgeTextSize.Y +
-                        badgePadY * 2f);
-
-                drawList.AddRectFilled(
-                    badgeMin,
-                    badgeMin +
-                    badgeSize,
-                    ImGui.GetColorU32(
-                        new Vector4(
-                            0.55f,
-                            0.30f,
-                            1f,
-                            0.28f)),
-                    6f);
-
-                drawList.AddRect(
-                    badgeMin,
-                    badgeMin +
-                    badgeSize,
-                    ImGui.GetColorU32(
-                        new Vector4(
-                            0.65f,
-                            0.45f,
-                            1f,
-                            0.55f)),
-                    6f);
-
-                drawList.AddText(
-                    badgeMin +
-                    new Vector2(
-                        badgePadX,
-                        badgePadY - 1f),
-                    ImGui.GetColorU32(
-                        Vector4.One),
-                    badgeText);
-
-                ImGui.Dummy(
-                    badgeSize);
-            }
 
             // =====================================================
             // HOST BADGE
@@ -3619,11 +6197,9 @@ internal sealed partial class MainWindow
                     ImGui.CalcTextSize(
                         badgeText);
 
-                const float badgePadX =
-                    7f;
+                var badgePadX = Ui(7f);
 
-                const float badgePadY =
-                    3f;
+                var badgePadY = Ui(3f);
 
                 var badgeMin =
                     ImGui.GetCursorScreenPos();
@@ -3659,7 +6235,7 @@ internal sealed partial class MainWindow
                             0.55f)),
                     6f);
 
-                drawList.AddText(
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                     badgeMin +
                     new Vector2(
                         badgePadX,
@@ -3677,16 +6253,16 @@ internal sealed partial class MainWindow
                 new Vector2(
                     nameX,
                     origin.Y +
-                    39f));
+                    Ui(39f)));
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 0.73f);
 
             ImGui.TextColored(
                 Good,
                 "● In Watch Party");
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
 
             // =====================================================
@@ -3702,20 +6278,15 @@ internal sealed partial class MainWindow
             const float gap =
                 7f;
 
-            const float makeHostWidth =
-                100f;
+            var makeHostWidth = Ui(100f);
 
-            const float kickWidth =
-                112f;
+            var kickWidth = Ui(112f);
 
-            const float banWidth =
-                106f;
+            var banWidth = Ui(106f);
 
-            const float buttonHeight =
-                31f;
+            var buttonHeight = Ui(31f);
 
-            const float rightPadding =
-                12f;
+            var rightPadding = Ui(12f);
 
             var actionsWidth =
                 makeHostWidth +
@@ -3734,6 +6305,61 @@ internal sealed partial class MainWindow
                 (rowHeight -
                  buttonHeight) *
                 0.5f;
+
+            var requestsDisabled = CurrentMediaDisallowsVideoRequests();
+            var permission = videoRequestPermissions.TryGetValue(userId, out var storedPermission)
+                ? storedPermission
+                : VideoRequestPermission.Allow;
+            var permissionLabel = permission switch
+            {
+                VideoRequestPermission.AutoAccept => "Auto-accept",
+                VideoRequestPermission.NotAllowed => "Not allowed",
+                _ => "Allow",
+            };
+
+            var requestLabelWidth = Ui(98f);
+            var requestComboWidth = Ui(112f);
+            var requestGap = Ui(8f);
+            var requestX = actionX - requestLabelWidth - requestComboWidth - requestGap;
+
+            ImGui.SetCursorScreenPos(new Vector2(requestX, actionY + Ui(7f)));
+            ImGui.TextUnformatted("Video Requests:");
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Set video request permissions");
+            }
+
+            ImGui.SetCursorScreenPos(new Vector2(requestX + requestLabelWidth, actionY));
+            ImGui.SetNextItemWidth(requestComboWidth);
+            using (ImRaii.Disabled(requestsDisabled))
+            {
+                if (ImGui.BeginCombo("##videoRequestPermission", permissionLabel))
+                {
+                    foreach (var option in Enum.GetValues<VideoRequestPermission>())
+                    {
+                        var optionLabel = option switch
+                        {
+                            VideoRequestPermission.AutoAccept => "Auto-accept",
+                            VideoRequestPermission.NotAllowed => "Not allowed",
+                            _ => "Allow",
+                        };
+
+                        if (ImGui.Selectable(optionLabel, option == permission))
+                        {
+                            videoRequestPermissions[userId] = option;
+                        }
+                    }
+
+                    ImGui.EndCombo();
+                }
+            }
+
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            {
+                ImGui.SetTooltip(requestsDisabled
+                    ? "Current media type does not allow video requests"
+                    : "Set video request permissions");
+            }
 
             // -----------------------------------------------------
             // Make Host
@@ -3766,7 +6392,7 @@ internal sealed partial class MainWindow
                     AccentActive))
             {
                 if (ImGui.Button(
-                        "Make Host",
+                        "Make host",
                         new Vector2(
                             makeHostWidth,
                             buttonHeight)))
@@ -3808,7 +6434,7 @@ internal sealed partial class MainWindow
                     0.14f)))
             {
                 ImGui.Button(
-                    "Kick from Room",
+                    "Kick",
                     new Vector2(
                         kickWidth,
                         buttonHeight));
@@ -3850,7 +6476,7 @@ internal sealed partial class MainWindow
                     0.34f)))
             {
                 ImGui.Button(
-                    "Kick and Ban",
+                    "Ban",
                     new Vector2(
                         banWidth,
                         buttonHeight));
@@ -3876,7 +6502,7 @@ internal sealed partial class MainWindow
             12f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(20f, 18f)))
+                UiVec(20f, 18f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(
@@ -3906,16 +6532,16 @@ internal sealed partial class MainWindow
 
             ImGui.SameLine(0f, 8f);
 
-            ImGui.SetWindowFontScale(1.15f);
+            SetUiFontScale(1.15f);
 
             ImGui.TextColored(
                 Vector4.One,
                 title);
 
-            ImGui.SetWindowFontScale(1f);
+            SetUiFontScale(1f);
 
             ImGui.Dummy(
-                new Vector2(0f, 6f));
+                UiVec(0f, 6f));
 
             ImGui.TextColored(
                 MutedText,
@@ -3927,21 +6553,21 @@ internal sealed partial class MainWindow
     {
         if (CurrentSession is null)
         {
-            ImGui.SetWindowFontScale(1.15f);
+            SetUiFontScale(1.15f);
 
             ImGui.TextColored(
                 Vector4.One,
                 "Watch party");
 
-            ImGui.SetWindowFontScale(1f);
+            SetUiFontScale(1f);
 
-            ImGui.Dummy(new Vector2(0f, 6f));
+            ImGui.Dummy(UiVec(0f, 6f));
 
             ImGui.TextColored(
                 MutedText,
                 "Sign in to host or join a synced watch party.");
 
-            ImGui.Dummy(new Vector2(0f, 12f));
+            ImGui.Dummy(UiVec(0f, 12f));
 
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.FrameRounding,
@@ -3958,7 +6584,7 @@ internal sealed partial class MainWindow
             {
                 if (ImGui.Button(
                     "Open Settings",
-                    new Vector2(120f, 34f)))
+                    UiVec(120f, 34f)))
                 {
                     currentPage = HomePage.Settings;
                 }
@@ -3971,15 +6597,15 @@ internal sealed partial class MainWindow
         // Heading
         // ---------------------------------------------------------
 
-        ImGui.SetWindowFontScale(1.15f);
+        SetUiFontScale(1.15f);
 
         ImGui.TextColored(
             Vector4.One,
             "Watch party");
 
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(1f);
 
-        ImGui.Dummy(new Vector2(0f, 4f));
+        ImGui.Dummy(UiVec(0f, 4f));
 
         switch (stream.Mode)
         {
@@ -4013,7 +6639,7 @@ internal sealed partial class MainWindow
                         {
                             // HOSTING
                             ImGui.SetCursorPos(
-                                new Vector2(14f, 12f));
+                                UiVec(14f, 12f));
 
                             ImGui.TextColored(
                                 Good,
@@ -4022,8 +6648,8 @@ internal sealed partial class MainWindow
                             // Private party toggle in top-right.
                             ImGui.SetCursorPos(
                                 new Vector2(
-                                    ImGui.GetWindowWidth() - 140f,
-                                    9f));
+                                    ImGui.GetWindowWidth() - Ui(140f),
+                                    Ui(9f)));
 
                             if (ImGui.Checkbox(
                                 "Private party",
@@ -4035,7 +6661,7 @@ internal sealed partial class MainWindow
 
                             // Host
                             ImGui.SetCursorPos(
-                                new Vector2(14f, 39f));
+                                UiVec(14f, 39f));
 
                             ImGui.TextColored(
                                 Vector4.One,
@@ -4043,31 +6669,31 @@ internal sealed partial class MainWindow
 
                             // Status
                             ImGui.SetCursorPos(
-                                new Vector2(14f, 63f));
+                                UiVec(14f, 63f));
 
-                            ImGui.SetWindowFontScale(0.80f);
+                            SetUiFontScale(0.80f);
 
                             ImGui.TextColored(
                                 MutedText,
                                 $"{stream.Roster.Length} watching  •  Playback stays synced to you");
 
-                            ImGui.SetWindowFontScale(1f);
+                            SetUiFontScale(1f);
 
                             // Room name label
                             ImGui.SetCursorPos(
-                                new Vector2(14f, 91f));
+                                UiVec(14f, 91f));
 
-                            ImGui.SetWindowFontScale(0.78f);
+                            SetUiFontScale(0.78f);
 
                             ImGui.TextColored(
                                 MutedText,
                                 "Room name");
 
-                            ImGui.SetWindowFontScale(1f);
+                            SetUiFontScale(1f);
 
                             // Room name input
                             ImGui.SetCursorPos(
-                                new Vector2(14f, 111f));
+                                UiVec(14f, 111f));
 
                             ImGui.SetNextItemWidth(
                                 ImGui.GetWindowWidth() - 106f);
@@ -4077,7 +6703,7 @@ internal sealed partial class MainWindow
                                 7f)
                                 .Push(
                                     ImGuiStyleVar.FramePadding,
-                                    new Vector2(12f, 7f)))
+                                    UiVec(12f, 7f)))
                             using (ImRaii.PushColor(
                                 ImGuiCol.FrameBg,
                                 new Vector4(0.055f, 0.07f, 0.115f, 1f))
@@ -4111,13 +6737,13 @@ internal sealed partial class MainWindow
                             {
                                 ImGui.Button(
                                     "Save",
-                                    new Vector2(64f, 32f));
+                                    UiVec(64f, 32f));
                             }
                         }
                     }
 
                     ImGui.Dummy(
-                        new Vector2(0f, 10f));
+                        UiVec(0f, 10f));
 
                     // Invite button directly below the card.
                     using (ImRaii.PushStyle(
@@ -4135,7 +6761,7 @@ internal sealed partial class MainWindow
                     {
                         if (ImGui.Button(
                             "Copy party invite",
-                            new Vector2(150f, 32f)))
+                            UiVec(150f, 32f)))
                         {
                             ImGui.SetClipboardText(
                                 $"Come watch with me! Right-click my character and choose \"Join Stream\" " +
@@ -4144,7 +6770,7 @@ internal sealed partial class MainWindow
                     }
 
                     ImGui.Dummy(
-                        new Vector2(0f, 14f));
+                        UiVec(0f, 14f));
 
                     DrawRoster(
                         $"Watching ({stream.Roster.Length})",
@@ -4175,14 +6801,14 @@ internal sealed partial class MainWindow
                         if (statusCard)
                         {
                             ImGui.SetCursorPos(
-                                new Vector2(14f, 12f));
+                                UiVec(14f, 12f));
 
                             ImGui.TextColored(
                                 Good,
                                 "IN ROOM");
 
                             ImGui.SetCursorPos(
-                                new Vector2(14f, 38f));
+                                UiVec(14f, 38f));
 
                             ImGui.TextColored(
                                 Vector4.One,
@@ -4191,19 +6817,19 @@ internal sealed partial class MainWindow
                                     : "A friend's room");
 
                             ImGui.SetCursorPos(
-                                new Vector2(14f, 64f));
+                                UiVec(14f, 64f));
 
-                            ImGui.SetWindowFontScale(0.82f);
+                            SetUiFontScale(0.82f);
 
                             ImGui.TextColored(
                                 MutedText,
                                 $"{stream.Roster.Length} also here  •  Playback is synced to the host");
 
-                            ImGui.SetWindowFontScale(1f);
+                            SetUiFontScale(1f);
                         }
                     }
 
-                    ImGui.Dummy(new Vector2(0f, 14f));
+                    ImGui.Dummy(UiVec(0f, 14f));
 
                     using (ImRaii.PushStyle(
                         ImGuiStyleVar.FrameRounding,
@@ -4220,14 +6846,14 @@ internal sealed partial class MainWindow
                     {
                         if (ImGui.Button(
                             "Leave room",
-                            new Vector2(120f, 34f)))
+                            UiVec(120f, 34f)))
                         {
-                            LeaveStream();
+                            RequestLeaveWatchParty();
                             partyChatItems.Clear();
                         }
                     }
 
-                    ImGui.Dummy(new Vector2(0f, 20f));
+                    ImGui.Dummy(UiVec(0f, 20f));
 
                     DrawRoster(
                         $"Also here ({stream.Roster.Length})",
@@ -4242,21 +6868,21 @@ internal sealed partial class MainWindow
 
             default:
                 {
-                    ImGui.SetWindowFontScale(0.88f);
+                    SetUiFontScale(0.88f);
 
                     ImGui.TextColored(
                         MutedText,
                         "Host automatically while playing, or join a friend's watch party.");
 
-                    ImGui.SetWindowFontScale(1f);
+                    SetUiFontScale(1f);
 
-                    ImGui.Dummy(new Vector2(0f, 14f));
+                    ImGui.Dummy(UiVec(0f, 14f));
 
                     ImGui.TextColored(
                         MutedText,
                         "Join a party");
 
-                    ImGui.Dummy(new Vector2(0f, 4f));
+                    ImGui.Dummy(UiVec(0f, 4f));
 
                     ImGui.SetNextItemWidth(-118f);
 
@@ -4265,7 +6891,7 @@ internal sealed partial class MainWindow
                         10f)
                         .Push(
                             ImGuiStyleVar.FramePadding,
-                            new Vector2(14f, 8f)))
+                            UiVec(14f, 8f)))
                     using (ImRaii.PushColor(
                         ImGuiCol.FrameBg,
                         new Vector4(0.055f, 0.07f, 0.115f, 1f))
@@ -4290,41 +6916,41 @@ internal sealed partial class MainWindow
                     }
                 }
 
-                    ImGui.SameLine(0f, 10f);
+                ImGui.SameLine(0f, 10f);
 
-                    using (ImRaii.PushStyle(
-                        ImGuiStyleVar.FrameRounding,
-                        8f))
-                    using (ImRaii.PushColor(
-                        ImGuiCol.Button,
-                        Accent)
-                        .Push(
-                            ImGuiCol.ButtonHovered,
-                            AccentHover)
-                        .Push(
-                            ImGuiCol.ButtonActive,
-                            AccentActive))
+                using (ImRaii.PushStyle(
+                    ImGuiStyleVar.FrameRounding,
+                    8f))
+                using (ImRaii.PushColor(
+                    ImGuiCol.Button,
+                    Accent)
+                    .Push(
+                        ImGuiCol.ButtonHovered,
+                        AccentHover)
+                    .Push(
+                        ImGuiCol.ButtonActive,
+                        AccentActive))
+                {
+                    if (ImGui.Button(
+                        "Join",
+                        UiVec(88f, 38f)))
                     {
-                        if (ImGui.Button(
-                            "Join",
-                            new Vector2(88f, 38f)))
-                        {
-                            DoJoin(joinHostNameInput, joinPasswordInput);
-                        }
+                        DoJoin(joinHostNameInput, joinPasswordInput);
                     }
-
-                    if (joinError is { } error)
-                    {
-                        ImGui.Dummy(new Vector2(0f, 8f));
-
-                        ImGui.TextColored(
-                            Danger,
-                            error);
-                    }
-
-                    break;
                 }
+
+                if (joinError is { } error)
+                {
+                    ImGui.Dummy(UiVec(0f, 8f));
+
+                    ImGui.TextColored(
+                        Danger,
+                        error);
+                }
+
+                break;
         }
+    }
 
 
     private void DrawPartySocialPanel()
@@ -4342,18 +6968,16 @@ internal sealed partial class MainWindow
 
         if (stream.Mode == StreamMode.None)
         {
-            ImGui.SetWindowFontScale(1.15f);
+            SetUiFontScale(1.15f);
 
             ImGui.TextColored(
                 Vector4.One,
                 "Chat");
 
-            ImGui.SetWindowFontScale(1f);
+            SetUiFontScale(1f);
 
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    6f));
+                UiVec(0f, 6f));
 
             ImGui.TextColored(
                 MutedText,
@@ -4365,16 +6989,12 @@ internal sealed partial class MainWindow
         DrawPartyChatFeed();
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 8f));
 
         DrawPartyChatComposer();
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                10f));
+            UiVec(0f, 10f));
 
         DrawReactions();
     }
@@ -4492,21 +7112,21 @@ internal sealed partial class MainWindow
                                 .ToString()
                                 .ToUpperInvariant();
 
-                        ImGui.SetWindowFontScale(
+                        SetUiFontScale(
                             0.95f);
 
                         var initialSize =
                             ImGui.CalcTextSize(
                                 initial);
 
-                        drawList.AddText(
+                        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                             avatarCenter -
                             initialSize * 0.5f,
                             ImGui.GetColorU32(
                                 Vector4.One),
                             initial);
 
-                        ImGui.SetWindowFontScale(
+                        SetUiFontScale(
                             1f);
                     }
 
@@ -4524,14 +7144,14 @@ internal sealed partial class MainWindow
                             contentX,
                             origin.Y));
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         0.95f);
 
                     ImGui.TextColored(
                         AccentHover,
                         senderName);
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         1f);
 
                     // ---------------------------------------------------------
@@ -4554,8 +7174,8 @@ internal sealed partial class MainWindow
                         var badgeMin =
                             ImGui.GetCursorScreenPos();
 
-                        const float badgePadX = 7f;
-                        const float badgePadY = 3f;
+                        var badgePadX = Ui(7f);
+                        var badgePadY = Ui(3f);
 
                         var badgeSize =
                             new Vector2(
@@ -4588,74 +7208,7 @@ internal sealed partial class MainWindow
                                     0.55f)),
                             6f);
 
-                        drawList.AddText(
-                            badgeMin +
-                            new Vector2(
-                                badgePadX,
-                                badgePadY - 1f),
-                            ImGui.GetColorU32(
-                                Vector4.One),
-                            badgeText);
-
-                        ImGui.Dummy(
-                            badgeSize);
-                    }
-
-                    // ---------------------------------------------------------
-                    // Developer badge
-                    // ---------------------------------------------------------
-
-                    if (UserRoles.IsDeveloper(senderName))
-                    {
-                        ImGui.SameLine(
-                            0f,
-                            8f);
-
-                        const string badgeText =
-                            "Developer";
-
-                        var badgeTextSize =
-                            ImGui.CalcTextSize(
-                                badgeText);
-
-                        const float badgePadX = 7f;
-                        const float badgePadY = 3f;
-
-                        var badgeMin =
-                            ImGui.GetCursorScreenPos();
-
-                        var badgeSize =
-                            new Vector2(
-                                badgeTextSize.X +
-                                badgePadX * 2f,
-                                badgeTextSize.Y +
-                                badgePadY * 2f);
-
-                        drawList.AddRectFilled(
-                            badgeMin,
-                            badgeMin +
-                            badgeSize,
-                            ImGui.GetColorU32(
-                                new Vector4(
-                                    0.55f,
-                                    0.30f,
-                                    1f,
-                                    0.28f)),
-                            6f);
-
-                        drawList.AddRect(
-                            badgeMin,
-                            badgeMin +
-                            badgeSize,
-                            ImGui.GetColorU32(
-                                new Vector4(
-                                    0.65f,
-                                    0.45f,
-                                    1f,
-                                    0.55f)),
-                            6f);
-
-                        drawList.AddText(
+                        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                             badgeMin +
                             new Vector2(
                                 badgePadX,
@@ -4678,7 +7231,7 @@ internal sealed partial class MainWindow
                             0f,
                             9f);
 
-                        ImGui.SetWindowFontScale(
+                        SetUiFontScale(
                             0.72f);
 
                         ImGui.TextColored(
@@ -4686,7 +7239,7 @@ internal sealed partial class MainWindow
                             receivedAt.ToString(
                                 "t"));
 
-                        ImGui.SetWindowFontScale(
+                        SetUiFontScale(
                             1f);
                     }
 
@@ -4697,9 +7250,9 @@ internal sealed partial class MainWindow
                     ImGui.SetCursorScreenPos(
                         new Vector2(
                             contentX,
-                            origin.Y + 24f));
+                            origin.Y + Ui(24f)));
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         0.96f);
 
                     var wrapRight =
@@ -4715,7 +7268,7 @@ internal sealed partial class MainWindow
 
                     ImGui.PopTextWrapPos();
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         1f);
 
                     // =========================================================
@@ -4757,9 +7310,7 @@ internal sealed partial class MainWindow
                         8f))
                     using (ImRaii.PushStyle(
                         ImGuiStyleVar.WindowPadding,
-                        new Vector2(
-                            14f,
-                            12f)))
+                        UiVec(14f, 12f)))
                     using (ImRaii.PushColor(
                         ImGuiCol.ChildBg,
                         new Vector4(
@@ -4774,7 +7325,7 @@ new Vector2(
     MathF.Max(
         1f,
         ImGui.GetContentRegionAvail().X -
-        16f),
+        Ui(16f)),
     cardHeight),
                             false,
                             ImGuiWindowFlags.NoScrollbar |
@@ -4800,7 +7351,7 @@ new Vector2(
                                     cardMin.X,
                                     cardMin.Y),
                                 new Vector2(
-                                    cardMin.X + 3f,
+                                    cardMin.X + Ui(3f),
                                     cardMax.Y),
                                 ImGui.GetColorU32(
                                     Accent),
@@ -4814,28 +7365,28 @@ new Vector2(
                             ImGui.SetCursorPosX(
                                 ImGui.GetCursorPosX() + 7f);
 
-                            ImGui.SetWindowFontScale(
+                            SetUiFontScale(
                                 0.88f);
 
                             ImGui.TextColored(
                                 Accent,
                                 "VIDEO REQUEST");
 
-                            ImGui.SetWindowFontScale(
+                            SetUiFontScale(
                                 1f);
 
                             ImGui.SameLine(
                                 0f,
                                 8f);
 
-                            ImGui.SetWindowFontScale(
+                            SetUiFontScale(
                                 0.88f);
 
                             ImGui.TextColored(
                                 MutedText,
                                 $"{item.Name} requested a video");
 
-                            ImGui.SetWindowFontScale(
+                            SetUiFontScale(
                                 1f);
 
                             // -------------------------------------------------
@@ -4847,7 +7398,7 @@ new Vector2(
 
                             var thumbnailMin =
                                 new Vector2(
-                                    origin.X + 7f,
+                                    origin.X + Ui(7f),
                                     mediaY);
 
                             var thumbnailMax =
@@ -4894,7 +7445,7 @@ new Vector2(
                                         ImGui.CalcTextSize(
                                             icon);
 
-                                    drawList.AddText(
+                                    drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                                         thumbnailMin +
                                         (thumbnailMax - thumbnailMin) / 2f -
                                         iconSize / 2f,
@@ -4941,7 +7492,7 @@ new Vector2(
                                     contentX,
                                     mediaY + 1f));
 
-                            ImGui.SetWindowFontScale(
+                            SetUiFontScale(
                                 1.00f);
 
                             ImGui.PushTextWrapPos(
@@ -4956,15 +7507,15 @@ new Vector2(
 
                             ImGui.PopTextWrapPos();
 
-                            ImGui.SetWindowFontScale(
+                            SetUiFontScale(
                                 1f);
 
                             ImGui.SetCursorScreenPos(
                                 new Vector2(
                                     contentX,
-                                    mediaY + 58f));
+                                    mediaY + Ui(58f)));
 
-                            ImGui.SetWindowFontScale(
+                            SetUiFontScale(
                                 0.82f);
 
                             var sourceText =
@@ -4982,7 +7533,7 @@ new Vector2(
                                 MutedText,
                                 metadataText);
 
-                            ImGui.SetWindowFontScale(
+                            SetUiFontScale(
                                 1f);
 
                             // -------------------------------------------------
@@ -5050,7 +7601,7 @@ new Vector2(
                                             ImGui.CalcTextSize(
                                                 icon);
 
-                                        drawList.AddText(
+                                        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                                             buttonMin +
                                             (buttonMax -
                                              buttonMin -
@@ -5095,9 +7646,7 @@ new Vector2(
                                         controlGap,
                                         controlsY));
 
-                                var gameplayActive =
-                                    screenController.Engine.IsPlayingSnes ||
-                                    screenController.Engine.IsPlayingGameBoy;
+                                var gameplayActive = screenController.Engine.IsPlayingGame;
 
                                 using (ImRaii.Disabled(
                                     gameplayActive))
@@ -5148,7 +7697,7 @@ new Vector2(
                                         iconPosition.X +=
                                             1f;
 
-                                        drawList.AddText(
+                                        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                                             iconPosition,
                                             ImGui.GetColorU32(
                                                 gameplayActive
@@ -5189,9 +7738,7 @@ new Vector2(
                     ImGui.PopID();
 
                     ImGui.Dummy(
-                        new Vector2(
-                            0f,
-                            3f));
+                        UiVec(0f, 3f));
 
                     break;
                 }
@@ -5206,7 +7753,7 @@ new Vector2(
                         Good,
                         "✓ Added to queue");
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         0.88f);
 
                     ImGui.TextColored(
@@ -5224,13 +7771,11 @@ new Vector2(
                             ? item.Url
                             : item.Title);
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         1f);
 
                     ImGui.Dummy(
-                        new Vector2(
-                            0f,
-                            8f));
+                        UiVec(0f, 8f));
 
                     break;
                 }
@@ -5241,7 +7786,7 @@ new Vector2(
                         Good,
                         "▶ Now playing");
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         0.88f);
 
                     ImGui.TextColored(
@@ -5255,13 +7800,11 @@ new Vector2(
                             ? item.Url
                             : item.Title);
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         1f);
 
                     ImGui.Dummy(
-                        new Vector2(
-                            0f,
-                            8f));
+                        UiVec(0f, 8f));
 
                     break;
                 }
@@ -5359,7 +7902,7 @@ new Vector2(
                             ImGui.CalcTextSize(
                                 initial);
 
-                        drawList.AddText(
+                        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                             avatarCenter -
                             initialSize * 0.5f,
                             ImGui.GetColorU32(
@@ -5374,8 +7917,8 @@ new Vector2(
                     var pillMin =
                         origin +
                         new Vector2(
-                            avatarSize + 8f,
-                            2f);
+                            avatarSize + Ui(8f),
+                            Ui(2f));
 
                     var pillHeight =
                         30f;
@@ -5383,7 +7926,7 @@ new Vector2(
                     var nameText =
                         $"{senderName} reacted with";
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         0.82f);
 
                     var nameSize =
@@ -5419,11 +7962,9 @@ new Vector2(
                                 1f)),
                         15f);
 
-                    drawList.AddText(
+                    drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                         pillMin +
-                        new Vector2(
-                            12f,
-                            7f),
+                        UiVec(12f, 7f),
                         ImGui.GetColorU32(
                             MutedText),
                         nameText);
@@ -5431,17 +7972,17 @@ new Vector2(
                     using (ImRaii.PushFont(
                         UiBuilder.IconFont))
                     {
-                        drawList.AddText(
+                        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                             pillMin +
                             new Vector2(
-                                18f + nameSize.X,
-                                7f),
+                                Ui(18f) + nameSize.X,
+                                Ui(7f)),
                             ImGui.GetColorU32(
                                 AccentHover),
                             item.Text);
                     }
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         1f);
 
                     // Register the reaction row with ImGui's layout system.
@@ -5456,7 +7997,7 @@ new Vector2(
                     ImGui.Dummy(
                         new Vector2(
                             0f,
-                            rowHeight + 4f));
+                            rowHeight + Ui(4f)));
 
                     break;
                 }
@@ -5522,19 +8063,19 @@ new Vector2(
 
             if (partyChatItems.Count == 0)
             {
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     0.88f);
 
                 ImGui.TextColored(
                     MutedText,
                     "No messages yet.");
 
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     1f);
             }
             else
             {
-                const float chatContentInset = 16f;
+                var chatContentInset = Ui(16f);
 
                 ImGui.Indent(
                     chatContentInset);
@@ -5580,7 +8121,7 @@ new Vector2(
                 ImGuiStyleVar.WindowPadding,
                 new Vector2(
                     padding,
-                    8f)))
+                    Ui(8f))))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(
@@ -5650,9 +8191,7 @@ new Vector2(
                 9f)
                 .Push(
                     ImGuiStyleVar.FramePadding,
-                    new Vector2(
-                        14f,
-                        10f)))
+                    UiVec(14f, 10f)))
             using (ImRaii.PushColor(
                 ImGuiCol.FrameBg,
                 new Vector4(
@@ -5762,16 +8301,12 @@ new Vector2(
             }
 
             ImGui.SetNextWindowSize(
-                new Vector2(
-                    300f,
-                    0f),
+                UiVec(300f, 0f),
                 ImGuiCond.Appearing);
 
             using (ImRaii.PushStyle(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(
-                    14f,
-                    12f))
+                UiVec(14f, 12f))
                 .Push(
                     ImGuiStyleVar.PopupRounding,
                     10f))
@@ -5779,20 +8314,18 @@ new Vector2(
                 if (ImGui.BeginPopup(
                         "##partyChatOptionsPopup"))
                 {
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         0.90f);
 
                     ImGui.TextColored(
                         Vector4.One,
                         "Chat options");
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         1f);
 
                     ImGui.Dummy(
-                        new Vector2(
-                            0f,
-                            5f));
+                        UiVec(0f, 5f));
 
                     // =====================================================
                     // Relay to FFXIV chat
@@ -5812,80 +8345,17 @@ new Vector2(
                     }
 
                     ImGui.Dummy(
-                        new Vector2(
-                            0f,
-                            3f));
+                        UiVec(0f, 3f));
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         0.76f);
 
                     ImGui.TextColored(
                         MutedText,
                         "Show Watch Party messages in your\nnormal FFXIV chatbox as well.");
 
-                    ImGui.SetWindowFontScale(
+                    SetUiFontScale(
                         1f);
-
-                    // =====================================================
-                    // Development sandbox
-                    // =====================================================
-                    //
-                    // Host-only. This does not change the real StreamMode;
-                    // it only routes media buttons through the viewer/request
-                    // flow for testing.
-                    // =====================================================
-
-                    if (stream.Mode == StreamMode.Hosting)
-                    {
-                        ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                8f));
-
-                        ImGui.Separator();
-
-                        ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                7f));
-
-                        ImGui.SetWindowFontScale(
-                            0.78f);
-
-                        ImGui.TextColored(
-                            MutedText,
-                            "TESTING");
-
-                        ImGui.SetWindowFontScale(
-                            1f);
-
-                        ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                4f));
-
-                        ImGui.Checkbox(
-                            "Sandbox mode: act as viewer",
-                            ref sandboxActAsViewer);
-
-                        if (sandboxActAsViewer)
-                        {
-                            ImGui.Dummy(
-                                new Vector2(
-                                    0f,
-                                    2f));
-
-                            ImGui.SetWindowFontScale(
-                                0.76f);
-
-                            ImGui.TextColored(
-                                Gold,
-                                "Media buttons behave like viewer requests.\nYou are still the real host.");
-
-                            ImGui.SetWindowFontScale(
-                                1f);
-                        }
-                    }
 
                     ImGui.EndPopup();
                 }
@@ -5934,7 +8404,7 @@ new Vector2(
                     windowPos +
                     new Vector2(
                         dividerX,
-                        dividerTop + 44f),
+                        dividerTop + Ui(44f)),
                     ImGui.GetColorU32(
                         new Vector4(
                             1f,
@@ -5977,14 +8447,14 @@ new Vector2(
             using (ImRaii.PushFont(
                 UiBuilder.IconFont))
             {
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     0.82f);
 
                 ImGui.TextColored(
                     Accent,
                     FontAwesomeIcon.Bolt.ToIconString());
 
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     1f);
             }
 
@@ -5992,14 +8462,14 @@ new Vector2(
                 0f,
                 5f);
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 0.68f);
 
             ImGui.TextColored(
                 AccentHover,
                 "REACT LIVE");
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
 
             // -----------------------------------------------------
@@ -6009,7 +8479,7 @@ new Vector2(
             ImGui.SetCursorPos(
                 new Vector2(
                     reactX,
-                    reactHeaderY + 15f));
+                    reactHeaderY + Ui(15f)));
 
             DrawCompactReactions(
                 reactWidthAvailable);

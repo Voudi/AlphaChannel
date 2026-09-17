@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Utility.Raii;
+using AlphaChannel.Plugin.Video;
 
 namespace AlphaChannel.Plugin;
 
@@ -8,11 +10,13 @@ namespace AlphaChannel.Plugin;
 // CardBg tiles used on Home/Player. Identity: configure the plugin, don't browse content.
 internal sealed partial class MainWindow
 {
-    private const string ProductionServerUrl = "https://alphachannel.duckdns.org";
+#if DEBUG
+    private const string ProductionServerUrl = Configuration.ProductionRelayServerUrl;
     private const string DevServerUrl = "http://194.113.211.29:5001";
 
     private string serverUrlInput = string.Empty;
     private bool serverUrlSynced;
+#endif
 
     // ---------------------------------------------------------
     // YouTube subscription management
@@ -22,6 +26,29 @@ internal sealed partial class MainWindow
     private bool isAddingManualSubscription;
     private string? subscriptionMessage;
     private bool subscriptionMessageIsError;
+
+    private string? subscriptionClipboardMessage;
+    private bool subscriptionClipboardMessageIsError;
+    private bool manageSubscriptionsOpen;
+    private bool manageTopicsOpen;
+
+    private sealed class SubscriptionClipboardPayload
+    {
+        public string? Type { get; set; }
+
+        public int Version { get; set; }
+
+        public List<SubscriptionClipboardChannel>? Channels { get; set; }
+    }
+
+    private sealed class SubscriptionClipboardChannel
+    {
+        public string? ChannelId { get; set; }
+
+        public string? ChannelName { get; set; }
+    }
+
+    private bool topicSelectionLimitWarning;
 
     private readonly HashSet<string> subscriptionNamesLoading =
     new(StringComparer.OrdinalIgnoreCase);
@@ -42,7 +69,7 @@ internal sealed partial class MainWindow
         // Settings tabs
         // ---------------------------------------------------------
 
-        const float tabGap = 8f;
+        var tabGap = Ui(8f);
 
         var availableWidth =
             ImGui.GetContentRegionAvail().X;
@@ -73,11 +100,11 @@ internal sealed partial class MainWindow
 
         DrawSettingsTab(
             SettingsTab.Other,
-            "Other",
+            "YouTube",
             tabWidth);
 
         ImGui.Dummy(
-            new Vector2(0f, 14f));
+            UiVec(0f, 14f));
 
         // Divider under tabs.
         var dividerOrigin =
@@ -99,7 +126,7 @@ internal sealed partial class MainWindow
         ImGui.Dummy(
             new Vector2(
                 dividerWidth,
-                18f));
+                Ui(18f)));
 
         // ---------------------------------------------------------
         // Selected tab
@@ -109,8 +136,8 @@ internal sealed partial class MainWindow
         {
             case SettingsTab.Account:
                 SettingsSection(
-                    "Account",
-                    "Sign-in, username, YouTube, and invite code.");
+      "Account",
+      "Sign-in, username, invite code, and live-streaming credentials.");
 
                 DrawAccountSettings();
                 break;
@@ -333,7 +360,7 @@ internal sealed partial class MainWindow
                 $"##settingsTab_{tab}",
                 new Vector2(
                     width,
-                    40f)))
+                    Ui(40f))))
             {
                 settingsTab = tab;
             }
@@ -348,7 +375,7 @@ internal sealed partial class MainWindow
                 ImGui.CalcTextSize(label);
 
             ImGui.GetWindowDrawList()
-                .AddText(
+                .AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                     new Vector2(
                         buttonMin.X +
                         (buttonMax.X -
@@ -371,16 +398,16 @@ internal sealed partial class MainWindow
 
     private void DrawWindowSizeSettings()
     {
-        ImGui.SetWindowFontScale(1.10f);
+        SetUiFontScale(1.10f);
         ImGui.TextColored(Vector4.One, "Window size");
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(1f);
 
-        ImGui.Dummy(new Vector2(0f, 3f));
+        ImGui.Dummy(UiVec(0f, 3f));
         ImGui.TextColored(
             MutedText,
             "Design is the original layout. 4K is capped to the game window so Dalamud UI scale cannot push it off-screen.");
 
-        ImGui.Dummy(new Vector2(0f, 12f));
+        ImGui.Dummy(UiVec(0f, 12f));
 
         ReadOnlySpan<UiWindowSizePreset> presets =
         [
@@ -423,7 +450,7 @@ internal sealed partial class MainWindow
         }
 
         var applied = ClampWindowSize(userWindowSize);
-        ImGui.Dummy(new Vector2(0f, 10f));
+        ImGui.Dummy(UiVec(0f, 10f));
         ImGui.TextColored(
             MutedText,
             Plugin.Cfg.WindowSizePreset == UiWindowSizePreset.Custom
@@ -442,7 +469,7 @@ internal sealed partial class MainWindow
             10f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(20f, 18f)))
+                UiVec(20f, 18f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(0.045f, 0.06f, 0.10f, 1f))
@@ -463,7 +490,7 @@ internal sealed partial class MainWindow
         }
 
         ImGui.Dummy(
-            new Vector2(0f, 14f));
+            UiVec(0f, 14f));
 
         // =========================================================
         // ACCENT COLOUR
@@ -474,7 +501,7 @@ internal sealed partial class MainWindow
             10f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(20f, 18f)))
+                UiVec(20f, 18f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(0.045f, 0.06f, 0.10f, 1f))
@@ -490,32 +517,32 @@ internal sealed partial class MainWindow
         {
             if (accentCard)
             {
-                ImGui.SetWindowFontScale(1.10f);
+                SetUiFontScale(1.10f);
 
                 ImGui.TextColored(
                     Vector4.One,
                     "Accent colour");
 
-                ImGui.SetWindowFontScale(1f);
+                SetUiFontScale(1f);
 
                 ImGui.Dummy(
-                    new Vector2(0f, 3f));
+                    UiVec(0f, 3f));
 
                 ImGui.TextColored(
                     MutedText,
                     "Choose the highlight colour used for buttons, tabs and selected items.");
 
                 ImGui.Dummy(
-                    new Vector2(0f, 16f));
+                    UiVec(0f, 16f));
 
                 var available =
                     ImGui.GetContentRegionAvail().X;
 
                 // On normal Settings widths, put the controls left
                 // and the mini preview on the right.
-                const float previewWidth = 210f;
-                const float previewHeight = 82f;
-                const float previewGap = 24f;
+                var previewWidth = Ui(210f);
+                var previewHeight = Ui(82f);
+                var previewGap = Ui(24f);
 
                 var optionsWidth =
                     MathF.Max(
@@ -551,7 +578,7 @@ internal sealed partial class MainWindow
         }
 
         ImGui.Dummy(
-            new Vector2(0f, 14f));
+            UiVec(0f, 14f));
 
         // =========================================================
         // APP BACKGROUND
@@ -562,7 +589,7 @@ internal sealed partial class MainWindow
             10f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(20f, 18f)))
+                UiVec(20f, 18f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(0.045f, 0.06f, 0.10f, 1f))
@@ -571,142 +598,303 @@ internal sealed partial class MainWindow
                 BorderSubtle))
         using (var backgroundCard = ImRaii.Child(
             "##appearanceBackgroundCard",
-            new Vector2(-1f, Ui(515f)),
+            new Vector2(-1f, Ui(230f)),
             true,
             ImGuiWindowFlags.NoScrollbar |
             ImGuiWindowFlags.NoScrollWithMouse))
         {
             if (backgroundCard)
             {
-                ImGui.SetWindowFontScale(1.10f);
+                SetUiFontScale(1.10f);
 
                 ImGui.TextColored(
                     Vector4.One,
                     "Plugin background");
 
-                ImGui.SetWindowFontScale(1f);
+                SetUiFontScale(1f);
 
                 ImGui.Dummy(
-                    new Vector2(0f, 3f));
+                    UiVec(0f, 3f));
 
                 ImGui.TextColored(
                     MutedText,
                     "Choose the background used throughout AlphaChannel.");
 
                 ImGui.Dummy(
-                    new Vector2(0f, 16f));
+                    UiVec(0f, 16f));
 
                 ImGui.TextColored(
                     Vector4.One,
                     "Background style");
 
                 ImGui.Dummy(
-                    new Vector2(0f, 8f));
+                    UiVec(0f, 8f));
 
                 DrawBackgroundSettings();
-
-                ImGui.Dummy(
-                    new Vector2(0f, 18f));
-
-                // Divider between presets and custom image.
-                var dividerOrigin =
-                    ImGui.GetCursorScreenPos();
-
-                var dividerWidth =
-                    ImGui.GetContentRegionAvail().X;
-
-                ImGui.GetWindowDrawList()
-                    .AddRectFilled(
-                        dividerOrigin,
-                        dividerOrigin +
-                        new Vector2(
-                            dividerWidth,
-                            1f),
-                        ImGui.GetColorU32(
-                            BorderSubtle));
-
-                ImGui.Dummy(
-                    new Vector2(
-                        dividerWidth,
-                        16f));
-
-                DrawCustomBackgroundSettings();
             }
         }
 
-        ImGui.Dummy(
-            new Vector2(0f, 14f));
+        ImGui.Dummy(UiVec(0f, 14f));
 
-        // =========================================================
-        // HOME ILLUSTRATION
-        // =========================================================
+        DrawOtherSettingsPanel(
+            "##appearanceHomeSectionsCard",
+            100f,
+            () =>
+            {
+                ImGui.TextUnformatted(
+                    "Home sections");
 
-        DrawHomeHeroSettings();
+                ImGui.Dummy(UiVec(0f, 10f));
+
+                var showFfxivVideos =
+                    Plugin.Cfg.ShowFfxivYouTubeSection;
+
+                if (DrawSettingsToggle(
+                        "##showFfxivVideosSection",
+                        "FFXIV Videos Section",
+                        ref showFfxivVideos))
+                {
+                    Plugin.Cfg.ShowFfxivYouTubeSection =
+                        showFfxivVideos;
+                    Plugin.Cfg.Save();
+                }
+            });
     }
 
     private void DrawOtherSettings()
     {
         SettingsSection(
-            "Other",
-            "Storage and other plugin preferences.");
+            "YouTube Settings",
+            "Manage YouTube data and video settings");
 
-        DrawWhisperSettings();
-
-        SettingsHairline();
-
-        SettingsSection(
-      "Video playback",
-      "Playback options for YouTube and online video sources.");
-
-        ImGui.TextColored(
-            MutedText,
-            "YouTube sign-in lives on the Account tab.");
-
-        SettingsHairline();
-
-        DrawYouTubeSubscriptionSettings();
-
-        SettingsHairline();
-
-        SettingsSection(
-            "Home sections",
-                    "Restore hidden sections on the Home page.");
-
-        if (!Plugin.Cfg.ShowFfxivYouTubeSection)
-        {
-            if (ImGui.Button("Show FFXIV videos section"))
+        DrawOtherSettingsPanel(
+            "##otherYouTubeQualityCard",
+            250f,
+            () =>
             {
-                Plugin.Cfg.ShowFfxivYouTubeSection = true;
-                Plugin.Cfg.Save();
-            }
-        }
-        else
-        {
-            ImGui.TextColored(
-                MutedText,
-                "FFXIV videos section is currently visible.");
-        }
+                SettingsSection(
+                    "YouTube video quality",
+                    "Choose between faster startup or higher-resolution YouTube playback.");
 
-        SettingsHairline();
+                var preferHighQualityYouTube =
+                    Plugin.Cfg.PreferHighQualityYouTubeVideos;
 
-        SettingsSection(
-            "Trending video topics",
-            "Choose the topics used for your Trending videos.");
+                if (ImGui.Checkbox(
+                        "Prefer higher-resolution YouTube videos",
+                        ref preferHighQualityYouTube))
+                {
+                    Plugin.Cfg.PreferHighQualityYouTubeVideos =
+                        preferHighQualityYouTube;
+                    Plugin.Cfg.Save();
+                }
 
-        DrawTrendingTopicTags();
+                ImGui.Dummy(UiVec(0f, 6f));
 
-        // Hidden from players — enable ShowServerStackSwitcher
-        // in the plugin config JSON to show.
+                if (preferHighQualityYouTube)
+                {
+                    ImGui.TextColored(
+                        new Vector4(1.00f, 0.72f, 0.28f, 1.00f),
+                        "Higher-resolution mode is enabled.");
+
+                    ImGui.PushTextWrapPos(
+                        ImGui.GetCursorPosX() +
+                        Math.Max(ImGui.GetContentRegionAvail().X, 200f));
+                    ImGui.TextColored(
+                        MutedText,
+                        "YouTube videos may take between 5–10 seconds longer to begin " +
+                        "playing when high resolution is enabled due to the way Alpha " +
+                        "Channel has to fetch those videos.");
+                    ImGui.PopTextWrapPos();
+                }
+                else
+                {
+                    ImGui.PushTextWrapPos(
+                        ImGui.GetCursorPosX() +
+                        Math.Max(ImGui.GetContentRegionAvail().X, 200f));
+                    ImGui.TextColored(
+                        MutedText,
+                        "When this setting is enabled Alpha Channel will try to fetch higher resolution videos " +
+                        "but it can delay the start of the YouTube videos by 2 to 8 seconds.");
+                    ImGui.PopTextWrapPos();
+                }
+
+                ImGui.Dummy(UiVec(0f, 8f));
+                ImGui.TextColored(
+                    MutedText,
+                    "Changes apply to the next YouTube video.");
+            });
+
+        DrawOtherSettingsPanel(
+            "##youtubeAccountCard",
+            230f,
+            () =>
+            {
+                SettingsSection(
+                    "YouTube account",
+                    "Connect the account signed into Alpha Channel's browser for videos that require sign-in.");
+                DrawEmbeddedBrowserYouTubeAccountSettings();
+            });
+
+        var subscriptionMessageRows =
+            (isAddingManualSubscription || subscriptionMessage is not null ? 1 : 0) +
+            (!string.IsNullOrWhiteSpace(subscriptionClipboardMessage) ? 1 : 0);
+        DrawOtherSettingsPanel(
+            "##otherYouTubeSubscriptionsCard",
+            455f + subscriptionMessageRows * 24f,
+            () =>
+            {
+                SettingsSection(
+                    "YouTube subscriptions",
+                    "Manage the channels used for your subscription feed.");
+                DrawYouTubeSubscriptionSettings();
+            });
+
+        DrawOtherSettingsPanel(
+            "##otherSubscribedTopicsCard",
+            195f,
+            () =>
+            {
+                SettingsSection(
+                    "Subscribed Topics",
+                    "Choose the topics used for your Home recommendations and the Browse Videos Topics tab.");
+
+                var subscribedTopicCount = GetSubscribedTopicCount();
+                ImGui.TextColored(
+                    subscribedTopicCount is >= 3 and <= 15
+                        ? AccentHover
+                        : MutedText,
+                    $"{subscribedTopicCount} / 15 topics selected");
+
+                ImGui.SameLine();
+                using (ImRaii.PushFont(UiBuilder.IconFont))
+                    ImGui.TextDisabled(FontAwesomeIcon.InfoCircle.ToIconString());
+
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(
+                        "Choose between 3 and 15 topics. These help Alpha Channel show relevant YouTube videos and can be changed here later.");
+
+                ImGui.Dummy(UiVec(0f, 12f));
+
+                DrawDjActionButton(
+                    "##manageYouTubeTopics",
+                    FontAwesomeIcon.List,
+                    "Manage Topics",
+                    new Vector2(
+                        ImGui.GetContentRegionAvail().X,
+                        Ui(36f)),
+                    false,
+                    () => manageTopicsOpen = true,
+                    true);
+            });
+
+#if DEBUG
+        // Debug-only relay switching. None of this UI or the development
+        // endpoint is compiled into public Release builds.
         if (Plugin.Cfg.ShowServerStackSwitcher)
         {
-            SettingsHairline();
-
-            SettingsSection(
-                "Advanced",
-                "Prod vs isolated dev relay.");
-
-            DrawServerSettings();
+            DrawOtherSettingsPanel(
+                "##otherAdvancedCard",
+                175f,
+                () =>
+                {
+                    SettingsSection(
+                        "Advanced",
+                        "Prod vs isolated dev relay.");
+                    DrawServerSettings();
+                });
         }
+#endif
+    }
+
+    private void DrawOtherSettingsPanel(
+        string id,
+        float height,
+        Action draw)
+    {
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.ChildRounding,
+            10f)
+            .Push(
+                ImGuiStyleVar.WindowPadding,
+                UiVec(20f, 18f)))
+        using (ImRaii.PushColor(
+            ImGuiCol.ChildBg,
+            new Vector4(0.045f, 0.06f, 0.10f, 1f))
+            .Push(
+                ImGuiCol.Border,
+                BorderSubtle))
+        using (var panel = ImRaii.Child(
+            id,
+            new Vector2(-1f, Ui(height)),
+            true,
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            if (panel)
+                draw();
+        }
+
+        ImGui.Dummy(UiVec(0f, 14f));
+    }
+
+    private static bool DrawSettingsToggle(
+        string id,
+        string label,
+        ref bool value)
+    {
+        var switchSize = UiVec(38f, 20f);
+        var switchOrigin = ImGui.GetCursorScreenPos();
+        var changed = false;
+
+        if (ImGui.InvisibleButton(
+                id,
+                switchSize))
+        {
+            value = !value;
+            changed = true;
+        }
+
+        var hovered = ImGui.IsItemHovered();
+        var drawList = ImGui.GetWindowDrawList();
+
+        drawList.AddRectFilled(
+            switchOrigin,
+            switchOrigin + switchSize,
+            ImGui.GetColorU32(
+                value
+                    ? Accent
+                    : hovered
+                        ? new Vector4(0.22f, 0.20f, 0.29f, 1f)
+                        : new Vector4(0.14f, 0.13f, 0.19f, 1f)),
+            switchSize.Y * 0.5f);
+
+        var knobCenter = new Vector2(
+            value
+                ? switchOrigin.X + switchSize.X - switchSize.Y * 0.5f
+                : switchOrigin.X + switchSize.Y * 0.5f,
+            switchOrigin.Y + switchSize.Y * 0.5f);
+
+        drawList.AddCircleFilled(
+            knobCenter,
+            Ui(7f),
+            ImGui.GetColorU32(Vector4.One),
+            18);
+
+        if (hovered)
+        {
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+        }
+
+        ImGui.SameLine(0f, Ui(9f));
+        ImGui.TextUnformatted(label);
+
+        if (ImGui.IsItemClicked())
+        {
+            value = !value;
+            changed = true;
+        }
+
+        return changed;
     }
 
     private void DrawYouTubeSubscriptionSettings()
@@ -720,20 +908,16 @@ internal sealed partial class MainWindow
             "Subscribe to a channel");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                4f));
+            UiVec(0f, 4f));
 
         ImGui.TextColored(
             MutedText,
             "Enter the exact YouTube channel name.");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 8f));
 
-        const float buttonWidth = 110f;
+        var buttonWidth = Ui(110f);
         const float gap = 10f;
 
         ImGui.SetNextItemWidth(
@@ -748,9 +932,7 @@ internal sealed partial class MainWindow
             8f)
             .Push(
                 ImGuiStyleVar.FramePadding,
-                new Vector2(
-                    12f,
-                    9f)))
+                UiVec(12f, 9f)))
         {
             submitted =
                 ImGui.InputTextWithHint(
@@ -789,7 +971,7 @@ internal sealed partial class MainWindow
                     "Subscribe##manualYouTubeSubscription",
                     new Vector2(
                         buttonWidth,
-                        36f));
+                        Ui(36f)));
         }
 
         if ((submitted || clicked) &&
@@ -810,9 +992,7 @@ internal sealed partial class MainWindow
         if (isAddingManualSubscription)
         {
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    6f));
+                UiVec(0f, 6f));
 
             ImGui.TextColored(
                 MutedText,
@@ -821,9 +1001,7 @@ internal sealed partial class MainWindow
         else if (subscriptionMessage is not null)
         {
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    6f));
+                UiVec(0f, 6f));
 
             ImGui.TextColored(
                 subscriptionMessageIsError
@@ -833,9 +1011,7 @@ internal sealed partial class MainWindow
         }
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                18f));
+            UiVec(0f, 18f));
 
         // ---------------------------------------------------------
         // Current subscriptions
@@ -846,49 +1022,642 @@ internal sealed partial class MainWindow
             "Subscribed channels");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                7f));
+            UiVec(0f, 5f));
 
-        if (Plugin.Cfg.SubscribedYouTubeChannelIds.Count == 0)
+        using (ImRaii.PushColor(
+            ImGuiCol.Text,
+            MutedText))
         {
-            ImGui.TextColored(
-                MutedText,
-                "You aren't subscribed to any channels yet.");
+            ImGui.TextWrapped(
+                "Subscriptions are stored locally. If you move devices or fully delete the plugin, you may want to export your subscriptions first. You can also use an export to share subscriptions with friends.");
+        }
 
+        ImGui.Dummy(
+            UiVec(0f, 9f));
+
+        DrawDjActionButton(
+            "##manageYouTubeSubscriptions",
+            FontAwesomeIcon.List,
+            "Manage Subscriptions",
+            new Vector2(
+                ImGui.GetContentRegionAvail().X,
+                Ui(36f)),
+            false,
+            () => manageSubscriptionsOpen = true,
+            true);
+
+        ImGui.Dummy(
+            UiVec(0f, 9f));
+
+        var clipboardGap = Ui(10f);
+        var clipboardButtonWidth =
+            (ImGui.GetContentRegionAvail().X - clipboardGap) * 0.5f;
+
+        DrawDjActionButton(
+            "##exportYouTubeSubscriptions",
+            FontAwesomeIcon.Copy,
+            "Export subscriptions",
+            new Vector2(
+                clipboardButtonWidth,
+                Ui(34f)),
+            false,
+            ExportYouTubeSubscriptionsToClipboard,
+            true);
+
+        ImGui.SameLine(
+            0f,
+            clipboardGap);
+
+        DrawDjActionButton(
+            "##importYouTubeSubscriptions",
+            FontAwesomeIcon.Clipboard,
+            "Import subscriptions",
+            new Vector2(
+                clipboardButtonWidth,
+                Ui(34f)),
+            false,
+            ImportYouTubeSubscriptionsFromClipboard,
+            true);
+
+        if (!string.IsNullOrWhiteSpace(
+                subscriptionClipboardMessage))
+        {
+            ImGui.Dummy(
+                UiVec(0f, 6f));
+
+            ImGui.TextColored(
+                subscriptionClipboardMessageIsError
+                    ? Danger
+                    : Good,
+                subscriptionClipboardMessage);
+        }
+
+    }
+
+    private void DrawYouTubeSubscriptionsOverlay()
+    {
+        if (!manageSubscriptionsOpen)
+        {
             return;
         }
 
-        // Copy the IDs because clicking Remove modifies the
-        // underlying config collection while we're drawing.
-        var subscriptions =
+        var parentPosition = ImGui.GetWindowPos();
+        var parentSize = ImGui.GetWindowSize();
+        var panelWidth = MathF.Min(
+            Ui(800f),
+            parentSize.X - Ui(40f));
+        var panelHeight = MathF.Min(
+            Ui(580f),
+            parentSize.Y - Ui(40f));
+        var panelPosition = parentPosition +
+            new Vector2(
+                (parentSize.X - panelWidth) * 0.5f,
+                (parentSize.Y - panelHeight) * 0.5f);
+
+        ImGui.SetNextWindowPos(
+            parentPosition,
+            ImGuiCond.Always);
+        ImGui.SetNextWindowSize(
+            parentSize,
+            ImGuiCond.Always);
+        ImGui.SetNextWindowBgAlpha(0f);
+
+        const ImGuiWindowFlags overlayFlags =
+            ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse |
+            ImGuiWindowFlags.NoCollapse |
+            ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoNav |
+            ImGuiWindowFlags.NoDocking |
+            ImGuiWindowFlags.NoBackground;
+
+        if (!ImGui.Begin(
+                "##youtubeSubscriptionsOverlay",
+                overlayFlags))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.GetWindowDrawList().AddRectFilled(
+            parentPosition,
+            parentPosition + parentSize,
+            ImGui.GetColorU32(
+                new Vector4(0f, 0f, 0f, 0.58f)));
+
+        ImGui.SetCursorScreenPos(panelPosition);
+
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.ChildRounding,
+            Ui(14f))
+            .Push(
+                ImGuiStyleVar.ChildBorderSize,
+                Ui(1f))
+            .Push(
+                ImGuiStyleVar.WindowPadding,
+                UiVec(22f, 20f)))
+        using (ImRaii.PushColor(
+            ImGuiCol.ChildBg,
+            new Vector4(0.025f, 0.03f, 0.06f, 0.995f))
+            .Push(
+                ImGuiCol.Border,
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.82f)))
+        using (var panel = ImRaii.Child(
+            "##youtubeSubscriptionsPanel",
+            new Vector2(panelWidth, panelHeight),
+            true,
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            if (panel)
+            {
+                DrawYouTubeSubscriptionsOverlayContents();
+            }
+        }
+
+        ImGui.End();
+    }
+
+    private void DrawYouTubeSubscriptionsOverlayContents()
+    {
+        var subscriptions = Plugin.Cfg.SubscribedYouTubeChannelIds
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        SetUiFontScale(1.15f);
+        ImGui.TextColored(
+            Vector4.One,
+            "Manage Subscriptions");
+        SetUiFontScale(1f);
+
+        ImGui.TextColored(
+            MutedText,
+            subscriptions.Count == 1
+                ? "1 subscribed YouTube channel"
+                : $"{subscriptions.Count} subscribed YouTube channels");
+
+        ImGui.Dummy(UiVec(0f, 8f));
+        ImGui.Separator();
+        ImGui.Dummy(UiVec(0f, 10f));
+
+        var listHeight = MathF.Max(
+            Ui(120f),
+            ImGui.GetContentRegionAvail().Y - Ui(58f));
+
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.ChildRounding,
+            Ui(9f))
+            .Push(
+                ImGuiStyleVar.ChildBorderSize,
+                Ui(1f))
+            .Push(
+                ImGuiStyleVar.WindowPadding,
+                UiVec(8f, 8f)))
+        using (ImRaii.PushColor(
+            ImGuiCol.ChildBg,
+            new Vector4(0.018f, 0.024f, 0.046f, 1f))
+            .Push(
+                ImGuiCol.Border,
+                BorderSubtle))
+        using (var list = ImRaii.Child(
+            "##youtubeSubscriptionsList",
+            new Vector2(-1f, listHeight),
+            true))
+        {
+            if (list)
+            {
+                if (subscriptions.Count == 0)
+                {
+                    ImGui.Dummy(UiVec(0f, 12f));
+                    ImGui.TextColored(
+                        MutedText,
+                        "You aren't subscribed to any channels yet.");
+                }
+                else
+                {
+                    using (ImRaii.PushStyle(
+                        ImGuiStyleVar.CellPadding,
+                        UiVec(5f, 5f)))
+                    {
+                        if (ImGui.BeginTable(
+                                "##youtubeSubscriptionsGrid",
+                                2,
+                                ImGuiTableFlags.SizingStretchSame))
+                        {
+                            foreach (var channelId in subscriptions)
+                            {
+                                ImGui.TableNextColumn();
+                                ImGui.PushID(
+                                    $"managedSubscription_{channelId}");
+                                DrawYouTubeSubscriptionSettingsRow(
+                                    channelId);
+                                ImGui.PopID();
+                            }
+
+                            ImGui.EndTable();
+                        }
+                    }
+                }
+            }
+        }
+
+        ImGui.Dummy(UiVec(0f, 12f));
+
+        var closeSize = UiVec(120f, 36f);
+        ImGui.SetCursorPosX(
+            ImGui.GetWindowWidth() - closeSize.X - Ui(22f));
+        DrawDjActionButton(
+            "##closeYouTubeSubscriptions",
+            FontAwesomeIcon.Times,
+            "Close",
+            closeSize,
+            false,
+            () => manageSubscriptionsOpen = false,
+            true);
+    }
+
+    private void DrawYouTubeTopicsOverlay()
+    {
+        if (!manageTopicsOpen)
+        {
+            return;
+        }
+
+        var parentPosition = ImGui.GetWindowPos();
+        var parentSize = ImGui.GetWindowSize();
+        var panelWidth = MathF.Min(
+            Ui(960f),
+            parentSize.X - Ui(40f));
+        var panelHeight = MathF.Min(
+            Ui(620f),
+            parentSize.Y - Ui(40f));
+        var panelPosition = parentPosition +
+            new Vector2(
+                (parentSize.X - panelWidth) * 0.5f,
+                (parentSize.Y - panelHeight) * 0.5f);
+
+        ImGui.SetNextWindowPos(
+            parentPosition,
+            ImGuiCond.Always);
+        ImGui.SetNextWindowSize(
+            parentSize,
+            ImGuiCond.Always);
+        ImGui.SetNextWindowBgAlpha(0f);
+
+        const ImGuiWindowFlags overlayFlags =
+            ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse |
+            ImGuiWindowFlags.NoCollapse |
+            ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoNav |
+            ImGuiWindowFlags.NoDocking |
+            ImGuiWindowFlags.NoBackground;
+
+        if (!ImGui.Begin(
+                "##youtubeTopicsOverlay",
+                overlayFlags))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.GetWindowDrawList().AddRectFilled(
+            parentPosition,
+            parentPosition + parentSize,
+            ImGui.GetColorU32(
+                new Vector4(0f, 0f, 0f, 0.58f)));
+
+        ImGui.SetCursorScreenPos(panelPosition);
+
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.ChildRounding,
+            Ui(14f))
+            .Push(
+                ImGuiStyleVar.ChildBorderSize,
+                Ui(1f))
+            .Push(
+                ImGuiStyleVar.WindowPadding,
+                UiVec(22f, 20f)))
+        using (ImRaii.PushColor(
+            ImGuiCol.ChildBg,
+            new Vector4(0.025f, 0.03f, 0.06f, 0.995f))
+            .Push(
+                ImGuiCol.Border,
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.82f)))
+        using (var panel = ImRaii.Child(
+            "##youtubeTopicsPanel",
+            new Vector2(panelWidth, panelHeight),
+            true,
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            if (panel)
+            {
+                DrawYouTubeTopicsOverlayContents();
+            }
+        }
+
+        ImGui.End();
+    }
+
+    private void DrawYouTubeTopicsOverlayContents()
+    {
+        SetUiFontScale(1.15f);
+        ImGui.TextColored(
+            Vector4.One,
+            "Manage Topics");
+        SetUiFontScale(1f);
+
+        ImGui.TextColored(
+            MutedText,
+            "Choose the topics used for your Home recommendations and the Browse Videos Topics tab.");
+
+        ImGui.Dummy(UiVec(0f, 8f));
+
+        var subscribedTopicCount = GetSubscribedTopicCount();
+        ImGui.TextColored(
+            subscribedTopicCount is >= 3 and <= 15
+                ? AccentHover
+                : new Vector4(1f, 0.55f, 0.35f, 1f),
+            $"{subscribedTopicCount} / 15 topics selected");
+
+        if (topicSelectionLimitWarning)
+        {
+            ImGui.SameLine(0f, Ui(12f));
+            ImGui.TextColored(
+                new Vector4(1f, 0.55f, 0.35f, 1f),
+                "You can select up to 15 topics.");
+        }
+
+        ImGui.Dummy(UiVec(0f, 8f));
+        ImGui.Separator();
+        ImGui.Dummy(UiVec(0f, 10f));
+
+        var topicGridHeight = MathF.Max(
+            Ui(250f),
+            ImGui.GetContentRegionAvail().Y - Ui(58f));
+        var topicSignatureBefore =
+            GetBrowseTopicSignature(GetEnabledTrendingTopics());
+
+        DrawTrendingTopicTags(
+            columnHeight: topicGridHeight,
+            availableWidthOverride: ImGui.GetContentRegionAvail().X);
+
+        var topicSignatureAfter =
+            GetBrowseTopicSignature(GetEnabledTrendingTopics());
+
+        if (!string.Equals(
+                topicSignatureBefore,
+                topicSignatureAfter,
+                StringComparison.Ordinal))
+        {
+            NotifyTopicSettingsChanged();
+        }
+
+        ImGui.Dummy(UiVec(0f, 12f));
+
+        var closeSize = UiVec(120f, 36f);
+        ImGui.SetCursorPosX(
+            ImGui.GetWindowWidth() - closeSize.X - Ui(22f));
+        DrawDjActionButton(
+            "##closeYouTubeTopics",
+            FontAwesomeIcon.Times,
+            "Close",
+            closeSize,
+            false,
+            () =>
+            {
+                manageTopicsOpen = false;
+                topicSelectionLimitWarning = false;
+            },
+            true);
+    }
+
+    private void ExportYouTubeSubscriptionsToClipboard()
+    {
+        var channels =
             Plugin.Cfg.SubscribedYouTubeChannelIds
+                .Where(
+                    channelId =>
+                        !string.IsNullOrWhiteSpace(
+                            channelId))
                 .Distinct(
                     StringComparer.OrdinalIgnoreCase)
+                .Select(
+                    channelId =>
+                    {
+                        Plugin.Cfg.SubscribedYouTubeChannelNames.TryGetValue(
+                            channelId,
+                            out var channelName);
+
+                        return new SubscriptionClipboardChannel
+                        {
+                            ChannelId = channelId.Trim(),
+                            ChannelName = string.IsNullOrWhiteSpace(channelName)
+                                ? null
+                                : channelName.Trim(),
+                        };
+                    })
                 .ToList();
 
-        foreach (var channelId in subscriptions)
+        var payload =
+            new SubscriptionClipboardPayload
+            {
+                Type = "AlphaChannelYouTubeSubscriptions",
+                Version = 1,
+                Channels = channels,
+            };
+
+        ImGui.SetClipboardText(
+            JsonSerializer.Serialize(payload));
+
+        subscriptionClipboardMessage =
+            channels.Count == 1
+                ? "1 subscription copied to the clipboard."
+                : $"{channels.Count} subscriptions copied to the clipboard.";
+
+        subscriptionClipboardMessageIsError =
+            false;
+    }
+
+    private void ImportYouTubeSubscriptionsFromClipboard()
+    {
+        try
         {
-            ImGui.PushID(
-                $"subscriptionSettings_{channelId}");
+            var clipboardText =
+                ImGui.GetClipboardText();
 
-            DrawYouTubeSubscriptionSettingsRow(
-                channelId);
+            if (string.IsNullOrWhiteSpace(
+                    clipboardText))
+            {
+                SetSubscriptionClipboardError(
+                    "The clipboard is empty.");
 
-            ImGui.PopID();
+                return;
+            }
 
-            ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    6f));
+            var payload =
+                JsonSerializer.Deserialize<SubscriptionClipboardPayload>(
+                    clipboardText);
+
+            if (payload is null ||
+                !string.Equals(
+                    payload.Type,
+                    "AlphaChannelYouTubeSubscriptions",
+                    StringComparison.Ordinal) ||
+                payload.Version != 1 ||
+                payload.Channels is null ||
+                payload.Channels.Count > 1000)
+            {
+                SetSubscriptionClipboardError(
+                    "The clipboard does not contain a valid Alpha Channel subscriptions list.");
+
+                return;
+            }
+
+            var importedChannels =
+                new Dictionary<string, string?>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            foreach (var channel in payload.Channels)
+            {
+                if (channel is null)
+                {
+                    SetSubscriptionClipboardError(
+                        "The clipboard does not contain a valid Alpha Channel subscriptions list.");
+
+                    return;
+                }
+
+                var channelId =
+                    channel.ChannelId?.Trim();
+
+                var channelName =
+                    channel.ChannelName?.Trim();
+
+                if (string.IsNullOrWhiteSpace(channelId) ||
+                    channelId.Length > 200 ||
+                    channelName?.Length > 300)
+                {
+                    SetSubscriptionClipboardError(
+                        "The clipboard does not contain a valid Alpha Channel subscriptions list.");
+
+                    return;
+                }
+
+                importedChannels.TryAdd(
+                    channelId,
+                    string.IsNullOrWhiteSpace(channelName)
+                        ? null
+                        : channelName);
+            }
+
+            var existingIds =
+                new HashSet<string>(
+                    Plugin.Cfg.SubscribedYouTubeChannelIds,
+                    StringComparer.OrdinalIgnoreCase);
+
+            var addedCount = 0;
+            var existingCount = 0;
+            var changed = false;
+
+            foreach (var (channelId, channelName) in importedChannels)
+            {
+                if (existingIds.Add(channelId))
+                {
+                    Plugin.Cfg.SubscribedYouTubeChannelIds.Add(
+                        channelId);
+
+                    addedCount++;
+                    changed = true;
+                }
+                else
+                {
+                    existingCount++;
+                }
+
+                if (!string.IsNullOrWhiteSpace(channelName) &&
+                    (!Plugin.Cfg.SubscribedYouTubeChannelNames.TryGetValue(
+                         channelId,
+                         out var savedName) ||
+                     string.IsNullOrWhiteSpace(savedName)))
+                {
+                    Plugin.Cfg.SubscribedYouTubeChannelNames[channelId] =
+                        channelName;
+
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                Plugin.Cfg.Save();
+            }
+
+            subscriptionClipboardMessageIsError =
+                false;
+
+            subscriptionClipboardMessage =
+                addedCount switch
+                {
+                    0 when importedChannels.Count == 0 =>
+                        "The imported subscriptions list is empty.",
+                    0 =>
+                        "All imported subscriptions were already in your list.",
+                    1 when existingCount > 0 =>
+                        $"Added 1 subscription; {existingCount} already existed.",
+                    1 =>
+                        "Added 1 subscription.",
+                    _ when existingCount > 0 =>
+                        $"Added {addedCount} subscriptions; {existingCount} already existed.",
+                    _ =>
+                        $"Added {addedCount} subscriptions.",
+                };
         }
+        catch (JsonException)
+        {
+            SetSubscriptionClipboardError(
+                "The clipboard does not contain a valid Alpha Channel subscriptions list.");
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning(
+                $"[Subscriptions] Clipboard import failed: {exception.Message}");
+
+            SetSubscriptionClipboardError(
+                "The subscriptions list could not be imported.");
+        }
+    }
+
+    private void SetSubscriptionClipboardError(
+        string message)
+    {
+        subscriptionClipboardMessage =
+            message;
+
+        subscriptionClipboardMessageIsError =
+            true;
     }
 
     private void DrawYouTubeSubscriptionSettingsRow(
     string channelId)
     {
-        var rowHeight = Ui(42f);
-        var removeWidth = Ui(88f);
+        var rowHeight = Ui(46f);
+        var removeSize = Ui(32f);
 
         var origin =
             ImGui.GetCursorScreenPos();
@@ -949,33 +1718,38 @@ internal sealed partial class MainWindow
         using (ImRaii.PushFont(
             UiBuilder.IconFont))
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 origin +
-                new Vector2(
-                    12f,
-                    13f),
+                UiVec(12f, 13f),
                 ImGui.GetColorU32(
                     AccentHover),
                 FontAwesomeIcon.User.ToIconString());
         }
 
-        drawList.AddText(
-            origin +
+        var channelTextPosition =
+            origin + UiVec(34f, 14f);
+
+        drawList.PushClipRect(
+            channelTextPosition,
             new Vector2(
-                34f,
-                12f),
+                origin.X + width - removeSize - Ui(16f),
+                origin.Y + rowHeight),
+            true);
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(),
+            channelTextPosition,
             ImGui.GetColorU32(
                 Vector4.One),
             channelName);
+        drawList.PopClipRect();
 
         // Remove button
         ImGui.SetCursorScreenPos(
             new Vector2(
                 origin.X +
                 width -
-                removeWidth -
-                7f,
-                origin.Y + 6f));
+                removeSize -
+                Ui(7f),
+                origin.Y + Ui(7f)));
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.FrameRounding,
@@ -1002,11 +1776,23 @@ internal sealed partial class MainWindow
                     0.10f,
                     1f)))
         {
-            if (ImGui.Button(
-                "Remove",
-                new Vector2(
-                    removeWidth,
-                    30f)))
+            bool removeClicked;
+            using (ImRaii.PushFont(
+                UiBuilder.IconFont))
+            {
+                removeClicked = ImGui.Button(
+                    $"{FontAwesomeIcon.Trash.ToIconString()}##removeSubscription",
+                    new Vector2(
+                        removeSize,
+                        removeSize));
+            }
+
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip($"Remove {channelName}");
+            }
+
+            if (removeClicked)
             {
                 Plugin.Cfg
                     .SubscribedYouTubeChannelIds
@@ -1038,7 +1824,7 @@ internal sealed partial class MainWindow
 
     private static void SettingsHairline()
     {
-        ImGui.Dummy(new Vector2(0f, 12f));
+        ImGui.Dummy(UiVec(0f, 12f));
 
         var origin = ImGui.GetCursorScreenPos();
         var width = ImGui.GetContentRegionAvail().X;
@@ -1048,14 +1834,14 @@ internal sealed partial class MainWindow
             origin + new Vector2(width, 1f),
             ImGui.GetColorU32(BorderSubtle));
 
-        ImGui.Dummy(new Vector2(width, 12f));
+        ImGui.Dummy(new Vector2(width, Ui(12f)));
     }
 
     private void DrawThemeSettings(
     float availableWidth)
     {
         const float gap = 12f;
-        const float buttonSize = 38f;
+        var buttonSize = Ui(38f);
 
         var totalWidth =
             (buttonSize * 4f) +
@@ -1104,8 +1890,7 @@ internal sealed partial class MainWindow
         var available =
             ImGui.GetContentRegionAvail().X;
 
-        // Six actual built-in background styles.
-        // Applying a custom image automatically switches to Custom.
+        // Six built-in background styles.
         var width =
             (available -
              gap * 5f) / 6f;
@@ -1173,21 +1958,21 @@ internal sealed partial class MainWindow
             "Custom background image");
 
         ImGui.Dummy(
-            new Vector2(0f, 3f));
+            UiVec(0f, 3f));
 
         ImGui.TextColored(
             MutedText,
             "Add your own image instead of using a built-in background style.");
 
         ImGui.Dummy(
-            new Vector2(0f, 9f));
+            UiVec(0f, 9f));
 
         // ---------------------------------------------------------
         // Path + Apply
         // ---------------------------------------------------------
 
-        const float applyWidth = 82f;
-        const float inputGap = 10f;
+        var applyWidth = Ui(82f);
+        var inputGap = Ui(10f);
 
         ImGui.SetNextItemWidth(
             ImGui.GetContentRegionAvail().X -
@@ -1199,7 +1984,7 @@ internal sealed partial class MainWindow
             8f)
             .Push(
                 ImGuiStyleVar.FramePadding,
-                new Vector2(12f, 9f)))
+                UiVec(12f, 9f)))
         using (ImRaii.PushColor(
             ImGuiCol.FrameBg,
             new Vector4(
@@ -1250,7 +2035,7 @@ internal sealed partial class MainWindow
                 "Apply##customBg",
                 new Vector2(
                     applyWidth,
-                    36f)))
+                    Ui(36f))))
             {
                 TryApplyCustomBackgroundFromPath(
                     customBackgroundPathInput);
@@ -1258,7 +2043,7 @@ internal sealed partial class MainWindow
         }
 
         ImGui.Dummy(
-            new Vector2(0f, 10f));
+            UiVec(0f, 10f));
 
         // ---------------------------------------------------------
         // Action tiles
@@ -1266,8 +2051,8 @@ internal sealed partial class MainWindow
         var actionAvailable =
     ImGui.GetContentRegionAvail().X;
 
-        const float actionGap = 10f;
-        const float actionInset = 8f;
+        var actionGap = Ui(10f);
+        var actionInset = Ui(8f);
 
         var actionWidth =
             MathF.Min(
@@ -1322,7 +2107,7 @@ internal sealed partial class MainWindow
         {
             ClearCustomBackground();
         }
-        ImGui.Dummy(new Vector2(0f, 10f));
+        ImGui.Dummy(UiVec(0f, 10f));
         // ---------------------------------------------------------
         // Dim amount
         // ---------------------------------------------------------
@@ -1333,7 +2118,7 @@ internal sealed partial class MainWindow
                 Plugin.Cfg.CustomBackgroundPath))
         {
             ImGui.Dummy(
-                new Vector2(0f, 11f));
+                UiVec(0f, 11f));
 
             var dim =
                 Plugin.Cfg.CustomBackgroundDim;
@@ -1373,7 +2158,7 @@ internal sealed partial class MainWindow
         if (customBackgroundError is { } error)
         {
             ImGui.Dummy(
-                new Vector2(0f, 5f));
+                UiVec(0f, 5f));
 
             ImGui.TextColored(
                 Danger,
@@ -1385,7 +2170,7 @@ internal sealed partial class MainWindow
             customBackground is not null)
         {
             ImGui.Dummy(
-                new Vector2(0f, 5f));
+                UiVec(0f, 5f));
 
             ImGui.TextColored(
                 Good,
@@ -1416,7 +2201,7 @@ internal sealed partial class MainWindow
             10f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(20f, 18f)))
+                UiVec(20f, 18f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(0.045f, 0.06f, 0.10f, 1f))
@@ -1435,25 +2220,25 @@ internal sealed partial class MainWindow
                 return;
             }
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1.10f);
 
             ImGui.TextColored(
                 Vector4.One,
                 "Home illustration");
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
 
             ImGui.Dummy(
-                new Vector2(0f, 3f));
+                UiVec(0f, 3f));
 
             ImGui.TextColored(
                 MutedText,
                 "Control the artwork shown beside Welcome on the Home page.");
 
             ImGui.Dummy(
-                new Vector2(0f, 13f));
+                UiVec(0f, 13f));
 
             // -----------------------------------------------------
             // Left side controls
@@ -1462,9 +2247,9 @@ internal sealed partial class MainWindow
             var available =
                 ImGui.GetContentRegionAvail().X;
 
-            const float previewWidth = 170f;
-            const float previewHeight = 170f;
-            const float previewGap = 18f;
+            var previewWidth = Ui(170f);
+            var previewHeight = Ui(170f);
+            var previewGap = Ui(18f);
 
             var controlsWidth =
                 MathF.Max(
@@ -1494,27 +2279,27 @@ internal sealed partial class MainWindow
             }
 
             ImGui.Dummy(
-                new Vector2(0f, 13f));
+                UiVec(0f, 13f));
 
             ImGui.TextColored(
                 Vector4.One,
                 "Illustration image");
 
             ImGui.Dummy(
-                new Vector2(0f, 3f));
+                UiVec(0f, 3f));
 
             ImGui.TextColored(
                 MutedText,
                 "Use the default AlphaChannel artwork or choose your own.");
 
             ImGui.Dummy(
-                new Vector2(0f, 8f));
+                UiVec(0f, 8f));
 
             using (ImRaii.Disabled(
                 !Plugin.Cfg.ShowHomeHeroImage))
             {
-                const float applyWidth = 82f;
-                const float inputGap = 10f;
+                var applyWidth = Ui(82f);
+                var inputGap = Ui(10f);
 
                 ImGui.SetNextItemWidth(
                     controlsWidth -
@@ -1526,7 +2311,7 @@ internal sealed partial class MainWindow
                     8f)
                     .Push(
                         ImGuiStyleVar.FramePadding,
-                        new Vector2(12f, 9f)))
+                        UiVec(12f, 9f)))
                 using (ImRaii.PushColor(
                     ImGuiCol.FrameBg,
                     new Vector4(
@@ -1577,7 +2362,7 @@ internal sealed partial class MainWindow
                         "Apply##homeHero",
                         new Vector2(
                             applyWidth,
-                            36f)))
+                            Ui(36f))))
                     {
                         TryApplyCustomHomeHeroFromPath(
                             customHomeHeroPathInput);
@@ -1585,10 +2370,10 @@ internal sealed partial class MainWindow
                 }
 
                 ImGui.Dummy(
-                    new Vector2(0f, 10f));
+                    UiVec(0f, 10f));
 
-                const float actionGap = 10f;
-                const float actionInset = 6f;
+                var actionGap = Ui(10f);
+                var actionInset = Ui(6f);
 
                 var actionWidth =
                     MathF.Min(
@@ -1644,13 +2429,13 @@ internal sealed partial class MainWindow
                 {
                     ClearCustomHomeHero();
                 }
-                ImGui.Dummy(new Vector2(0f, 10f));
+                ImGui.Dummy(UiVec(0f, 10f));
             }
 
             if (customHomeHeroError is { } error)
             {
                 ImGui.Dummy(
-                    new Vector2(0f, 7f));
+                    UiVec(0f, 7f));
 
                 ImGui.TextColored(
                     Danger,
@@ -1662,7 +2447,7 @@ internal sealed partial class MainWindow
                 Plugin.Cfg.ShowHomeHeroImage)
             {
                 ImGui.Dummy(
-                    new Vector2(0f, 7f));
+                    UiVec(0f, 7f));
 
                 ImGui.TextColored(
                     Good,
@@ -1710,7 +2495,7 @@ internal sealed partial class MainWindow
         var size =
             new Vector2(
                 width,
-                38f);
+                Ui(38f));
 
         var origin =
             ImGui.GetCursorScreenPos();
@@ -1762,7 +2547,7 @@ internal sealed partial class MainWindow
         var circleCenter =
             origin +
             new Vector2(
-                17f,
+                Ui(17f),
                 size.Y * 0.5f);
 
         drawList.AddCircleFilled(
@@ -1787,9 +2572,9 @@ internal sealed partial class MainWindow
             ImGui.CalcTextSize(
                 label);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
-                origin.X + 29f,
+                origin.X + Ui(29f),
                 origin.Y +
                 (size.Y -
                  labelSize.Y) * 0.5f),
@@ -1896,7 +2681,7 @@ internal sealed partial class MainWindow
                 var checkSize =
                     ImGui.CalcTextSize(check);
 
-                drawList.AddText(
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                     center -
                     checkSize * 0.5f,
                     ImGui.GetColorU32(Vector4.One),
@@ -1965,7 +2750,7 @@ internal sealed partial class MainWindow
             origin +
             new Vector2(
                 pad,
-                22f);
+                Ui(22f));
 
         var innerMax =
             origin +
@@ -1988,13 +2773,9 @@ internal sealed partial class MainWindow
         // Tiny title bar marks.
         drawList.AddRectFilled(
             origin +
-            new Vector2(
-                14f,
-                10f),
+            UiVec(14f, 10f),
             origin +
-            new Vector2(
-                52f,
-                14f),
+            UiVec(52f, 14f),
             ImGui.GetColorU32(
                 Accent),
             3f);
@@ -2002,8 +2783,8 @@ internal sealed partial class MainWindow
         drawList.AddCircleFilled(
             origin +
             new Vector2(
-                size.X - 34f,
-                12f),
+                size.X - Ui(34f),
+                Ui(12f)),
             2f,
             ImGui.GetColorU32(
                 MutedText));
@@ -2011,8 +2792,8 @@ internal sealed partial class MainWindow
         drawList.AddCircleFilled(
             origin +
             new Vector2(
-                size.X - 22f,
-                12f),
+                size.X - Ui(22f),
+                Ui(12f)),
             2f,
             ImGui.GetColorU32(
                 MutedText));
@@ -2020,15 +2801,11 @@ internal sealed partial class MainWindow
         // Mini selected tab.
         var tabMin =
             innerMin +
-            new Vector2(
-                8f,
-                8f);
+            UiVec(8f, 8f);
 
         var tabMax =
             tabMin +
-            new Vector2(
-                50f,
-                7f);
+            UiVec(50f, 7f);
 
         drawList.AddRectFilled(
             tabMin,
@@ -2040,13 +2817,9 @@ internal sealed partial class MainWindow
         // Content lines.
         drawList.AddRectFilled(
             innerMin +
-            new Vector2(
-                8f,
-                28f),
+            UiVec(8f, 28f),
             innerMin +
-            new Vector2(
-                90f,
-                33f),
+            UiVec(90f, 33f),
             ImGui.GetColorU32(
                 new Vector4(
                     0.45f,
@@ -2057,13 +2830,9 @@ internal sealed partial class MainWindow
 
         drawList.AddRectFilled(
             innerMin +
-            new Vector2(
-                8f,
-                40f),
+            UiVec(8f, 40f),
             innerMin +
-            new Vector2(
-                64f,
-                44f),
+            UiVec(64f, 44f),
             ImGui.GetColorU32(
                 new Vector4(
                     0.45f,
@@ -2075,15 +2844,11 @@ internal sealed partial class MainWindow
         // Accent action.
         var buttonMax =
             innerMax -
-            new Vector2(
-                8f,
-                8f);
+            UiVec(8f, 8f);
 
         var buttonMin =
             buttonMax -
-            new Vector2(
-                70f,
-                23f);
+            UiVec(70f, 23f);
 
         drawList.AddRectFilled(
             buttonMin,
@@ -2103,11 +2868,11 @@ internal sealed partial class MainWindow
                 ImGui.CalcTextSize(
                     check);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 buttonMin +
                 new Vector2(
-                    9f,
-                    (23f -
+                    Ui(9f),
+                    (Ui(23f) -
                      checkSize.Y) * 0.5f),
                 ImGui.GetColorU32(
                     Vector4.One),
@@ -2147,11 +2912,11 @@ internal sealed partial class MainWindow
         {
             var imageOrigin =
     origin +
-    new Vector2(6f, 6f);
+    UiVec(6f, 6f);
 
             var imageSize =
                 size -
-                new Vector2(12f, 12f);
+                UiVec(12f, 12f);
 
             var (uv0, uv1) =
                 CoverUvs(
@@ -2184,7 +2949,7 @@ internal sealed partial class MainWindow
                     ImGui.CalcTextSize(
                         icon);
 
-                drawList.AddText(
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                     origin +
                     (size - iconSize) *
                     0.5f,
@@ -2204,76 +2969,7 @@ internal sealed partial class MainWindow
             1f);
     }
 
-    private void DrawWhisperSettings()
-    {
-        using (ImRaii.PushStyle(
-            ImGuiStyleVar.ChildRounding,
-            10f)
-            .Push(
-                ImGuiStyleVar.WindowPadding,
-                new Vector2(20f, 18f)))
-        using (ImRaii.PushColor(
-            ImGuiCol.ChildBg,
-            new Vector4(0.045f, 0.06f, 0.10f, 1f))
-            .Push(
-                ImGuiCol.Border,
-                BorderSubtle))
-        using (var card = ImRaii.Child(
-            "##whisperHistoryCard",
-            new Vector2(-1f, Ui(205f)),
-            true,
-            ImGuiWindowFlags.NoScrollbar |
-            ImGuiWindowFlags.NoScrollWithMouse))
-        {
-            if (!card)
-            {
-                return;
-            }
-
-            ImGui.SetWindowFontScale(1.10f);
-            ImGui.TextColored(
-                Vector4.One,
-                "Whisper history");
-            ImGui.SetWindowFontScale(1f);
-
-            ImGui.Dummy(new Vector2(0f, 3f));
-
-            ImGui.TextColored(
-                MutedText,
-                "Choose whether your /tell direct messages are kept between sessions.");
-
-            ImGui.Dummy(new Vector2(0f, 16f));
-
-            var archive =
-                Plugin.Cfg.ArchiveWhispersToDisk;
-
-            if (ImGui.Checkbox(
-                "Save /tell history to this device",
-                ref archive))
-            {
-                Plugin.Cfg.ArchiveWhispersToDisk =
-                    archive;
-
-                Plugin.Cfg.Save();
-            }
-
-            ImGui.Dummy(new Vector2(0f, 8f));
-
-            if (archive)
-            {
-                ImGui.TextColored(
-                    MutedText,
-                    "Your /tell history is stored locally on this computer and will still be available next session.");
-            }
-            else
-            {
-                ImGui.TextColored(
-                    MutedText,
-                    "Your /tell history is only kept for this session. It will not be available after you start a new session.");
-            }
-        }
-    }
-
+#if DEBUG
     // Lets a dev-build plugin point at the isolated dev server (own DB, no real accounts) instead of
     // prod, so server-side changes can be tried end-to-end before the same build goes live - see
     // docker-compose.yml's alphachannel-server-dev for the other half of this. Signing in again is
@@ -2287,7 +2983,7 @@ internal sealed partial class MainWindow
         }
 
         ImGui.TextColored(MutedText, "Switching requires signing in again.");
-        ImGui.SetNextItemWidth(320f);
+        ImGui.SetNextItemWidth(Ui(320f));
         ImGui.InputText("##serverUrl", ref serverUrlInput, 128);
         ImGui.SameLine();
         using (ImRaii.Disabled(serverUrlInput.Trim() == Plugin.Cfg.RelayServerUrl))
@@ -2316,185 +3012,367 @@ internal sealed partial class MainWindow
 
         ImGui.TextColored(MutedText, $"Currently: {Plugin.Cfg.RelayServerUrl}");
     }
+#endif
 
-    private void DrawTrendingTopicTags()
+    private void DrawTrendingTopicTags(
+        float columnHeight = 405f,
+        float? availableWidthOverride = null)
     {
-        ImGui.TextColored(
-            MutedText,
-            "Entertainment");
+        var availableWidth =
+            availableWidthOverride ??
+            ImGui.GetContentRegionAvail().X;
 
-        Plugin.Cfg.TrendingGaming =
-            DrawTrendingTopicTag(
-                "Gaming",
-                Plugin.Cfg.TrendingGaming);
+        var columnGap = Ui(8f);
 
-        ImGui.SameLine();
+        var columnWidth =
+            MathF.Max(
+                150f,
+                (
+                    availableWidth -
+                    (columnGap * 2f)
+                ) /
+                3f);
 
-        Plugin.Cfg.TrendingMMORPG =
-            DrawTrendingTopicTag(
-                "MMORPG",
-                Plugin.Cfg.TrendingMMORPG);
+        DrawTopicColumn(
+            "Entertainment",
+            columnWidth,
+            columnHeight,
+            () =>
+            {
+                Plugin.Cfg.TrendingGaming =
+                    DrawTrendingTopicRow(
+                        "Gaming",
+                        Plugin.Cfg.TrendingGaming);
 
-        ImGui.SameLine();
+                Plugin.Cfg.TrendingMMORPG =
+                    DrawTrendingTopicRow(
+                        "MMORPG",
+                        Plugin.Cfg.TrendingMMORPG);
 
-        Plugin.Cfg.TrendingFinalFantasy =
-            DrawTrendingTopicTag(
-                "Final Fantasy",
-                Plugin.Cfg.TrendingFinalFantasy);
+                Plugin.Cfg.TrendingFinalFantasy =
+                    DrawTrendingTopicRow(
+                        "Final Fantasy",
+                        Plugin.Cfg.TrendingFinalFantasy);
 
-        ImGui.SameLine();
+                Plugin.Cfg.TrendingAnime =
+                    DrawTrendingTopicRow(
+                        "Anime",
+                        Plugin.Cfg.TrendingAnime);
 
-        Plugin.Cfg.TrendingAnime =
-            DrawTrendingTopicTag(
-                "Anime",
-                Plugin.Cfg.TrendingAnime);
+                Plugin.Cfg.TrendingMovies =
+                    DrawTrendingTopicRow(
+                        "Movies",
+                        Plugin.Cfg.TrendingMovies);
 
-        ImGui.NewLine();
+                Plugin.Cfg.TrendingTvShows =
+                    DrawTrendingTopicRow(
+                        "TV Shows",
+                        Plugin.Cfg.TrendingTvShows);
 
-        Plugin.Cfg.TrendingMovies =
-            DrawTrendingTopicTag(
-                "Movies",
-                Plugin.Cfg.TrendingMovies);
+                Plugin.Cfg.TrendingMusic =
+                    DrawTrendingTopicRow(
+                        "Music",
+                        Plugin.Cfg.TrendingMusic);
 
-        ImGui.SameLine();
+                Plugin.Cfg.TrendingMemes =
+                    DrawTrendingTopicRow(
+                        "Memes",
+                        Plugin.Cfg.TrendingMemes);
 
-        Plugin.Cfg.TrendingTvShows =
-            DrawTrendingTopicTag(
-                "TV Shows",
-                Plugin.Cfg.TrendingTvShows);
+                Plugin.Cfg.TrendingCartoons =
+                    DrawTrendingTopicRow(
+                        "Cartoons",
+                        Plugin.Cfg.TrendingCartoons);
 
-        ImGui.SameLine();
+                Plugin.Cfg.TrendingHorror =
+                    DrawTrendingTopicRow(
+                        "Horror",
+                        Plugin.Cfg.TrendingHorror);
 
-        Plugin.Cfg.TrendingMusic =
-            DrawTrendingTopicTag(
-                "Music",
-                Plugin.Cfg.TrendingMusic);
+                Plugin.Cfg.TrendingSciFi =
+                    DrawTrendingTopicRow(
+                        "Sci-Fi",
+                        Plugin.Cfg.TrendingSciFi);
 
-        ImGui.SameLine();
+                Plugin.Cfg.TrendingComedy =
+                    DrawTrendingTopicRow(
+                        "Comedy",
+                        Plugin.Cfg.TrendingComedy);
 
-        Plugin.Cfg.TrendingMemes =
-            DrawTrendingTopicTag(
-                "Memes",
-                Plugin.Cfg.TrendingMemes);
+                Plugin.Cfg.TrendingMinecraft =
+                    DrawTrendingTopicRow(
+                        "Minecraft",
+                        Plugin.Cfg.TrendingMinecraft);
 
+                Plugin.Cfg.TrendingDisney =
+                    DrawTrendingTopicRow(
+                        "Disney",
+                        Plugin.Cfg.TrendingDisney);
 
-        ImGui.Dummy(
-            new Vector2(0f, 8f));
+                Plugin.Cfg.TrendingFantasy =
+                    DrawTrendingTopicRow(
+                        "Fantasy",
+                        Plugin.Cfg.TrendingFantasy);
+            });
 
+        ImGui.SameLine(
+            0f,
+            columnGap);
 
-        ImGui.TextColored(
-            MutedText,
-            "World & Knowledge");
+        DrawTopicColumn(
+            "World & Knowledge",
+            columnWidth,
+            columnHeight,
+            () =>
+            {
+                Plugin.Cfg.TrendingWildlife =
+                    DrawTrendingTopicRow(
+                        "Wildlife",
+                        Plugin.Cfg.TrendingWildlife);
 
-        Plugin.Cfg.TrendingWildlife =
-            DrawTrendingTopicTag(
-                "Wildlife",
-                Plugin.Cfg.TrendingWildlife);
+                Plugin.Cfg.TrendingArchitecture =
+                    DrawTrendingTopicRow(
+                        "Architecture",
+                        Plugin.Cfg.TrendingArchitecture);
 
-        ImGui.SameLine();
+                Plugin.Cfg.TrendingScience =
+                    DrawTrendingTopicRow(
+                        "Science",
+                        Plugin.Cfg.TrendingScience);
 
-        Plugin.Cfg.TrendingArchitecture =
-            DrawTrendingTopicTag(
-                "Architecture",
-                Plugin.Cfg.TrendingArchitecture);
+                Plugin.Cfg.TrendingSpace =
+                    DrawTrendingTopicRow(
+                        "Space",
+                        Plugin.Cfg.TrendingSpace);
 
-        ImGui.SameLine();
+                Plugin.Cfg.TrendingHistory =
+                    DrawTrendingTopicRow(
+                        "History",
+                        Plugin.Cfg.TrendingHistory);
 
-        Plugin.Cfg.TrendingScience =
-            DrawTrendingTopicTag(
-                "Science",
-                Plugin.Cfg.TrendingScience);
+                Plugin.Cfg.TrendingTechnology =
+                    DrawTrendingTopicRow(
+                        "Technology",
+                        Plugin.Cfg.TrendingTechnology);
 
-        ImGui.SameLine();
+                Plugin.Cfg.TrendingUrbanExploration =
+                    DrawTrendingTopicRow(
+                        "Urban Exploration",
+                        Plugin.Cfg.TrendingUrbanExploration);
+            });
 
-        Plugin.Cfg.TrendingSpace =
-            DrawTrendingTopicTag(
-                "Space",
-                Plugin.Cfg.TrendingSpace);
+        ImGui.SameLine(
+            0f,
+            columnGap);
 
-        ImGui.NewLine();
+        DrawTopicColumn(
+            "Lifestyle & Creative",
+            columnWidth,
+            columnHeight,
+            () =>
+            {
+                Plugin.Cfg.TrendingPets =
+                    DrawTrendingTopicRow(
+                        "Pets",
+                        Plugin.Cfg.TrendingPets);
 
-        Plugin.Cfg.TrendingHistory =
-            DrawTrendingTopicTag(
-                "History",
-                Plugin.Cfg.TrendingHistory);
+                Plugin.Cfg.TrendingFood =
+                    DrawTrendingTopicRow(
+                        "Food",
+                        Plugin.Cfg.TrendingFood);
 
-        ImGui.SameLine();
+                Plugin.Cfg.TrendingTravel =
+                    DrawTrendingTopicRow(
+                        "Travel",
+                        Plugin.Cfg.TrendingTravel);
 
-        Plugin.Cfg.TrendingTechnology =
-            DrawTrendingTopicTag(
-                "Technology",
-                Plugin.Cfg.TrendingTechnology);
+                Plugin.Cfg.TrendingCars =
+                    DrawTrendingTopicRow(
+                        "Cars",
+                        Plugin.Cfg.TrendingCars);
 
+                Plugin.Cfg.TrendingSports =
+                    DrawTrendingTopicRow(
+                        "Sports",
+                        Plugin.Cfg.TrendingSports);
 
-        ImGui.Dummy(
-            new Vector2(0f, 8f));
+                Plugin.Cfg.TrendingArtsAndCrafts =
+                    DrawTrendingTopicRow(
+                        "Arts & Crafts",
+                        Plugin.Cfg.TrendingArtsAndCrafts);
 
+                Plugin.Cfg.TrendingCosplaying =
+                    DrawTrendingTopicRow(
+                        "Cosplaying",
+                        Plugin.Cfg.TrendingCosplaying);
 
-        ImGui.TextColored(
-            MutedText,
-            "Lifestyle");
+                Plugin.Cfg.TrendingDiy =
+                    DrawTrendingTopicRow(
+                        "DIY",
+                        Plugin.Cfg.TrendingDiy);
 
-        Plugin.Cfg.TrendingPets =
-            DrawTrendingTopicTag(
-                "Pets",
-                Plugin.Cfg.TrendingPets);
-
-        ImGui.SameLine();
-
-        Plugin.Cfg.TrendingFood =
-            DrawTrendingTopicTag(
-                "Food",
-                Plugin.Cfg.TrendingFood);
-
-        ImGui.SameLine();
-
-        Plugin.Cfg.TrendingTravel =
-            DrawTrendingTopicTag(
-                "Travel",
-                Plugin.Cfg.TrendingTravel);
-
-        ImGui.SameLine();
-
-        Plugin.Cfg.TrendingCars =
-            DrawTrendingTopicTag(
-                "Cars",
-                Plugin.Cfg.TrendingCars);
-
-        ImGui.SameLine();
-
-        Plugin.Cfg.TrendingSports =
-            DrawTrendingTopicTag(
-                "Sports",
-                Plugin.Cfg.TrendingSports);
-
+                Plugin.Cfg.TrendingFashion =
+                    DrawTrendingTopicRow(
+                        "Fashion",
+                        Plugin.Cfg.TrendingFashion);
+            });
 
         Plugin.Cfg.Save();
     }
-    private bool DrawTrendingTopicTag(
-    string label,
-    bool enabled)
+
+    private void DrawTopicColumn(
+      string heading,
+      float width,
+      float height,
+      Action drawRows)
     {
+        ImGui.PushID(
+            heading);
+
         using (ImRaii.PushStyle(
-            ImGuiStyleVar.FrameRounding,
-            14f))
+            ImGuiStyleVar.ChildRounding,
+            7f))
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.ChildBorderSize,
+            1f))
         using (ImRaii.PushColor(
-            ImGuiCol.Button,
-            enabled
-                ? Accent
-                : CardBg))
+            ImGuiCol.Border,
+            new Vector4(
+                Accent.X,
+                Accent.Y,
+                Accent.Z,
+                0.55f)))
         using (ImRaii.PushColor(
-            ImGuiCol.ButtonHovered,
-            enabled
-                ? AccentHover
-                : CardBgHover))
+            ImGuiCol.ChildBg,
+            new Vector4(
+                0.025f,
+                0.03f,
+                0.055f,
+                0.72f)))
+        using (var child =
+            ImRaii.Child(
+                "##topicColumn",
+                new Vector2(
+                    width,
+                    height),
+                true))
         {
-            if (ImGui.SmallButton(label))
+            if (child)
             {
-                return !enabled;
+                ImGui.TextColored(
+                    AccentHover,
+                    heading);
+
+                ImGui.Dummy(
+                    new Vector2(
+                        0f,
+                        1f));
+
+                using (ImRaii.PushStyle(
+                    ImGuiStyleVar.ItemSpacing,
+                    UiVec(4f, 1f)))
+                {
+                    drawRows();
+                }
             }
         }
 
-        return enabled;
+        ImGui.PopID();
+    }
+
+    private bool DrawTrendingTopicRow(
+      string label,
+      bool selected)
+    {
+        var selectionLimitReached =
+            !selected &&
+            GetSubscribedTopicCount() >= 15;
+
+        if (selectionLimitReached)
+        {
+            ImGui.BeginDisabled();
+        }
+
+        var rowLabel =
+            selected
+                ? $"✓  {label}"
+                : $"    {label}";
+
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.FrameRounding,
+            2f))
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.FramePadding,
+            UiVec(5f, 0f)))
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.ButtonTextAlign,
+            new Vector2(
+                0f,
+                0.5f)))
+        using (ImRaii.PushColor(
+            ImGuiCol.Text,
+            selected
+                ? AccentHover
+                : Vector4.One))
+        using (ImRaii.PushColor(
+            ImGuiCol.Button,
+            selected
+                ? new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.18f)
+                : new Vector4(
+                    0f,
+                    0f,
+                    0f,
+                    0f)))
+        using (ImRaii.PushColor(
+            ImGuiCol.ButtonHovered,
+            selected
+                ? new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.28f)
+                : CardBgHover))
+        using (ImRaii.PushColor(
+            ImGuiCol.ButtonActive,
+            new Vector4(
+                Accent.X,
+                Accent.Y,
+                Accent.Z,
+                0.35f)))
+        {
+            if (ImGui.Button(
+                    $"{rowLabel}##topicRow_{label}",
+                    UiVec(-1f, 17f)))
+            {
+                selected =
+                    !selected;
+
+                topicSelectionLimitWarning =
+                    false;
+            }
+        }
+
+        if (selectionLimitReached)
+        {
+            ImGui.EndDisabled();
+
+            var attemptedSelection =
+                ImGui.IsItemHovered(
+                    ImGuiHoveredFlags.AllowWhenDisabled) &&
+                ImGui.IsMouseClicked(
+                    ImGuiMouseButton.Left);
+
+            if (attemptedSelection)
+            {
+                topicSelectionLimitWarning =
+                    true;
+            }
+        }
+
+        return selected;
     }
 }

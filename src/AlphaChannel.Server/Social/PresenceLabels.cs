@@ -24,8 +24,12 @@ internal static class PresenceLabels
                 return "Watching privately";
             }
 
-            var count = hostedRoom.Viewers.Count;
-            return count == 0 ? "Hosting a watch-along" : $"Hosting a watch-along ({count} watching)";
+            var count =
+                hostedRoom.Viewers.Count;
+
+            return count == 0
+                ? "Hosting a Watch Party"
+                : $"Hosting a Watch Party ({count} watching)";
         }
 
         if (rooms.FindRoomViewedBy(accountId) is { } viewedRoom)
@@ -35,5 +39,15 @@ internal static class PresenceLabels
         }
 
         return null;
+    }
+    public static bool HostingJoinableWatchParty(
+    string accountId,
+    RoomManager rooms)
+    {
+        return rooms.FindRoomHostedBy(
+                   accountId) is
+        {
+            IsPrivate: false
+        };
     }
 }

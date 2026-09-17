@@ -52,7 +52,7 @@ internal sealed partial class MainWindow
             ImGui.Spacing();
             using (ImRaii.Disabled(activityLoading))
             {
-                if (ImGui.Button("Load older", new Vector2(-1, 32)))
+                if (ImGui.Button("Load older", UiVec(-1, 32)))
                 {
                     RefreshActivity(session.Token, reset: false, before: long.Parse(cursor));
                 }
@@ -74,7 +74,12 @@ internal sealed partial class MainWindow
                     return;
                 }
 
-                activityItems = reset ? page.Items : [.. activityItems, .. page.Items];
+                var visibleItems =
+                    page.Items
+                        .Where(item => !IsRemovedPostActivity(item))
+                        .ToArray();
+
+                activityItems = reset ? visibleItems : [.. activityItems, .. visibleItems];
                 activityNextCursor = page.NextCursor;
 
                 if (page.Items.Length > 0 && reset)
@@ -89,4 +94,7 @@ internal sealed partial class MainWindow
             }
         });
     }
+
+    private static bool IsRemovedPostActivity(ActivityEventDto item) =>
+        item.Type is "PostLiked" or "PostReplied" or "Mentioned";
 }

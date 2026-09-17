@@ -26,6 +26,7 @@ internal sealed partial class MainWindow
     private string homeSearch = string.Empty;
     private string? pendingPlayerSearch;
     private bool homeSearchPopupOpen;
+    private int homeSearchInputVersion;
     private int homeVideoColumnCount = 5;
 
     private const int FavouritePageSize = 20;
@@ -141,7 +142,7 @@ internal sealed partial class MainWindow
                 width,
                 subtitle is null
                     ? rowHeight
-                    : 44f));
+                    : Ui(44f)));
 
         var hovered =
             ImGui.IsItemHovered();
@@ -158,7 +159,7 @@ internal sealed partial class MainWindow
                     width,
                     subtitle is null
                         ? rowHeight
-                        : 44f),
+                        : Ui(44f)),
                 ImGui.GetColorU32(
                     new Vector4(
                         Accent.X,
@@ -171,14 +172,14 @@ internal sealed partial class MainWindow
         var iconPos =
             origin +
             new Vector2(
-                8f,
+                Ui(8f),
                 subtitle is null
-                    ? 9f
-                    : 13f);
+                    ? Ui(9f)
+                    : Ui(13f));
 
         using (ImRaii.PushFont(UiBuilder.IconFont))
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 iconPos,
                 ImGui.GetColorU32(
                     hovered
@@ -187,13 +188,13 @@ internal sealed partial class MainWindow
                 icon.ToIconString());
         }
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             origin +
             new Vector2(
-                31f,
+                Ui(31f),
                 subtitle is null
-                    ? 8f
-                    : 6f),
+                    ? Ui(8f)
+                    : Ui(6f)),
             ImGui.GetColorU32(Vector4.One),
             title);
 
@@ -204,11 +205,9 @@ internal sealed partial class MainWindow
                     ? subtitle[..59] + "..."
                     : subtitle;
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 origin +
-                new Vector2(
-                    31f,
-                    24f),
+                UiVec(31f, 24f),
                 ImGui.GetColorU32(MutedText),
                 displaySubtitle);
         }
@@ -287,13 +286,7 @@ internal sealed partial class MainWindow
 
         var searchWidth = Math.Clamp(ImGui.GetContentRegionAvail().X * 0.42f, Ui(280f), Ui(520f));
 
-        if (!homeYouTubeRequested)
-        {
-            homeYouTubeRequested = true;
-            isLoadingHomeYouTube = true;
 
-            _ = LoadHomeYouTubeAsync();
-        }
 
         if (!featuredSlidesRequested)
         {
@@ -360,7 +353,7 @@ internal sealed partial class MainWindow
             var popupPos =
                 new Vector2(
                     searchMin.X,
-                    searchMax.Y + 6f);
+                    searchMax.Y + Ui(6f));
 
 
             var drawList =
@@ -369,7 +362,7 @@ internal sealed partial class MainWindow
             var popupSize =
                 new Vector2(
                     searchWidth,
-                    looksLikeUrl ? 108f : 142f);
+                    looksLikeUrl ? Ui(108f) : Ui(100f));
 
             drawList.AddRectFilled(
                 popupPos,
@@ -377,7 +370,7 @@ internal sealed partial class MainWindow
                 ImGui.GetColorU32(CardBg),
                 10f);
 
-            var textPos = popupPos + new Vector2(16f, 14f);
+            var textPos = popupPos + UiVec(16f, 14f);
 
             string suggestionText;
 
@@ -387,7 +380,7 @@ internal sealed partial class MainWindow
             }
             else
             {
-                suggestionText = $"▶  Search \"{trimmedSearch}\" on YouTube";
+                suggestionText = $"▶  Search for \"{trimmedSearch}\" videos";
             }
 
             var rowHeight = looksLikeUrl ? 44f : 38f;
@@ -401,8 +394,7 @@ internal sealed partial class MainWindow
                 }
                 : new[]
                 {
-        $"▶  Search \"{trimmedSearch}\" on YouTube",
-        $"▶  Search \"{trimmedSearch}\" on Dailymotion",
+        $"▶  Search for \"{trimmedSearch}\" videos",
         $"▶  Find Twitch channel \"{trimmedSearch}\""
                 };
 
@@ -411,13 +403,13 @@ internal sealed partial class MainWindow
                 var rowMin =
                     popupPos +
                     new Vector2(
-                        8f,
-                        8f + i * (rowHeight + rowSpacing));
+                        Ui(8f),
+                        Ui(8f) + i * (rowHeight + rowSpacing));
 
                 var rowMax =
                     rowMin +
                     new Vector2(
-                        searchWidth - 16f,
+                        searchWidth - Ui(16f),
                         rowHeight);
 
                 // ---------------------------------------------------------
@@ -457,8 +449,8 @@ internal sealed partial class MainWindow
                 // Row text
                 // ---------------------------------------------------------
 
-                drawList.AddText(
-                    rowMin + new Vector2(12f, 8f),
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                    rowMin + UiVec(12f, 8f),
                     ImGui.GetColorU32(Vector4.One),
                     rows[i]);
 
@@ -469,8 +461,8 @@ internal sealed partial class MainWindow
                             ? trimmedSearch[..59] + "..."
                             : trimmedSearch;
 
-                    drawList.AddText(
-                        rowMin + new Vector2(12f, 24f),
+                    drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                        rowMin + UiVec(12f, 24f),
                         ImGui.GetColorU32(MutedText),
                         displayUrl);
                 }
@@ -526,20 +518,10 @@ internal sealed partial class MainWindow
                         switch (i)
                         {
                             case 0:
-                                // YouTube
-                                OpenPlayerSearch(
-                                    1,
-                                    trimmedSearch);
+                                OpenUnifiedVideoSearch(trimmedSearch);
                                 break;
 
                             case 1:
-                                // Dailymotion
-                                OpenPlayerSearch(
-                                    3,
-                                    trimmedSearch);
-                                break;
-
-                            case 2:
                                 // Twitch
                                 OpenPlayerSearch(
                                     2,
@@ -551,6 +533,7 @@ internal sealed partial class MainWindow
                     // Clear the Home search after ANY action.
                     homeSearch = string.Empty;
                     homeSearchPopupOpen = false;
+                    homeSearchInputVersion++;
                 }
             }
 
@@ -563,7 +546,7 @@ internal sealed partial class MainWindow
 
 
 
-        ImGui.Dummy(new Vector2(0f, -6f));
+        ImGui.Dummy(UiVec(0f, -6f));
 
 
         // ---------------------------------------------------------
@@ -574,43 +557,39 @@ internal sealed partial class MainWindow
         var startX = ImGui.GetCursorPosX();
         var headerY = ImGui.GetCursorPosY();
 
-        var showWelcome = contentWidth >= Ui(900f);
         var showWatchers = contentWidth >= Ui(500f);
 
 
         // ---------------------------------------------------------
         // Left: Welcome text
         // ---------------------------------------------------------
-        if (showWelcome)
+        ImGui.SetCursorPos(
+        new Vector2(
+            startX + Ui(5f),
+            headerY + Ui(6f)));
+
+        using (ImRaii.PushFont(UiBuilder.IconFont))
         {
-            ImGui.SetCursorPos(
-            new Vector2(
-                startX + Ui(25f),
-                headerY + Ui(6f)));
-
-            using (ImRaii.PushFont(UiBuilder.IconFont))
-            {
-                ImGui.TextColored(
-                    Accent,
-                    FontAwesomeIcon.Users.ToIconString());
-            }
-
-            ImGui.SameLine(0, 8);
-
-            ImGui.SetWindowFontScale(1.08f);
-
-            ImGui.TextColored(
-                MutedText,
-                "Welcome to ");
-
-            ImGui.SameLine(0, 0);
-
             ImGui.TextColored(
                 Accent,
-                "Alpha Channel");
-
-            ImGui.SetWindowFontScale(1f);
+                FontAwesomeIcon.Users.ToIconString());
         }
+
+        ImGui.SameLine(0, 8);
+
+        SetUiFontScale(1.08f);
+
+        ImGui.TextColored(
+            MutedText,
+            "Welcome to ");
+
+        ImGui.SameLine(0, 0);
+
+        ImGui.TextColored(
+            Accent,
+            "Alpha Channel");
+
+        SetUiFontScale(1f);
 
 
         // ---------------------------------------------------------
@@ -618,18 +597,13 @@ internal sealed partial class MainWindow
         // ---------------------------------------------------------
 
         //
-        // At full width, keep the search bar centered.
-        //
-        // When "Welcome to Alpha Channel" disappears, move the
-        // search bar left into the space that Welcome was using.
+        // Keep the search bar centered as it narrows with the window.
         //
 
         var searchX =
-            showWelcome
-                ? startX +
-                  (contentWidth - searchWidth) *
-                  0.5f
-                : startX + Ui(25f);
+            startX +
+            (contentWidth - searchWidth) *
+            0.5f;
 
 
         ImGui.SetCursorPos(
@@ -655,7 +629,7 @@ internal sealed partial class MainWindow
                     ImGui.GetCursorScreenPos();
 
                 ImGui.InputTextWithHint(
-                    "##homeSearch",
+                    $"##homeSearch_{homeSearchInputVersion}",
                     "Search videos, channels, or paste a link...",
                     ref homeSearch,
                     256);
@@ -677,13 +651,13 @@ internal sealed partial class MainWindow
 
         var iconAreaMin =
             homeSearchInputPos +
-            new Vector2(2f, 2f);
+            UiVec(2f, 2f);
 
         var iconAreaMax =
             homeSearchInputPos +
             new Vector2(
-                35f,
-                searchHeight - 2f);
+                Ui(35f),
+                searchHeight - Ui(2f));
 
         var iconAreaColor =
     ImGui.GetColorU32(FrameBg);
@@ -704,11 +678,11 @@ internal sealed partial class MainWindow
 
         var iconPos =
             homeSearchInputPos +
-            new Vector2(14f, 7f);
+            UiVec(14f, 7f);
 
         using (ImRaii.PushFont(UiBuilder.IconFont))
         {
-            searchDrawList.AddText(
+            searchDrawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 iconPos,
                 ImGui.GetColorU32(Accent),
                 FontAwesomeIcon.Search.ToIconString());
@@ -848,14 +822,14 @@ internal sealed partial class MainWindow
             ImGui.SetCursorPos(
                 new Vector2(
                     textX,
-                    profileY + 17f));
+                    profileY + Ui(17f)));
 
 
             //
             // Friends are deliberately the quieter secondary status.
             //
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 0.84f);
 
 
@@ -876,7 +850,7 @@ internal sealed partial class MainWindow
             ImGui.SetCursorPos(
             new Vector2(
                 textX,
-                profileY + 35f));
+                profileY + Ui(35f)));
 
 
             //
@@ -884,7 +858,7 @@ internal sealed partial class MainWindow
             // profile block, so give it a little more size and live color.
             //
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1.02f);
 
 
@@ -893,12 +867,12 @@ internal sealed partial class MainWindow
                 watchersText);
 
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
         }
 
-        ImGui.SetWindowFontScale(1f);
-        ImGui.Dummy(new Vector2(0f, 2f));
+        SetUiFontScale(1f);
+        ImGui.Dummy(UiVec(0f, 2f));
 
         //
         // Subtitle becomes more compact shortly before the search bar
@@ -957,30 +931,315 @@ internal sealed partial class MainWindow
 
         DrawMediaHubFeatured();
 
+        DrawHomeQuickStart();
+
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 2f));
 
         DrawHomeYouTubeShelf();
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                2f));
+            UiVec(0f, 2f));
 
         DrawWatchPartiesShelf();
 
         if (Plugin.Cfg.ShowFfxivYouTubeSection)
         {
-            ImGui.Dummy(new Vector2(0f, 24f));
+            ImGui.Dummy(UiVec(0f, 2f));
             DrawFfxivYouTubeShelf();
         }
 
-        ImGui.Dummy(new Vector2(0f, 24f));
+        ImGui.Dummy(UiVec(0f, 2f));
 
         DrawRecentlyWatchedShelf();
         ImGui.PopStyleVar();
+    }
+
+    private void DrawHomeQuickStart()
+    {
+        var availableWidth =
+            ImGui.GetContentRegionAvail().X;
+
+        var gap =
+            Ui(10f);
+
+        var showMoreMedia =
+            ImGui.GetWindowSize().X >=
+            MinimumWindowSize.X +
+            150f;
+
+        var cardCount =
+            showMoreMedia
+                ? 5
+                : 4;
+
+        var cardWidth =
+            (availableWidth -
+             gap *
+             (cardCount - 1)) /
+            cardCount;
+
+        var cardHeight =
+            Ui(64f);
+
+        DrawHomeQuickStartCard(
+            "watchVideo",
+            FontAwesomeIcon.Play,
+            Accent,
+            "Watch a Video",
+            "Find something to play",
+            cardWidth,
+            cardHeight,
+            () =>
+            {
+                currentPage =
+                    HomePage.Player;
+
+                activePlayerDrawer =
+                    PlayerDrawer.PlayVideo;
+
+                playerSourceTab =
+                    0;
+
+                showingAddMediaSources =
+                    false;
+            });
+
+        ImGui.SameLine(
+            0f,
+            gap);
+
+        DrawHomeQuickStartCard(
+            "watchParty",
+            FontAwesomeIcon.Users,
+            Hex(0xEC4899),
+            "Start a Watch Party",
+            "Watch with friends",
+            cardWidth,
+            cardHeight,
+            () => currentPage =
+                HomePage.WatchAlong);
+
+        ImGui.SameLine(
+            0f,
+            gap);
+
+        DrawHomeQuickStartCard(
+            "retroGames",
+            FontAwesomeIcon.Gamepad,
+            Hex(0x3B82F6),
+            "Play Retro Games",
+            "Play classic games",
+            cardWidth,
+            cardHeight,
+            () => currentPage =
+                HomePage.PlaySnes);
+
+        ImGui.SameLine(
+            0f,
+            gap);
+
+        DrawHomeQuickStartCard(
+            "browser",
+            FontAwesomeIcon.Globe,
+            Hex(0x14B8A6),
+            "Open Browser",
+            "Browse the web",
+            cardWidth,
+            cardHeight,
+            () => currentPage =
+                HomePage.Browser);
+
+        if (showMoreMedia)
+        {
+            ImGui.SameLine(
+                0f,
+                gap);
+
+            DrawHomeQuickStartCard(
+                "moreMedia",
+                FontAwesomeIcon.PlusSquare,
+                Hex(0xF97316),
+                "More Media",
+                "See every media source",
+                cardWidth,
+                cardHeight,
+                () =>
+                {
+                    currentPage =
+                        HomePage.Player;
+
+                    activePlayerDrawer =
+                        PlayerDrawer.PlayVideo;
+
+                    showingAddMediaSources =
+                        true;
+                });
+        }
+    }
+
+    private void DrawHomeQuickStartCard(
+        string id,
+        FontAwesomeIcon icon,
+        Vector4 iconColor,
+        string title,
+        string description,
+        float width,
+        float height,
+        Action onClick)
+    {
+        var origin =
+            ImGui.GetCursorScreenPos();
+
+        var size =
+            new Vector2(
+                width,
+                height);
+
+        if (ImGui.InvisibleButton(
+                $"##homeQuickStart_{id}",
+                size))
+        {
+            onClick();
+        }
+
+        var hovered =
+            ImGui.IsItemHovered();
+
+        if (hovered)
+        {
+            ImGui.SetMouseCursor(
+                ImGuiMouseCursor.Hand);
+        }
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        drawList.AddRectFilled(
+            origin,
+            origin + size,
+            ImGui.GetColorU32(
+                hovered
+                    ? CardBgHover
+                    : new Vector4(
+                        CardBg.X,
+                        CardBg.Y,
+                        CardBg.Z,
+                        0.45f)),
+            Ui(9f));
+
+        drawList.AddRect(
+            origin,
+            origin + size,
+            ImGui.GetColorU32(
+                hovered
+                    ? new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        0.82f)
+                    : new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        0.48f)),
+            Ui(9f),
+            ImDrawFlags.None,
+            hovered
+                ? Ui(1.5f)
+                : Ui(1f));
+
+        var iconBoxSize =
+            Ui(38f);
+
+        var iconBoxMin =
+            origin +
+            UiVec(12f, 13f);
+
+        drawList.AddRectFilled(
+            iconBoxMin,
+            iconBoxMin +
+            new Vector2(
+                iconBoxSize,
+                iconBoxSize),
+            ImGui.GetColorU32(
+                new Vector4(
+                    iconColor.X,
+                    iconColor.Y,
+                    iconColor.Z,
+                    hovered
+                        ? 1f
+                        : 0.88f)),
+            Ui(8f));
+
+        var iconText =
+            icon.ToIconString();
+
+        Vector2 iconTextSize;
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            iconTextSize =
+                ImGui.CalcTextSize(
+                    iconText);
+        }
+
+        drawList.AddText(
+            UiBuilder.IconFont,
+            ImGui.GetFontSize(),
+            iconBoxMin +
+            new Vector2(
+                (iconBoxSize - iconTextSize.X) * 0.5f,
+                (iconBoxSize - iconTextSize.Y) * 0.5f),
+            ImGui.GetColorU32(
+                Vector4.One),
+            iconText);
+
+        var textX =
+            iconBoxMin.X +
+            iconBoxSize +
+            Ui(10f);
+
+        var textWidth =
+            Math.Max(
+                Ui(20f),
+                origin.X +
+                width -
+                Ui(10f) -
+                textX);
+
+        DrawWrappedLines(
+            drawList,
+            new Vector2(
+                textX,
+                origin.Y +
+                Ui(15f)),
+            textWidth,
+            ImGui.GetTextLineHeight(),
+            2,
+            ImGui.GetColorU32(
+                Vector4.One),
+            title);
+
+        SetUiFontScale(
+            0.78f);
+
+        DrawWrappedLines(
+            drawList,
+            new Vector2(
+                textX,
+                origin.Y +
+                Ui(36f)),
+            textWidth,
+            ImGui.GetTextLineHeight(),
+            1,
+            ImGui.GetColorU32(
+                MutedText),
+            description);
+
+        SetUiFontScale(
+            1f);
     }
 
     private int GetHomeVideoColumnCount(float windowWidth)
@@ -1013,9 +1272,9 @@ internal sealed partial class MainWindow
         var width =
             ImGui.GetContentRegionAvail().X;
 
-        var headingPos = ImGui.GetCursorScreenPos();
-
-        using (ImRaii.PushFont(UiBuilder.IconFont))
+        using (
+            ImRaii.PushFont(
+                UiBuilder.IconFont))
         {
             ImGui.TextColored(
                 new Vector4(
@@ -1026,13 +1285,20 @@ internal sealed partial class MainWindow
                 FontAwesomeIcon.Fire.ToIconString());
         }
 
-        ImGui.SameLine(0f, 8f);
+        ImGui.SameLine(
+            0f,
+            Ui(8f));
 
-        ImGui.Text("Trending on YouTube");
+        ImGui.Text(
+            "Trending on YouTube");
 
-        ImGui.SameLine(0f, 8f);
+        ImGui.SameLine(
+            0f,
+            Ui(8f));
 
-        using (ImRaii.PushFont(UiBuilder.IconFont))
+        using (
+            ImRaii.PushFont(
+                UiBuilder.IconFont))
         {
             ImGui.TextColored(
                 MutedText,
@@ -1042,39 +1308,54 @@ internal sealed partial class MainWindow
         if (ImGui.IsItemHovered())
         {
             ImGui.SetTooltip(
-                "Adjust your trending video topics in settings.");
+                "Adjust your trending video topics in Settings.");
         }
 
-
-
-        // Refresh icon right side
         ImGui.SameLine();
 
         ImGui.SetCursorPosX(
-    ImGui.GetWindowContentRegionMax().X -
-    HomeContentRightInset -
-    22f);
+            ImGui.GetWindowContentRegionMax().X -
+            HomeContentRightInset -
+            Ui(22f));
 
-        using (ImRaii.PushFont(UiBuilder.IconFont))
+        var refreshPosition =
+      ImGui.GetCursorScreenPos();
+
+        var refreshGlyph =
+            FontAwesomeIcon.Sync.ToIconString();
+
+        Vector2 refreshGlyphSize;
+
+        using (
+            ImRaii.PushFont(
+                UiBuilder.IconFont))
         {
-            var refreshHovered =
-                ImGui.IsMouseHoveringRect(
-                    ImGui.GetCursorScreenPos(),
-                    ImGui.GetCursorScreenPos() +
-                    ImGui.CalcTextSize(
-                        FontAwesomeIcon.Sync.ToIconString()));
+            refreshGlyphSize =
+                ImGui.CalcTextSize(
+                    refreshGlyph);
+        }
 
+        var refreshHovered =
+            ImGui.IsMouseHoveringRect(
+                refreshPosition,
+                refreshPosition +
+                refreshGlyphSize);
+
+        using (
+            ImRaii.PushFont(
+                UiBuilder.IconFont))
+        {
             ImGui.TextColored(
                 refreshHovered
                     ? AccentHover
                     : MutedText,
-                FontAwesomeIcon.Sync.ToIconString());
+                refreshGlyph);
         }
 
         if (ImGui.IsItemHovered())
         {
             ImGui.SetTooltip(
-                "Refresh trending videos");
+                "Show different trending videos from your cached topics");
 
             ImGui.SetMouseCursor(
                 ImGuiMouseCursor.Hand);
@@ -1082,49 +1363,52 @@ internal sealed partial class MainWindow
 
         if (ImGui.IsItemClicked())
         {
-            homeYouTubeResults = null;
-            isLoadingHomeYouTube = true;
-
-            _ = LoadHomeYouTubeAsync(true);
+            RefreshHomeYouTubeFromCache();
         }
 
-        // ---------------------------------------------------------
-        // Loading / unavailable state
-        // ---------------------------------------------------------
+        const float compactCardHeightDesign =
+            188f;
 
-        if (homeYouTubeResults is not { Count: > 0 } results)
+        var cardHeight =
+            Ui(
+                compactCardHeightDesign);
+
+        if (homeYouTubeResults is not
+            { Count: > 0 } results)
         {
             if (isLoadingHomeYouTube)
             {
                 DrawMediaHubLoadingCards(
-                    Ui(224f));
+                    cardHeight);
             }
             else
             {
                 DrawMediaHubShelfCards(
-                    Ui(224f));
+                    cardHeight);
             }
 
             return;
         }
 
-        // ---------------------------------------------------------
-        // Real results
-        // ---------------------------------------------------------
-
-        var windowWidth = ImGui.GetWindowSize().X;
+        var windowWidth =
+            ImGui.GetWindowSize().X;
 
         var cardCount =
-      GetHomeVideoColumnCount(windowWidth);
+            GetHomeVideoColumnCount(
+                windowWidth);
 
-        var gap = Ui(12f);
-        var cardHeight = Ui(224f);
+        var gap =
+            Ui(12f);
 
         var visibleCount =
-            Math.Min(cardCount, results.Count);
+            Math.Min(
+                cardCount,
+                results.Count);
 
         var cardWidth =
-            (width - gap * (cardCount - 1)) /
+            (width -
+             gap *
+             (cardCount - 1)) /
             cardCount;
 
         for (var index = 0;
@@ -1133,15 +1417,19 @@ internal sealed partial class MainWindow
         {
             if (index > 0)
             {
-                ImGui.SameLine(0f, gap);
+                ImGui.SameLine(
+                    0f,
+                    gap);
             }
 
-            ImGui.PushID($"homeYoutube_{index}");
+            ImGui.PushID(
+                $"homeYoutube_{index}");
 
-            DrawHomeYouTubeCard(
+            DrawCompactHomeYouTubeCardSurface(
                 results[index],
                 cardWidth,
-                cardHeight);
+                cardHeight,
+                useThumbnailActions: true);
 
             ImGui.PopID();
         }
@@ -1161,7 +1449,7 @@ internal sealed partial class MainWindow
         var drawList =
             ImGui.GetWindowDrawList();
 
-        const float iconGap = 8f;
+        var iconGap = Ui(8f);
 
         Vector2 iconSize;
 
@@ -1173,7 +1461,7 @@ internal sealed partial class MainWindow
             iconSize =
                 ImGui.CalcTextSize(glyph);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
                     origin.X,
                     origin.Y + 1f),
@@ -1187,11 +1475,11 @@ internal sealed partial class MainWindow
             iconSize.X +
             iconGap);
 
-        ImGui.SetWindowFontScale(1.08f);
+        SetUiFontScale(1.08f);
 
         ImGui.TextUnformatted(title);
 
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(1f);
 
         if (showSeeAll)
         {
@@ -1210,7 +1498,7 @@ internal sealed partial class MainWindow
                         FontAwesomeIcon.ChevronRight.ToIconString());
             }
 
-            const float chevronGap = 7f;
+            var chevronGap = Ui(7f);
 
             var right =
                 ImGui.GetWindowPos().X +
@@ -1231,7 +1519,7 @@ internal sealed partial class MainWindow
             var seeAllMax =
                 new Vector2(
                     right,
-                    origin.Y + ImGui.GetTextLineHeight() + 6f);
+                    origin.Y + ImGui.GetTextLineHeight() + Ui(6f));
 
             var seeAllHovered =
                 ImGui.IsMouseHoveringRect(
@@ -1249,21 +1537,21 @@ internal sealed partial class MainWindow
                     ImGuiMouseCursor.Hand);
             }
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
                     seeAllX,
-                    origin.Y + 3f),
+                    origin.Y + Ui(3f)),
                 ImGui.GetColorU32(seeAllColor),
                 seeAll);
 
             using (ImRaii.PushFont(UiBuilder.IconFont))
             {
-                drawList.AddText(
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                     new Vector2(
                         seeAllX +
                         seeAllSize.X +
                         chevronGap,
-                        origin.Y + 2f),
+                        origin.Y + Ui(2f)),
                     ImGui.GetColorU32(seeAllColor),
                     FontAwesomeIcon.ChevronRight.ToIconString());
             }
@@ -1278,9 +1566,7 @@ internal sealed partial class MainWindow
         if (addBottomSpacing)
         {
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    5f));
+                UiVec(0f, 5f));
         }
     }
 
@@ -1357,8 +1643,8 @@ internal sealed partial class MainWindow
     }
 
     private void DrawMediaHubLoadingCard(
-        float width,
-        float height)
+    float width,
+    float height)
     {
         var origin =
             ImGui.GetCursorScreenPos();
@@ -1375,47 +1661,64 @@ internal sealed partial class MainWindow
             "##loadingCard",
             size);
 
-        var thumbnailHeight = Ui(116f);
+        var thumbnailHeight =
+            Ui(116f);
 
-        // Thumbnail skeleton.
         drawList.AddRectFilled(
             origin,
-            origin + new Vector2(
+            origin +
+            size,
+            ImGui.GetColorU32(
+                new Vector4(
+                    CardBg.X,
+                    CardBg.Y,
+                    CardBg.Z,
+                    0.72f)),
+            Ui(10f));
+
+        drawList.AddRect(
+            origin,
+            origin +
+            size,
+            ImGui.GetColorU32(
+                new Vector4(
+                    MutedText.X,
+                    MutedText.Y,
+                    MutedText.Z,
+                    0.20f)),
+            Ui(10f),
+            ImDrawFlags.None,
+            Ui(1f));
+
+        drawList.AddRectFilled(
+            origin,
+            origin +
+            new Vector2(
                 width,
                 thumbnailHeight),
-            ImGui.GetColorU32(CardBg),
-            9f);
-
-        // ---------------------------------------------------------
-        // Animated spinner
-        // ---------------------------------------------------------
+            ImGui.GetColorU32(
+                new Vector4(
+                    MutedText.X,
+                    MutedText.Y,
+                    MutedText.Z,
+                    0.12f)),
+            Ui(9f));
 
         var center =
             origin +
             new Vector2(
-                width * 0.5f,
-                thumbnailHeight * 0.5f);
+                width *
+                0.5f,
+                thumbnailHeight *
+                0.5f);
 
-        const float radius = 14f;
+        var radius =
+            Ui(14f);
 
         var rotation =
-            (float)ImGui.GetTime() * 4.5f;
+            (float)ImGui.GetTime() *
+            4.5f;
 
-
-        // Soft purple glow behind spinner.
-        drawList.AddCircle(
-            center,
-            radius,
-            ImGui.GetColorU32(
-                new Vector4(
-                    Accent.X,
-                    Accent.Y,
-                    Accent.Z,
-                    0.12f)),
-            48,
-            5f);
-
-        // Dim full ring behind the active arc.
         drawList.AddCircle(
             center,
             radius,
@@ -1426,14 +1729,15 @@ internal sealed partial class MainWindow
                     MutedText.Z,
                     0.16f)),
             32,
-            2.5f);
+            Ui(2.5f));
 
-        // Rotating 270-degree accent arc.
         drawList.PathArcTo(
             center,
             radius,
             rotation,
-            rotation + MathF.PI * 1.5f,
+            rotation +
+            MathF.PI *
+            1.5f,
             24);
 
         drawList.PathStroke(
@@ -1444,53 +1748,137 @@ internal sealed partial class MainWindow
                     Accent.Z,
                     0.95f)),
             ImDrawFlags.None,
-            3.2f);
+            Ui(3.2f));
 
-        // Skeleton title lines beneath the thumbnail.
+        var textX =
+            origin.X +
+            Ui(8f);
+
+        var titleY =
+            origin.Y +
+            thumbnailHeight +
+            Ui(9f);
+
         drawList.AddRectFilled(
-            origin + new Vector2(
-                2f,
-                thumbnailHeight + 10f),
-            origin + new Vector2(
-                width * 0.78f,
-                thumbnailHeight + 14f),
+            new Vector2(
+                textX,
+                titleY),
+            new Vector2(
+                origin.X +
+                width *
+                0.78f,
+                titleY +
+                Ui(7f)),
             ImGui.GetColorU32(
                 new Vector4(
                     1f,
                     1f,
                     1f,
                     0.18f)),
-            2f);
+            Ui(3f));
 
         drawList.AddRectFilled(
-            origin + new Vector2(
-                2f,
-                thumbnailHeight + 25f),
-            origin + new Vector2(
-                width * 0.58f,
-                thumbnailHeight + 29f),
+            new Vector2(
+                textX,
+                titleY +
+                Ui(15f)),
+            new Vector2(
+                origin.X +
+                width *
+                0.58f,
+                titleY +
+                Ui(22f)),
             ImGui.GetColorU32(
                 new Vector4(
                     1f,
                     1f,
                     1f,
                     0.10f)),
-            2f);
+            Ui(3f));
 
         drawList.AddRectFilled(
-            origin + new Vector2(
-                2f,
-                thumbnailHeight + 44f),
-            origin + new Vector2(
-                width * 0.40f,
-                thumbnailHeight + 47f),
+            new Vector2(
+                textX,
+                titleY +
+                Ui(35f)),
+            new Vector2(
+                origin.X +
+                width *
+                0.43f,
+                titleY +
+                Ui(42f)),
             ImGui.GetColorU32(
                 new Vector4(
                     MutedText.X,
                     MutedText.Y,
                     MutedText.Z,
                     0.14f)),
-            2f);
+            Ui(3f));
+
+        var footerHeight =
+            Ui(30f);
+
+        var footerPadding =
+            Ui(6f);
+
+        var footerGap =
+            Ui(6f);
+
+        var footerTop =
+            origin.Y +
+            height -
+            footerPadding -
+            footerHeight;
+
+        var availableFooterWidth =
+            width -
+            footerPadding *
+            2f;
+
+        var buttonWidth =
+            (availableFooterWidth -
+             footerGap) *
+            0.5f;
+
+        drawList.AddRectFilled(
+            new Vector2(
+                origin.X +
+                footerPadding,
+                footerTop),
+            new Vector2(
+                origin.X +
+                footerPadding +
+                buttonWidth,
+                footerTop +
+                footerHeight),
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.20f)),
+            Ui(6f));
+
+        drawList.AddRectFilled(
+            new Vector2(
+                origin.X +
+                footerPadding +
+                buttonWidth +
+                footerGap,
+                footerTop),
+            new Vector2(
+                origin.X +
+                width -
+                footerPadding,
+                footerTop +
+                footerHeight),
+            ImGui.GetColorU32(
+                new Vector4(
+                    MutedText.X,
+                    MutedText.Y,
+                    MutedText.Z,
+                    0.10f)),
+            Ui(6f));
     }
 
     private static string? GetYouTubeVideoId(
@@ -1502,10 +1890,116 @@ internal sealed partial class MainWindow
         return videoId?.Value;
     }
 
+    private static readonly Vector4[] BrowseTopicTagPalette =
+[
+    new(0.55f, 0.32f, 0.95f, 1f),
+    new(0.18f, 0.58f, 0.92f, 1f),
+    new(0.10f, 0.68f, 0.56f, 1f),
+    new(0.90f, 0.45f, 0.20f, 1f),
+    new(0.82f, 0.30f, 0.52f, 1f),
+    new(0.68f, 0.52f, 0.12f, 1f),
+    new(0.35f, 0.52f, 0.92f, 1f),
+    new(0.72f, 0.28f, 0.82f, 1f)
+];
+
+    private static Vector4 GetBrowseTopicTagColour(
+        string topic)
+    {
+        unchecked
+        {
+            uint hash =
+                2166136261;
+
+            foreach (var character in topic)
+            {
+                hash ^=
+                    char.ToUpperInvariant(
+                        character);
+
+                hash *=
+                    16777619;
+            }
+
+            return BrowseTopicTagPalette[
+                hash %
+                BrowseTopicTagPalette.Length];
+        }
+    }
+
+    private void DrawCompactHomeYouTubeCardSurface(
+    VideoSearchEntry videoResult,
+    float width,
+    float height,
+    bool useThumbnailActions = false)
+    {
+        var origin =
+            ImGui.GetCursorScreenPos();
+
+        var size =
+            new Vector2(
+                width,
+                height);
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        drawList.AddRectFilled(
+            origin,
+            origin +
+            size,
+            ImGui.GetColorU32(
+                new Vector4(
+                    CardBg.X,
+                    CardBg.Y,
+                    CardBg.Z,
+                    0.72f)),
+            Ui(10f));
+
+        DrawHomeYouTubeCard(
+            videoResult,
+            width,
+            height,
+            compactHomeLayout: true,
+            showBrowseFavouriteAction: true,
+            useThumbnailActions: useThumbnailActions);
+
+        var cardHovered =
+            useThumbnailActions &&
+            ImGui.GetMousePos().X >= origin.X &&
+            ImGui.GetMousePos().X <= origin.X + size.X &&
+            ImGui.GetMousePos().Y >= origin.Y &&
+            ImGui.GetMousePos().Y <= origin.Y + size.Y;
+
+        drawList.AddRect(
+            origin,
+            origin +
+            size,
+            ImGui.GetColorU32(
+                cardHovered
+                    ? new Vector4(
+                        AccentHover.X,
+                        AccentHover.Y,
+                        AccentHover.Z,
+                        0.82f)
+                    : new Vector4(
+                        MutedText.X,
+                        MutedText.Y,
+                        MutedText.Z,
+                        0.20f)),
+            Ui(10f),
+            ImDrawFlags.None,
+            Ui(1f));
+    }
+
     private void DrawHomeYouTubeCard(
-        VideoSearchEntry result,
-        float width,
-        float height)
+     VideoSearchEntry result,
+     float width,
+     float height,
+     bool browseLayout = false,
+     string? browseTopic = null,
+     bool showBrowseFavouriteAction = false,
+     bool compactHomeLayout = false,
+     bool useThumbnailActions = false)
     {
         var origin = ImGui.GetCursorScreenPos();
         var size = new Vector2(width, height);
@@ -1564,7 +2058,7 @@ internal sealed partial class MainWindow
         drawList.AddRectFilled(
             origin + new Vector2(
                 0f,
-                thumbnailHeight - 22f),
+                thumbnailHeight - Ui(22f)),
             origin + new Vector2(
                 width,
                 thumbnailHeight),
@@ -1591,15 +2085,13 @@ internal sealed partial class MainWindow
 
             var badgeMin =
                 origin +
-                new Vector2(
-                    7f,
-                    6f);
+                UiVec(7f, 6f);
 
             var badgeMax =
                 badgeMin +
                 new Vector2(
-                    badgeSize.X + 10f,
-                    badgeSize.Y + 5f);
+                    badgeSize.X + Ui(10f),
+                    badgeSize.Y + Ui(5f));
 
             drawList.AddRectFilled(
                 badgeMin,
@@ -1612,11 +2104,9 @@ internal sealed partial class MainWindow
                         0.95f)),
                 5f);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 badgeMin +
-                new Vector2(
-                    5f,
-                    2f),
+                UiVec(5f, 2f),
                 ImGui.GetColorU32(
                     Vector4.One),
                 badgeText);
@@ -1636,15 +2126,13 @@ internal sealed partial class MainWindow
 
             var badgeMin =
                 origin +
-                new Vector2(
-                    7f,
-                    6f);
+                UiVec(7f, 6f);
 
             var badgeMax =
                 badgeMin +
                 new Vector2(
-                    dateSize.X + 10f,
-                    dateSize.Y + 5f);
+                    dateSize.X + Ui(10f),
+                    dateSize.Y + Ui(5f));
 
             drawList.AddRectFilled(
                 badgeMin,
@@ -1657,11 +2145,9 @@ internal sealed partial class MainWindow
                         0.75f)),
                 5f);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 badgeMin +
-                new Vector2(
-                    5f,
-                    2f),
+                UiVec(5f, 2f),
                 ImGui.GetColorU32(Vector4.One),
                 dateText);
         }
@@ -1684,19 +2170,19 @@ internal sealed partial class MainWindow
                     origin.X +
                     width -
                     durationSize.X -
-                    10f,
+                    Ui(10f),
                     origin.Y +
                     thumbnailHeight -
-                    20f);
+                    Ui(20f));
 
             var badgeMax =
                 new Vector2(
                     origin.X +
                     width -
-                    4f,
+                    Ui(4f),
                     origin.Y +
                     thumbnailHeight -
-                    4f);
+                    Ui(4f));
 
             drawList.AddRectFilled(
                 badgeMin,
@@ -1709,13 +2195,180 @@ internal sealed partial class MainWindow
                         0.82f)),
                 4f);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
-                    badgeMin.X + 3f,
+                    badgeMin.X + Ui(3f),
                     badgeMin.Y +
                     ((badgeMax.Y - badgeMin.Y) - durationSize.Y) * 0.5f),
                 ImGui.GetColorU32(Vector4.One),
                 durationText);
+        }
+
+        // ---------------------------------------------------------
+        // Browse topic badge
+        // ---------------------------------------------------------
+
+        var hasBrowseTopic =
+            browseLayout &&
+            !string.IsNullOrWhiteSpace(
+                browseTopic);
+
+        if (hasBrowseTopic)
+        {
+            var topicText =
+                browseTopic!.Trim();
+
+            var maximumTopicWidth =
+                MathF.Max(
+                    width *
+                    0.56f,
+                    Ui(55f));
+
+            while (topicText.Length > 1 &&
+                   ImGui.CalcTextSize(
+                       topicText).X +
+                   Ui(14f) >
+                   maximumTopicWidth)
+            {
+                topicText =
+                    topicText[..^1];
+            }
+
+            if (!string.Equals(
+                    topicText,
+                    browseTopic,
+                    StringComparison.Ordinal))
+            {
+                topicText =
+                    topicText.TrimEnd() +
+                    "…";
+            }
+
+            var topicTextSize =
+                ImGui.CalcTextSize(
+                    topicText);
+
+            var topicColour =
+                GetBrowseTopicTagColour(
+                    browseTopic!);
+
+            var topicMin =
+                new Vector2(
+                    origin.X +
+                    Ui(5f),
+                    origin.Y +
+                    thumbnailHeight -
+                    Ui(24f));
+
+            var topicMax =
+                topicMin +
+                new Vector2(
+                    topicTextSize.X +
+                    Ui(14f),
+                    Ui(19f));
+
+            drawList.AddRectFilled(
+                topicMin,
+                topicMax,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        topicColour.X,
+                        topicColour.Y,
+                        topicColour.Z,
+                        0.94f)),
+                Ui(5f));
+
+            drawList.AddRect(
+                topicMin,
+                topicMax,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        1f,
+                        1f,
+                        1f,
+                        0.24f)),
+                Ui(5f),
+                ImDrawFlags.None,
+                Ui(1f));
+
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                new Vector2(
+                    topicMin.X +
+                    Ui(7f),
+                    topicMin.Y +
+                    (Ui(19f) -
+                     topicTextSize.Y) *
+                    0.5f),
+                ImGui.GetColorU32(
+                    Vector4.One),
+                topicText);
+        }
+
+        // ---------------------------------------------------------
+        // Compact Home view-count badge
+        // ---------------------------------------------------------
+
+        if (compactHomeLayout &&
+            result.ViewCount is { } compactViews)
+        {
+            var viewsText =
+                FormatViewCount(
+                    compactViews);
+
+            var viewsTextSize =
+                ImGui.CalcTextSize(
+                    viewsText);
+
+            var viewsMin =
+                new Vector2(
+                    origin.X +
+                    Ui(5f),
+                    origin.Y +
+                    thumbnailHeight -
+                    Ui(24f));
+
+            var viewsMax =
+                viewsMin +
+                new Vector2(
+                    viewsTextSize.X +
+                    Ui(14f),
+                    Ui(19f));
+
+            drawList.AddRectFilled(
+                viewsMin,
+                viewsMax,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        0.82f)),
+                Ui(5f));
+
+            drawList.AddRect(
+                viewsMin,
+                viewsMax,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        AccentHover.X,
+                        AccentHover.Y,
+                        AccentHover.Z,
+                        0.82f)),
+                Ui(5f),
+                ImDrawFlags.None,
+                Ui(1f));
+
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                new Vector2(
+                    viewsMin.X +
+                    Ui(7f),
+                    viewsMin.Y +
+                    (Ui(19f) -
+                     viewsTextSize.Y) *
+                    0.5f),
+                ImGui.GetColorU32(
+                    Vector4.One),
+                viewsText);
         }
 
         // ---------------------------------------------------------
@@ -1735,8 +2388,7 @@ internal sealed partial class MainWindow
                         0f,
                         1f);
 
-                const float progressHeight =
-                    3f;
+                var progressHeight = Ui(3f);
 
                 var progressY =
                     origin.Y +
@@ -1782,7 +2434,11 @@ internal sealed partial class MainWindow
         var lineHeight = ImGui.GetTextLineHeight();
 
         var titleY =
-     origin.Y + thumbnailHeight + 10f;
+            origin.Y +
+            thumbnailHeight +
+            (compactHomeLayout
+                ? Ui(7f)
+                : Ui(10f));
 
 
         DrawWrappedLines(
@@ -1797,14 +2453,22 @@ internal sealed partial class MainWindow
             result.Title);
 
         var channel =
-    TruncateHomeMediaText(
-        result.ChannelName,
-        17);
+         TruncateHomeMediaText(
+             result.ChannelName,
+             17);
+
+        var metadataY =
+            titleY +
+            lineHeight *
+            2f +
+            (compactHomeLayout
+                ? Ui(4f)
+                : Ui(5f));
+
+
 
         var channelY =
-     titleY +
-     (lineHeight * 2f) +
-     5f;
+    metadataY;
 
         var userIcon =
             FontAwesomeIcon.User.ToIconString();
@@ -1816,7 +2480,7 @@ internal sealed partial class MainWindow
             iconWidth =
                 ImGui.CalcTextSize(userIcon).X;
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
                     textX,
                     channelY),
@@ -1846,8 +2510,8 @@ internal sealed partial class MainWindow
 
         var subscribeMin =
             new Vector2(
-                origin.X + width - subscribeButtonSize - 2f,
-                channelY - 2f);
+                origin.X + width - subscribeButtonSize - Ui(2f),
+                channelY - Ui(2f));
 
         var subscribeMax =
             subscribeMin +
@@ -1892,9 +2556,9 @@ internal sealed partial class MainWindow
                 displayChannel.TrimEnd() + "…";
         }
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
-                textX + iconWidth + 5f,
+                textX + iconWidth + Ui(5f),
                 channelY),
             ImGui.GetColorU32(
                 new Vector4(
@@ -1906,7 +2570,7 @@ internal sealed partial class MainWindow
 
         var channelTextMin =
     new Vector2(
-        textX + iconWidth + 5f,
+        textX + iconWidth + Ui(5f),
         channelY);
 
         var channelTextSize =
@@ -1990,7 +2654,7 @@ internal sealed partial class MainWindow
                 ImGui.CalcTextSize(
                     subscribeGlyph);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 subscribeMin +
                 new Vector2(
                     (subscribeButtonSize - subscribeGlyphSize.X) * 0.5f,
@@ -2052,14 +2716,15 @@ internal sealed partial class MainWindow
             }
         }
 
-        if (result.ViewCount is { } views)
+        if (!compactHomeLayout &&
+            result.ViewCount is { } views)
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
                     textX,
                     channelY +
                     lineHeight +
-                    3f),
+                    Ui(3f)),
                 ImGui.GetColorU32(
                     new Vector4(
                         MutedText.X,
@@ -2084,9 +2749,269 @@ internal sealed partial class MainWindow
                 favouriteVideoId,
                 StringComparer.OrdinalIgnoreCase);
 
-        if (hovered)
+        if (useThumbnailActions)
         {
-            // Darken the thumbnail so the controls stand out.
+            var thumbnailMaximum =
+                origin +
+                new Vector2(
+                    width,
+                    thumbnailHeight);
+
+            var thumbnailCenter =
+                origin +
+                new Vector2(
+                    width * 0.5f,
+                    thumbnailHeight * 0.5f);
+
+            var mouse =
+                ImGui.GetMousePos();
+
+            if (hovered)
+            {
+                drawList.AddRectFilled(
+                    origin,
+                    thumbnailMaximum,
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            0f,
+                            0f,
+                            0f,
+                            0.46f)),
+                    Ui(9f));
+
+                drawList.AddRect(
+                    origin,
+                    thumbnailMaximum,
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            AccentHover.X,
+                            AccentHover.Y,
+                            AccentHover.Z,
+                            0.76f)),
+                    Ui(9f),
+                    ImDrawFlags.None,
+                    Ui(1f));
+
+                var playRadius = Ui(24f);
+                var queueRadius = Ui(20f);
+                var controlGap = Ui(10f);
+                var controlsWidth =
+                    playRadius * 2f +
+                    controlGap +
+                    queueRadius * 2f;
+
+                var playCenter =
+                    new Vector2(
+                        thumbnailCenter.X -
+                        controlsWidth * 0.5f +
+                        playRadius,
+                        thumbnailCenter.Y);
+
+                var queueCenter =
+                    new Vector2(
+                        playCenter.X +
+                        playRadius +
+                        controlGap +
+                        queueRadius,
+                        thumbnailCenter.Y);
+
+                var playHovered =
+                    Vector2.DistanceSquared(
+                        mouse,
+                        playCenter) <=
+                    playRadius * playRadius;
+
+                var queueHovered =
+                    Vector2.DistanceSquared(
+                        mouse,
+                        queueCenter) <=
+                    queueRadius * queueRadius;
+
+                drawList.AddCircleFilled(
+                    playCenter,
+                    playRadius,
+                    ImGui.GetColorU32(
+                        playHovered
+                            ? AccentHover
+                            : Accent),
+                    32);
+
+                drawList.AddCircle(
+                    playCenter,
+                    playRadius,
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            1f,
+                            1f,
+                            1f,
+                            0.30f)),
+                    32,
+                    Ui(1f));
+
+                drawList.AddCircleFilled(
+                    queueCenter,
+                    queueRadius,
+                    ImGui.GetColorU32(
+                        queueHovered
+                            ? CardBgHover
+                            : new Vector4(
+                                0.05f,
+                                0.06f,
+                                0.10f,
+                                0.92f)),
+                    32);
+
+                drawList.AddCircle(
+                    queueCenter,
+                    queueRadius,
+                    ImGui.GetColorU32(
+                        queueHovered
+                            ? AccentHover
+                            : new Vector4(
+                                1f,
+                                1f,
+                                1f,
+                                0.30f)),
+                    32,
+                    Ui(1f));
+
+                var playGlyph =
+                    FontAwesomeIcon.Play.ToIconString();
+
+                var queueGlyph =
+                    FontAwesomeIcon.ListUl.ToIconString();
+
+                using (ImRaii.PushFont(UiBuilder.IconFont))
+                {
+                    var playGlyphSize =
+                        ImGui.CalcTextSize(
+                            playGlyph);
+
+                    var queueGlyphSize =
+                        ImGui.CalcTextSize(
+                            queueGlyph);
+
+                    drawList.AddText(
+                        ImGui.GetFont(),
+                        ImGui.GetFontSize(),
+                        playCenter -
+                        playGlyphSize * 0.5f,
+                        ImGui.GetColorU32(Vector4.One),
+                        playGlyph);
+
+                    drawList.AddText(
+                        ImGui.GetFont(),
+                        ImGui.GetFontSize(),
+                        queueCenter -
+                        queueGlyphSize * 0.5f,
+                        ImGui.GetColorU32(Vector4.One),
+                        queueGlyph);
+                }
+
+                if (playHovered ||
+                    queueHovered)
+                {
+                    ImGui.SetMouseCursor(
+                        ImGuiMouseCursor.Hand);
+
+                    ImGui.SetTooltip(
+                        playHovered
+                            ? "Play now"
+                            : "Add to queue");
+                }
+
+                if (ImGui.IsMouseClicked(
+                        ImGuiMouseButton.Left))
+                {
+                    if (playHovered)
+                    {
+                        actionClicked = true;
+
+                        HandlePlayNow(
+                            new VideoQueueEntry(
+                                result.Url,
+                                result.Title,
+                                result.ChannelName,
+                                result.Duration,
+                                result.ThumbnailUrl));
+                    }
+                    else if (queueHovered)
+                    {
+                        actionClicked = true;
+
+                        HandleAddToQueue(
+                            new VideoQueueEntry(
+                                result.Url,
+                                result.Title,
+                                result.ChannelName,
+                                result.Duration,
+                                result.ThumbnailUrl));
+
+                        if (!ShouldUseViewerMediaActions)
+                        {
+                            queueAddedFeedbackUntil =
+                                ImGui.GetTime() +
+                                2.0;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                var playRadius = Ui(18f);
+
+                drawList.AddCircleFilled(
+                    thumbnailCenter,
+                    playRadius,
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            0.03f,
+                            0.04f,
+                            0.07f,
+                            0.66f)),
+                    28);
+
+                drawList.AddCircle(
+                    thumbnailCenter,
+                    playRadius,
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            1f,
+                            1f,
+                            1f,
+                            0.32f)),
+                    28,
+                    Ui(1f));
+
+                var playGlyph =
+                    FontAwesomeIcon.Play.ToIconString();
+
+                using (ImRaii.PushFont(UiBuilder.IconFont))
+                {
+                    var playGlyphSize =
+                        ImGui.CalcTextSize(
+                            playGlyph);
+
+                    drawList.AddText(
+                        ImGui.GetFont(),
+                        ImGui.GetFontSize(),
+                        thumbnailCenter -
+                        playGlyphSize * 0.5f,
+                        ImGui.GetColorU32(
+                            new Vector4(
+                                1f,
+                                1f,
+                                1f,
+                                0.92f)),
+                        playGlyph);
+                }
+            }
+        }
+
+        if (hovered &&
+            !browseLayout &&
+            !compactHomeLayout)
+        {
             drawList.AddRectFilled(
                 origin,
                 origin +
@@ -2125,8 +3050,8 @@ internal sealed partial class MainWindow
 
             var favouriteMin =
                 new Vector2(
-                    origin.X + width - favouriteButtonSize - 7f,
-                    origin.Y + 7f);
+                    origin.X + width - favouriteButtonSize - Ui(7f),
+                    origin.Y + Ui(7f));
 
             var favouriteMax =
                 favouriteMin +
@@ -2197,7 +3122,7 @@ internal sealed partial class MainWindow
                 favouriteGlyphSize =
                     ImGui.CalcTextSize(favouriteGlyph);
 
-                drawList.AddText(
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                     favouriteMin +
                     new Vector2(
                         (favouriteButtonSize - favouriteGlyphSize.X) * 0.5f,
@@ -2243,7 +3168,7 @@ internal sealed partial class MainWindow
 
             var playMin =
                 new Vector2(
-                    origin.X + 8f,
+                    origin.X + Ui(8f),
                     buttonY);
 
             var playMax =
@@ -2313,7 +3238,7 @@ internal sealed partial class MainWindow
 
             using (ImRaii.PushFont(UiBuilder.IconFont))
             {
-                drawList.AddText(
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                     new Vector2(
                         playStartX,
                         playMin.Y +
@@ -2322,11 +3247,11 @@ internal sealed partial class MainWindow
                     FontAwesomeIcon.Play.ToIconString());
             }
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
                     playStartX +
                     playGlyphSize.X +
-                    6f,
+                    Ui(6f),
                     playMin.Y +
                     (buttonHeight - playLabelSize.Y) * 0.5f),
                 ImGui.GetColorU32(Vector4.One),
@@ -2383,7 +3308,7 @@ internal sealed partial class MainWindow
 
             using (ImRaii.PushFont(UiBuilder.IconFont))
             {
-                drawList.AddText(
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                     new Vector2(
                         queueStartX,
                         queueMin.Y +
@@ -2392,11 +3317,11 @@ internal sealed partial class MainWindow
                     FontAwesomeIcon.Plus.ToIconString());
             }
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
                     queueStartX +
                     queueGlyphSize.X +
-                    6f,
+                    Ui(6f),
                     queueMin.Y +
                     (buttonHeight - queueLabelSize.Y) * 0.5f),
                 ImGui.GetColorU32(Vector4.One),
@@ -2415,28 +3340,35 @@ internal sealed partial class MainWindow
 
                     if (favouriteVideoId is not null)
                     {
+                        var isNowFavourite =
+         !isFavourite;
+
                         if (isFavourite)
                         {
                             Plugin.Cfg.FavouriteYouTubeVideoIds.RemoveAll(
-                                id => string.Equals(
-                                    id,
-                                    favouriteVideoId,
-                                    StringComparison.OrdinalIgnoreCase));
+                                id =>
+                                    string.Equals(
+                                        id,
+                                        favouriteVideoId,
+                                        StringComparison.OrdinalIgnoreCase));
                         }
                         else
                         {
                             Plugin.Cfg.FavouriteYouTubeVideoIds.RemoveAll(
-                                id => string.Equals(
-                                    id,
-                                    favouriteVideoId,
-                                    StringComparison.OrdinalIgnoreCase));
+                                id =>
+                                    string.Equals(
+                                        id,
+                                        favouriteVideoId,
+                                        StringComparison.OrdinalIgnoreCase));
 
                             Plugin.Cfg.FavouriteYouTubeVideoIds.Insert(
                                 0,
                                 favouriteVideoId);
                         }
 
-                        Plugin.Cfg.Save();
+                        UpdateFavouriteVideoCacheAfterToggle(
+                            result,
+                            isNowFavourite);
                     }
                 }
 
@@ -2476,6 +3408,284 @@ internal sealed partial class MainWindow
             }
         }
 
+        if ((browseLayout ||
+             compactHomeLayout) &&
+            !useThumbnailActions)
+        {
+            var footerHeight =
+                compactHomeLayout
+                    ? Ui(30f)
+                    : Ui(34f);
+
+            var footerGap =
+                compactHomeLayout
+                    ? Ui(6f)
+                    : Ui(7f);
+
+            var footerPadding =
+                compactHomeLayout
+                    ? Ui(6f)
+                    : Ui(8f);
+
+            var footerTop =
+                origin.Y +
+                height -
+                footerPadding -
+                footerHeight;
+
+            var availableFooterWidth =
+                width -
+                footerPadding *
+                2f;
+
+            var playButtonWidth =
+                (availableFooterWidth -
+                 footerGap) *
+                0.5f;
+
+            var queueButtonWidth =
+                availableFooterWidth -
+                footerGap -
+                playButtonWidth;
+
+            var playMin =
+                new Vector2(
+                    origin.X +
+                    footerPadding,
+                    footerTop);
+
+            var playMax =
+                playMin +
+                new Vector2(
+                    playButtonWidth,
+                    footerHeight);
+
+            var queueMin =
+                new Vector2(
+                    playMax.X +
+                    footerGap,
+                    footerTop);
+
+            var queueMax =
+                queueMin +
+                new Vector2(
+                    queueButtonWidth,
+                    footerHeight);
+
+            var mouse =
+                ImGui.GetMousePos();
+
+            var browsePlayHovered =
+                mouse.X >=
+                playMin.X &&
+                mouse.X <=
+                playMax.X &&
+                mouse.Y >=
+                playMin.Y &&
+                mouse.Y <=
+                playMax.Y;
+
+            var browseQueueHovered =
+                mouse.X >=
+                queueMin.X &&
+                mouse.X <=
+                queueMax.X &&
+                mouse.Y >=
+                queueMin.Y &&
+                mouse.Y <=
+                queueMax.Y;
+
+            DrawBrowseCardActionButton(
+                drawList,
+                playMin,
+                playMax,
+                FontAwesomeIcon.Play,
+                "Play",
+                browsePlayHovered,
+                true);
+
+            DrawBrowseCardActionButton(
+                drawList,
+                queueMin,
+                queueMax,
+                FontAwesomeIcon.Plus,
+                "Queue",
+                browseQueueHovered,
+                false);
+
+            if (browsePlayHovered ||
+                browseQueueHovered)
+            {
+                ImGui.SetMouseCursor(
+                    ImGuiMouseCursor.Hand);
+            }
+
+            if (ImGui.IsMouseClicked(
+                    ImGuiMouseButton.Left))
+            {
+                if (browsePlayHovered)
+                {
+                    actionClicked =
+                        true;
+
+                    HandlePlayNow(
+                        new VideoQueueEntry(
+                            result.Url,
+                            result.Title,
+                            result.ChannelName,
+                            result.Duration,
+                            result.ThumbnailUrl));
+                }
+                else if (browseQueueHovered)
+                {
+                    actionClicked =
+                        true;
+
+                    HandleAddToQueue(
+                        new VideoQueueEntry(
+                            result.Url,
+                            result.Title,
+                            result.ChannelName,
+                            result.Duration,
+                            result.ThumbnailUrl));
+
+                    if (!ShouldUseViewerMediaActions)
+                    {
+                        queueAddedFeedbackUntil =
+                            ImGui.GetTime() +
+                            2.0;
+                    }
+                }
+            }
+        }
+
+        if ((browseLayout ||
+      compactHomeLayout) &&
+     showBrowseFavouriteAction &&
+     favouriteVideoId is not null)
+        {
+            var favouriteButtonSize =
+                Ui(28f);
+
+            var favouriteMin =
+                new Vector2(
+                    origin.X +
+                    width -
+                    favouriteButtonSize -
+                    Ui(7f),
+                    origin.Y +
+                    Ui(7f));
+
+            var favouriteMax =
+                favouriteMin +
+                new Vector2(
+                    favouriteButtonSize,
+                    favouriteButtonSize);
+
+            var mouse =
+                ImGui.GetMousePos();
+
+            var browseFavouriteHovered =
+                mouse.X >=
+                favouriteMin.X &&
+                mouse.X <=
+                favouriteMax.X &&
+                mouse.Y >=
+                favouriteMin.Y &&
+                mouse.Y <=
+                favouriteMax.Y;
+
+            drawList.AddCircleFilled(
+                favouriteMin +
+                new Vector2(
+                    favouriteButtonSize *
+                    0.5f,
+                    favouriteButtonSize *
+                    0.5f),
+                favouriteButtonSize *
+                0.5f,
+                ImGui.GetColorU32(
+                    browseFavouriteHovered
+                        ? new Vector4(
+                            0.12f,
+                            0.14f,
+                            0.20f,
+                            0.98f)
+                        : new Vector4(
+                            0.04f,
+                            0.05f,
+                            0.08f,
+                            0.88f)));
+
+            var heartGlyph =
+                FontAwesomeIcon.Heart.ToIconString();
+
+            Vector2 heartSize;
+
+            using (
+                ImRaii.PushFont(
+                    UiBuilder.IconFont))
+            {
+                heartSize =
+                    ImGui.CalcTextSize(
+                        heartGlyph);
+
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                    favouriteMin +
+                    new Vector2(
+                        (favouriteButtonSize -
+                         heartSize.X) *
+                        0.5f,
+                        (favouriteButtonSize -
+                         heartSize.Y) *
+                        0.5f),
+                    ImGui.GetColorU32(
+                        isFavourite
+                            ? AccentHover
+                            : Vector4.One),
+                    heartGlyph);
+            }
+
+            if (browseFavouriteHovered)
+            {
+                ImGui.SetMouseCursor(
+                    ImGuiMouseCursor.Hand);
+
+                ImGui.SetTooltip(
+                    isFavourite
+                        ? "Remove from favourites"
+                        : "Add to favourites");
+
+                if (ImGui.IsMouseClicked(
+                        ImGuiMouseButton.Left))
+                {
+                    actionClicked =
+                        true;
+
+                    var isNowFavourite =
+                        !isFavourite;
+
+                    Plugin.Cfg.FavouriteYouTubeVideoIds.RemoveAll(
+                        id =>
+                            string.Equals(
+                                id,
+                                favouriteVideoId,
+                                StringComparison.OrdinalIgnoreCase));
+
+                    if (isNowFavourite)
+                    {
+                        Plugin.Cfg.FavouriteYouTubeVideoIds.Insert(
+                            0,
+                            favouriteVideoId);
+                    }
+
+                    UpdateFavouriteVideoCacheAfterToggle(
+                        result,
+                        isNowFavourite);
+                }
+            }
+        }
+
         // ---------------------------------------------------------
         // Clicking elsewhere on the card = Play
         // ---------------------------------------------------------
@@ -2496,7 +3706,8 @@ internal sealed partial class MainWindow
                 thumbnailHeight -
                 36f;
 
-            if (mouse.Y < actionAreaTop ||
+            if (useThumbnailActions ||
+                mouse.Y < actionAreaTop ||
                 mouse.Y > origin.Y + thumbnailHeight)
             {
                 HandlePlayNow(
@@ -2508,6 +3719,130 @@ internal sealed partial class MainWindow
                         result.ThumbnailUrl));
             }
         }
+    }
+
+
+    private void DrawBrowseCardActionButton(
+    ImDrawListPtr drawList,
+    Vector2 minimum,
+    Vector2 maximum,
+    FontAwesomeIcon icon,
+    string label,
+    bool hovered,
+    bool primary)
+    {
+        var background =
+            primary
+                ? hovered
+                    ? AccentHover
+                    : Accent
+                : hovered
+                    ? CardBgHover
+                    : new Vector4(
+                        0.055f,
+                        0.07f,
+                        0.115f,
+                        1f);
+
+        drawList.AddRectFilled(
+            minimum,
+            maximum,
+            ImGui.GetColorU32(
+                background),
+            Ui(7f));
+
+        if (!primary)
+        {
+            drawList.AddRect(
+                minimum,
+                maximum,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        MutedText.X,
+                        MutedText.Y,
+                        MutedText.Z,
+                        hovered
+                            ? 0.46f
+                            : 0.26f)),
+                Ui(7f),
+                ImDrawFlags.None,
+                Ui(1f));
+        }
+
+        var iconText =
+            icon.ToIconString();
+
+        Vector2 iconSize;
+
+        using (
+            ImRaii.PushFont(
+                UiBuilder.IconFont))
+        {
+            iconSize =
+                ImGui.CalcTextSize(
+                    iconText);
+        }
+
+        var labelSize =
+            ImGui.CalcTextSize(
+                label);
+
+        var contentGap =
+            Ui(7f);
+
+        var contentWidth =
+            iconSize.X +
+            contentGap +
+            labelSize.X;
+
+        var buttonWidth =
+            maximum.X -
+            minimum.X;
+
+        var buttonHeight =
+            maximum.Y -
+            minimum.Y;
+
+        var contentX =
+            minimum.X +
+            (buttonWidth -
+             contentWidth) *
+            0.5f;
+
+        using (
+            ImRaii.PushFont(
+                UiBuilder.IconFont))
+        {
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                new Vector2(
+                    contentX,
+                    minimum.Y +
+                    (buttonHeight -
+                     iconSize.Y) *
+                    0.5f),
+                ImGui.GetColorU32(
+                    Vector4.One),
+                iconText);
+        }
+
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            new Vector2(
+                contentX +
+                iconSize.X +
+                contentGap,
+                minimum.Y +
+                (buttonHeight -
+                 labelSize.Y) *
+                0.5f),
+            ImGui.GetColorU32(
+                primary
+                    ? Vector4.One
+                    : new Vector4(
+                        0.88f,
+                        0.90f,
+                        0.96f,
+                        1f)),
+            label);
     }
 
 
@@ -2756,7 +4091,7 @@ internal sealed partial class MainWindow
             20f;
 
         var dotGap = Ui(15f);
-        const float dotRadius = 3.5f;
+        var dotRadius = Ui(3.5f);
         var activePillWidth = Ui(13f);
 
         var totalIndicatorWidth =
@@ -2794,11 +4129,11 @@ internal sealed partial class MainWindow
             // don't feel fiddly to click.
             var hitMin =
                 dotCenter -
-                new Vector2(7f, 7f);
+                UiVec(7f, 7f);
 
             var hitMax =
                 dotCenter +
-                new Vector2(7f, 7f);
+                UiVec(7f, 7f);
 
             var dotHovered =
                 !featuredTransitioning &&
@@ -2831,10 +4166,10 @@ internal sealed partial class MainWindow
                 drawList.AddRectFilled(
                     new Vector2(
                         x - activePillWidth * 0.5f,
-                        dotY - 2.5f),
+                        dotY - Ui(2.5f)),
                     new Vector2(
                         x + activePillWidth * 0.5f,
-                        dotY + 2.5f),
+                        dotY + Ui(2.5f)),
                     ImGui.GetColorU32(
                         AccentHover),
                     3f);
@@ -3009,10 +4344,10 @@ internal sealed partial class MainWindow
                         0f,
                         1f)));
         }
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
     new Vector2(
         textX,
-        origin.Y + 35f),
+        origin.Y + Ui(35f)),
     WithAlpha(
         AccentHover,
         contentAlpha),
@@ -3021,10 +4356,10 @@ internal sealed partial class MainWindow
         // Eyebrow
         // ---------------------------------------------------------
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 textX,
-               origin.Y + 55f),
+               origin.Y + Ui(55f)),
             WithAlpha(
                 AccentHover,
                 contentAlpha),
@@ -3037,12 +4372,12 @@ internal sealed partial class MainWindow
         var savedCursor =
             ImGui.GetCursorScreenPos();
 
-        ImGui.SetWindowFontScale(1.55f);
+        SetUiFontScale(1.55f);
 
         ImGui.SetCursorScreenPos(
             new Vector2(
                 textX,
-               origin.Y + 95f));
+               origin.Y + Ui(95f)));
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.Alpha,
@@ -3057,7 +4392,7 @@ internal sealed partial class MainWindow
             ImGui.PopTextWrapPos();
         }
 
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(1f);
 
         // ---------------------------------------------------------
         // Channel / category
@@ -3066,7 +4401,7 @@ internal sealed partial class MainWindow
         ImGui.SetCursorScreenPos(
             new Vector2(
                 textX,
-                origin.Y + 165f));
+                origin.Y + Ui(165f)));
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.Alpha,
@@ -3107,20 +4442,16 @@ internal sealed partial class MainWindow
 
         var watchMax =
             watchMin +
-            new Vector2(
-                118f,
-                36f);
+            UiVec(118f, 36f);
 
         var togetherMin =
             new Vector2(
-                watchMax.X + 8f,
+                watchMax.X + Ui(8f),
                 buttonY);
 
         var togetherMax =
             togetherMin +
-            new Vector2(
-                142f,
-                36f);
+            UiVec(142f, 36f);
 
         var mouse =
             ImGui.GetMousePos();
@@ -3170,11 +4501,9 @@ internal sealed partial class MainWindow
         using (ImRaii.PushFont(
             UiBuilder.IconFont))
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 watchMin +
-                new Vector2(
-                    15f,
-                    10f),
+                UiVec(15f, 10f),
                 WithAlpha(
                     Vector4.One,
                     contentAlpha),
@@ -3182,11 +4511,9 @@ internal sealed partial class MainWindow
                     .ToIconString());
         }
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             watchMin +
-            new Vector2(
-                38f,
-                9f),
+            UiVec(38f, 9f),
             WithAlpha(
                 Vector4.One,
                 contentAlpha),
@@ -3199,11 +4526,9 @@ internal sealed partial class MainWindow
         using (ImRaii.PushFont(
             UiBuilder.IconFont))
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 togetherMin +
-                new Vector2(
-                    14f,
-                    10f),
+                UiVec(14f, 10f),
                 WithAlpha(
                     Vector4.One,
                     contentAlpha),
@@ -3211,11 +4536,9 @@ internal sealed partial class MainWindow
                     .ToIconString());
         }
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             togetherMin +
-            new Vector2(
-                38f,
-                9f),
+            UiVec(38f, 9f),
             WithAlpha(
                 Vector4.One,
                 contentAlpha),
@@ -3277,9 +4600,9 @@ internal sealed partial class MainWindow
         // Heading
         // ---------------------------------------------------------
 
-        ImGui.SetWindowFontScale(1.08f);
+        SetUiFontScale(1.08f);
         ImGui.TextUnformatted(title);
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(1f);
 
         var seeAll = "See all  >";
         var seeAllWidth = ImGui.CalcTextSize(seeAll).X;
@@ -3366,10 +4689,10 @@ internal sealed partial class MainWindow
 
         // Placeholder title / metadata lines.
         drawList.AddRectFilled(
-            origin + new Vector2(10f, thumbnailHeight + 9f),
+            origin + new Vector2(Ui(10f), thumbnailHeight + Ui(9f)),
             origin + new Vector2(
                 width * 0.72f,
-                thumbnailHeight + 13f),
+                thumbnailHeight + Ui(13f)),
             ImGui.GetColorU32(
                 new Vector4(1f, 1f, 1f, 0.34f)),
             2f);
@@ -3377,10 +4700,10 @@ internal sealed partial class MainWindow
         if (height >= 90f)
         {
             drawList.AddRectFilled(
-                origin + new Vector2(10f, thumbnailHeight + 21f),
+                origin + new Vector2(Ui(10f), thumbnailHeight + Ui(21f)),
                 origin + new Vector2(
                     width * 0.48f,
-                    thumbnailHeight + 24f),
+                    thumbnailHeight + Ui(24f)),
                 ImGui.GetColorU32(
                     new Vector4(
                         MutedText.X,
@@ -3412,9 +4735,8 @@ internal sealed partial class MainWindow
             GetHomeVideoColumnCount(
                 ImGui.GetWindowSize().X);
 
-        var gap = Ui(10f);
-        var rowGap = Ui(14f);
-        var cardHeight = Ui(174f);
+        var gap = Ui(12f);
+        var cardHeight = Ui(188f);
 
         var width =
             ImGui.GetContentRegionAvail().X;
@@ -3470,7 +4792,7 @@ internal sealed partial class MainWindow
                 hideTotalWidth,
                 MathF.Max(
                     hideIconSize.Y,
-                    hideTextSize.Y) + 4f);
+                    hideTextSize.Y) + Ui(4f));
 
         var hideHovered =
             ImGui.IsMouseHoveringRect(
@@ -3510,9 +4832,6 @@ internal sealed partial class MainWindow
 
         ImGui.PopID();
 
-        ImGui.Dummy(
-            new Vector2(0f, 5f));
-
         // ---------------------------------------------------------
         // Results
         // ---------------------------------------------------------
@@ -3524,24 +4843,14 @@ internal sealed partial class MainWindow
         if (ffxivYouTubeResults is not { Count: > 0 } results)
         {
             for (var index = 0;
-                 index < 10;
+                 index < columns;
                  index++)
             {
                 if (index > 0)
                 {
-                    if (index % columns == 0)
-                    {
-                        ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                rowGap));
-                    }
-                    else
-                    {
-                        ImGui.SameLine(
-                            0f,
-                            gap);
-                    }
+                    ImGui.SameLine(
+                        0f,
+                        gap);
                 }
 
                 ImGui.PushID(
@@ -3568,7 +4877,7 @@ internal sealed partial class MainWindow
 
         var visibleCount =
             Math.Min(
-                10,
+                columns,
                 results.Count);
 
         for (var index = 0;
@@ -3577,26 +4886,19 @@ internal sealed partial class MainWindow
         {
             if (index > 0)
             {
-                if (index % columns == 0)
-                {
-                    ImGui.Dummy(
-                        new Vector2(0f, rowGap));
-                }
-                else
-                {
-                    ImGui.SameLine(
-                        0f,
-                        gap);
-                }
+                ImGui.SameLine(
+                    0f,
+                    gap);
             }
 
             ImGui.PushID(
                 $"ffxivYoutube_{index}");
 
-            DrawHomeYouTubeCard(
+            DrawCompactHomeYouTubeCardSurface(
                 results[index],
                 cardWidth,
-                cardHeight);
+                cardHeight,
+                useThumbnailActions: true);
 
             ImGui.PopID();
         }
@@ -3608,7 +4910,8 @@ internal sealed partial class MainWindow
             FontAwesomeIcon.History,
             "Recently Watched",
             Accent,
-            false);
+            showSeeAll: false,
+            addBottomSpacing: false);
 
         var drawList =
       ImGui.GetWindowDrawList();
@@ -3651,7 +4954,7 @@ internal sealed partial class MainWindow
 
         using (ImRaii.PushFont(UiBuilder.IconFont))
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 trashMin,
                 ImGui.GetColorU32(
                     trashHovered
@@ -3679,7 +4982,9 @@ internal sealed partial class MainWindow
  
 
         var videos =
-            Plugin.Cfg.RecentlyWatchedVideos;
+            Plugin.Cfg.RecentlyWatchedVideos
+                .Where(IsResumableHistoryMedia)
+                .ToList();
 
         if (videos is not { Count: > 0 })
         {
@@ -3796,7 +5101,7 @@ internal sealed partial class MainWindow
                         1);
 
 
-                const float progressHeight = 3f;
+                var progressHeight = Ui(3f);
 
 
                 drawList.AddRectFilled(
@@ -3819,8 +5124,8 @@ internal sealed partial class MainWindow
                 drawList,
                 origin +
                 new Vector2(
-                    2f,
-                    thumbnailHeight + 10f),
+                    Ui(2f),
+                    thumbnailHeight + Ui(10f)),
                 cardWidth - 4f,
                 ImGui.GetTextLineHeight(),
                 2,
@@ -3940,7 +5245,7 @@ internal sealed partial class MainWindow
                 0f,
                 1f);
 
-        const float progressHeight = 3f;
+        var progressHeight = Ui(3f);
 
         var progressY =
             origin.Y +
@@ -3990,15 +5295,13 @@ internal sealed partial class MainWindow
 
             var badgeMin =
                 origin +
-                new Vector2(
-                    7f,
-                    6f);
+                UiVec(7f, 6f);
 
             var badgeMax =
                 badgeMin +
                 new Vector2(
-                    badgeSize.X + 10f,
-                    badgeSize.Y + 5f);
+                    badgeSize.X + Ui(10f),
+                    badgeSize.Y + Ui(5f));
 
             drawList.AddRectFilled(
                 badgeMin,
@@ -4011,11 +5314,9 @@ internal sealed partial class MainWindow
     0.75f)),
                 5f);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 badgeMin +
-                new Vector2(
-                    5f,
-                    2f),
+                UiVec(5f, 2f),
                 ImGui.GetColorU32(
                     Vector4.One),
                 badgeText);
@@ -4079,7 +5380,7 @@ internal sealed partial class MainWindow
                     origin.Y +
                     thumbnailHeight -
                     buttonHeight -
-                    8f);
+                    Ui(8f));
 
             var buttonMax =
                 buttonMin +
@@ -4105,7 +5406,7 @@ internal sealed partial class MainWindow
                         : Accent),
                 6f);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
                     buttonMin.X +
                     (buttonWidth - buttonTextSize.X) * 0.5f,
@@ -4134,11 +5435,11 @@ internal sealed partial class MainWindow
                 title,
                 28);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             origin +
             new Vector2(
-                2f,
-                thumbnailHeight + 8f),
+                Ui(2f),
+                thumbnailHeight + Ui(8f)),
             ImGui.GetColorU32(
                 Vector4.One),
             displayTitle);
@@ -4183,167 +5484,694 @@ internal sealed partial class MainWindow
 
     private void OpenWatchPartyPage()
     {
-        currentPage = HomePage.WatchAlong;
+        currentPage =
+            HomePage.PartyDirectory;
     }
 
-    private void JoinHomeWatchParty(RoomDirectoryDto room)
+    private void JoinHomeWatchParty(
+    RoomDirectoryDto room)
     {
-        if (room.Kind == RoomKind.Locked)
+        //
+        // Home Watch Party cards should behave like Party Directory
+        // results and take the user directly to the Watch Party page.
+        //
+        currentPage =
+            HomePage.WatchAlong;
+
+        if (room.Kind ==
+            RoomKind.Locked)
         {
-            joinHostNameInput = room.HostDisplayName;
-            currentPage = HomePage.WatchAlong;
+            //
+            // Use the same global password prompt as the Party
+            // Directory instead of navigating to the manual join form.
+            //
+            partyDirectoryPasswordRoom =
+                room;
+
+            partyDirectoryPassword =
+                string.Empty;
+
+            partyDirectoryPasswordError =
+                null;
+
+            partyDirectoryPasswordPopupRequested =
+                true;
+
             return;
         }
 
-        DoJoin(room.HostDisplayName);
+        DoJoin(
+            room.HostDisplayName);
     }
 
-    private static FontAwesomeIcon WatchPartyKindIcon(RoomKind kind) =>
+    private enum WatchPartyCategory
+    {
+        Unknown,
+        YouTube,
+        Movies,
+        Tv,
+        Twitch,
+        Cartoons,
+        LiveStream,
+        Gaming,
+        Dj,
+        Music,
+        Images,
+        Promotional,
+    }
+
+    private static bool TryReadWatchPartyMetadata(
+        RoomDirectoryDto room,
+        out WatchPartyCategory category,
+        out bool adultOnly,
+        out string serverName,
+        out string visibleDescription)
+    {
+        category =
+            WatchPartyCategory.Unknown;
+
+        adultOnly =
+            false;
+
+        serverName =
+            string.Empty;
+
+        var rawDescription =
+            room.Description ??
+            string.Empty;
+
+        visibleDescription =
+            rawDescription.Trim();
+
+        var tokenStart =
+            rawDescription.IndexOf(
+                "<#",
+                StringComparison.Ordinal);
+
+        if (tokenStart < 0)
+        {
+            return false;
+        }
+
+        var tokenEnd =
+            rawDescription.IndexOf(
+                "#>",
+                tokenStart + 2,
+                StringComparison.Ordinal);
+
+        if (tokenEnd < 0)
+        {
+            return false;
+        }
+
+        var tokenContents =
+            rawDescription.Substring(
+                tokenStart + 2,
+                tokenEnd -
+                tokenStart -
+                2);
+
+        var tokenParts =
+            tokenContents.Split(
+                '#',
+                StringSplitOptions.TrimEntries);
+
+        // Existing rooms use:
+        // <#YouTube#0#>
+        //
+        // New rooms use:
+        // <#YouTube#0#Balmung#>
+        if (tokenParts.Length < 2)
+        {
+            return false;
+        }
+
+        category =
+            tokenParts[0]
+                .Trim()
+                .ToUpperInvariant() switch
+            {
+                "YOUTUBE" =>
+                    WatchPartyCategory.YouTube,
+
+                "MOVIES" =>
+                    WatchPartyCategory.Movies,
+
+                "TV" =>
+                    WatchPartyCategory.Tv,
+
+                "TWITCH" =>
+                    WatchPartyCategory.Twitch,
+
+                "CARTOONS" =>
+                    WatchPartyCategory.Cartoons,
+
+                "LIVE STREAM" =>
+                    WatchPartyCategory.LiveStream,
+
+                "LIVESTREAM" =>
+                    WatchPartyCategory.LiveStream,
+
+                "GAMING" =>
+                    WatchPartyCategory.Gaming,
+
+                "DJ" =>
+                    WatchPartyCategory.Dj,
+
+                "MUSIC" =>
+                    WatchPartyCategory.Music,
+
+                "IMAGES" =>
+                    WatchPartyCategory.Images,
+
+                "PROMOTIONAL" =>
+                    WatchPartyCategory.Promotional,
+
+                _ =>
+                    WatchPartyCategory.Unknown,
+            };
+
+        if (category ==
+            WatchPartyCategory.Unknown)
+        {
+            return false;
+        }
+
+        var ratingText =
+            tokenParts[1].Trim();
+
+        if (ratingText != "0" &&
+            ratingText != "1")
+        {
+            category =
+                WatchPartyCategory.Unknown;
+
+            return false;
+        }
+
+        adultOnly =
+            ratingText == "1";
+
+        if (tokenParts.Length >= 3)
+        {
+            serverName =
+                tokenParts[2].Trim();
+        }
+
+        // Hide the entire metadata marker from the visible description.
+        visibleDescription =
+            (
+                rawDescription[..tokenStart] +
+                rawDescription[(tokenEnd + 2)..]
+            ).Trim();
+
+        return true;
+    }
+
+    private static string WatchPartyDescription(
+        RoomDirectoryDto room)
+    {
+        TryReadWatchPartyMetadata(
+            room,
+            out _,
+            out _,
+            out _,
+            out var visibleDescription);
+
+        if (!string.IsNullOrWhiteSpace(
+                visibleDescription))
+        {
+            return visibleDescription;
+        }
+
+        return "No description set for this Watch Party.";
+    }
+
+    private static WatchPartyCategory GetWatchPartyCategory(
+        RoomDirectoryDto room)
+    {
+        TryReadWatchPartyMetadata(
+            room,
+            out var category,
+            out _,
+            out _,
+            out _);
+
+        return category;
+    }
+
+    private static bool WatchPartyIsAdultOnly(
+        RoomDirectoryDto room)
+    {
+        return
+            TryReadWatchPartyMetadata(
+                room,
+                out _,
+                out var adultOnly,
+                out _,
+                out _) &&
+            adultOnly;
+    }
+
+    private static string WatchPartyServer(
+        RoomDirectoryDto room)
+    {
+        TryReadWatchPartyMetadata(
+            room,
+            out _,
+            out _,
+            out var serverName,
+            out _);
+
+        return serverName;
+    }
+
+    private static string WatchPartyLocation(
+        RoomDirectoryDto room)
+    {
+        return !string.IsNullOrWhiteSpace(
+                room.Location)
+            ? room.Location!
+            : "Location not specified";
+    }
+
+    private static string WatchPartyLocationTooltip(
+        RoomDirectoryDto room)
+    {
+        var location =
+            WatchPartyLocation(
+                room);
+
+        var server =
+            WatchPartyServer(
+                room);
+
+        return string.IsNullOrWhiteSpace(
+                server)
+            ? location
+            : $"{location} — {server}";
+    }
+    private static string WatchPartyVisibilityText(RoomKind kind) =>
+        kind switch
+        {
+            RoomKind.Locked => "LOCKED",
+            RoomKind.Venue => "VENUE",
+            _ => "PUBLIC",
+        };
+
+    private static FontAwesomeIcon WatchPartyVisibilityIcon(RoomKind kind) =>
         kind switch
         {
             RoomKind.Locked => FontAwesomeIcon.Lock,
             RoomKind.Venue => FontAwesomeIcon.Video,
-            _ => FontAwesomeIcon.Play,
+            _ => FontAwesomeIcon.Globe,
         };
 
-    private static string WatchPartyActivityText(RoomDirectoryDto room)
-    {
-        if (!string.IsNullOrWhiteSpace(room.Description))
+    private static Vector4 WatchPartyVisibilityColor(RoomKind kind) =>
+        kind switch
         {
-            return room.Description!;
+            RoomKind.Locked => new Vector4(
+                1.00f,
+                0.35f,
+                0.20f,
+                1f),
+
+            RoomKind.Venue => new Vector4(
+                1.00f,
+                0.72f,
+                0.20f,
+                1f),
+
+            _ => new Vector4(
+                0.35f,
+                0.90f,
+                0.48f,
+                1f),
+        };
+
+    private static string WatchPartyPlaybackStateText(
+        RoomDirectoryDto room)
+    {
+        if (!room.HasMedia)
+        {
+            return "WAITING";
         }
 
-        return room.HasMedia
-            ? "Watching together"
-            : "Waiting for a video";
+        return room.Paused
+            ? "PAUSED"
+            : "PLAYING";
+    }
+
+    private static Vector4 WatchPartyPlaybackStateColor(
+        RoomDirectoryDto room)
+    {
+        if (!room.HasMedia)
+        {
+            return new Vector4(
+                0.48f,
+                0.70f,
+                1.00f,
+                1f);
+        }
+
+        if (room.Paused)
+        {
+            return new Vector4(
+                1.00f,
+                0.72f,
+                0.20f,
+                1f);
+        }
+
+        return new Vector4(
+            0.35f,
+            0.90f,
+            0.48f,
+            1f);
+    }
+
+    private static FontAwesomeIcon WatchPartyPlaybackStateIcon(
+        RoomDirectoryDto room)
+    {
+        if (!room.HasMedia)
+        {
+            return FontAwesomeIcon.Circle;
+        }
+
+        return room.Paused
+            ? FontAwesomeIcon.Pause
+            : FontAwesomeIcon.Play;
+    }
+
+    private static FontAwesomeIcon WatchPartyCategoryIcon(
+       RoomDirectoryDto room)
+    {
+        return GetWatchPartyCategory(
+            room) switch
+        {
+            WatchPartyCategory.YouTube =>
+                FontAwesomeIcon.PlayCircle,
+
+            WatchPartyCategory.Movies =>
+                FontAwesomeIcon.Film,
+
+            WatchPartyCategory.Tv =>
+                FontAwesomeIcon.Tv,
+
+            WatchPartyCategory.Twitch =>
+                FontAwesomeIcon.CommentDots,
+
+            WatchPartyCategory.Cartoons =>
+                FontAwesomeIcon.Smile,
+
+            WatchPartyCategory.LiveStream =>
+                FontAwesomeIcon.BroadcastTower,
+
+            WatchPartyCategory.Gaming =>
+                FontAwesomeIcon.Gamepad,
+
+            WatchPartyCategory.Dj =>
+                FontAwesomeIcon.Headphones,
+
+            WatchPartyCategory.Music =>
+                FontAwesomeIcon.Music,
+
+            WatchPartyCategory.Images =>
+                FontAwesomeIcon.Images,
+
+            WatchPartyCategory.Promotional =>
+                FontAwesomeIcon.Bullhorn,
+
+            _ =>
+                FontAwesomeIcon.Video,
+        };
+    }
+
+    private static string WatchPartyCategoryText(
+        RoomDirectoryDto room)
+    {
+        return GetWatchPartyCategory(
+            room) switch
+        {
+            WatchPartyCategory.YouTube =>
+                "YOUTUBE",
+
+            WatchPartyCategory.Movies =>
+                "MOVIES",
+
+            WatchPartyCategory.Tv =>
+                "TV",
+
+            WatchPartyCategory.Twitch =>
+                "TWITCH",
+
+            WatchPartyCategory.Cartoons =>
+                "CARTOONS",
+
+            WatchPartyCategory.LiveStream =>
+                "LIVE STREAM",
+
+            WatchPartyCategory.Gaming =>
+                "GAMING",
+
+            WatchPartyCategory.Dj =>
+                "DJ",
+
+            WatchPartyCategory.Music =>
+                "MUSIC",
+
+            WatchPartyCategory.Images =>
+                "IMAGES",
+
+            WatchPartyCategory.Promotional =>
+                "PROMOTIONAL",
+
+            _ =>
+                "MEDIA",
+        };
+    }
+
+    private RoomDirectoryDto[] GetRankedHomeWatchPartyRooms()
+    {
+        //
+        // Discovery priority:
+        //
+        // 1. Public + Venue rooms.
+        // 2. Highest viewer count first.
+        // 3. Locked rooms fill remaining slots.
+        //
+        // A large locked room therefore does not displace an available
+        // Public or Venue room.
+        //
+        return homeWatchPartyRooms
+            .OrderBy(
+                room =>
+                    room.Kind == RoomKind.Locked
+                        ? 1
+                        : 0)
+            .ThenByDescending(
+                room => room.ViewerCount)
+            .ThenBy(
+                room => room.HostDisplayName,
+                StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private void DrawWatchPartiesShelf()
     {
         RefreshHomeWatchPartiesIfNeeded();
 
-        var gap = Ui(10f);
-        var cardHeight = Ui(238f);
-        var rooms = homeWatchPartyRooms.Take(3).ToArray();
-        var cardCount = rooms.Length + 1;
-
         var width =
             ImGui.GetContentRegionAvail().X;
+
+        var gap =
+            Ui(10f);
+
+        //
+        // Four columns at the approved full window size.
+        // Smaller windows wrap to three or two columns instead of
+        // crushing every card into an unusably narrow slot.
+        //
+        var columnCount =
+            width >= Ui(860f)
+                ? 4
+                : width >= Ui(620f)
+                    ? 3
+                    : 2;
+
+        var cardWidth =
+            (width -
+             gap * (columnCount - 1)) /
+            columnCount;
+
+        var rankedRooms =
+            GetRankedHomeWatchPartyRooms();
+
+        // Keep the established room-card height whenever a room is available. The fully empty
+        // create/join state has much less content, so it only needs half of that vertical space.
+        var cardHeight =
+            Ui(rankedRooms.Length == 0
+                ? 180f
+                : 330f);
+
+        //
+        // With four or more rooms:
+        //
+        // - outside a party: show three rooms and Create / Join
+        // - inside a party:  show the top four rooms
+        //
+        var showFourthRoom =
+            rankedRooms.Length >= 4 &&
+            stream.Mode != StreamMode.None;
+
+        var roomLimit =
+            showFourthRoom
+                ? 4
+                : 3;
+
+        var rooms =
+            rankedRooms
+                .Take(roomLimit)
+                .ToArray();
+
+        var showCreateCard =
+            !showFourthRoom;
 
         DrawHomeShelfHeading(
             FontAwesomeIcon.Users,
             "Watch Parties",
             AccentHover,
+            addBottomSpacing: false,
             onSeeAll: OpenWatchPartyPage);
 
-        var cardWidth =
-            (width - gap * (cardCount - 1)) /
-            cardCount;
+        var slotIndex =
+            0;
 
-        for (var i = 0; i < rooms.Length; i++)
+        for (var index = 0;
+             index < rooms.Length;
+             index++)
         {
-            var room = rooms[i];
-            if (i > 0)
+            if (slotIndex > 0 &&
+                slotIndex % columnCount != 0)
             {
-                ImGui.SameLine(0f, gap);
+                ImGui.SameLine(
+                    0f,
+                    gap);
             }
 
+            var room =
+                rooms[index];
+
+            ImGui.PushID(
+                $"homeWatchPartyRoom_{room.HostAccountId}_{index}");
+
             DrawWatchPartyCard(
-                room.HostAccountId,
-                room.HostDisplayName,
-                WatchPartyActivityText(room),
-                room.HostDisplayName,
-                string.IsNullOrWhiteSpace(room.Location)
-                    ? string.Empty
-                    : room.Location,
-                room.ViewerCount == 1
-                    ? "1 watching"
-                    : $"{room.ViewerCount} watching",
-                null,
-                WatchPartyKindIcon(room.Kind),
-                featured: i == 0 && room.HasMedia,
-                locked: room.Kind == RoomKind.Locked,
+                room,
                 cardWidth,
                 cardHeight,
-                room.ViewerCount,
                 () => JoinHomeWatchParty(room));
+
+            ImGui.PopID();
+
+            slotIndex++;
         }
 
-        if (rooms.Length > 0)
+        if (showCreateCard)
         {
-            ImGui.SameLine(0f, gap);
-        }
+            var usedColumns =
+                slotIndex %
+                columnCount;
 
-        DrawCreateWatchPartyCard(
-            cardWidth,
-            cardHeight);
+            var remainingColumns =
+                usedColumns == 0
+                    ? columnCount
+                    : columnCount -
+                      usedColumns;
+
+            var createCardWidth =
+                cardWidth *
+                remainingColumns +
+                gap *
+                (remainingColumns - 1);
+
+            if (usedColumns > 0)
+            {
+                ImGui.SameLine(
+                    0f,
+                    gap);
+            }
+
+            DrawCreateWatchPartyCard(
+                createCardWidth,
+                cardHeight);
+        }
     }
 
     private void DrawWatchPartyCard(
-     string id,
-     string title,
-     string contentText,
-     string hostName,
-     string locationText,
-     string watcherText,
-     string? imageName,
-     FontAwesomeIcon categoryIcon,
-     bool featured,
-     bool locked,
+     RoomDirectoryDto room,
      float width,
      float height,
-     int participantCount,
      Action? onJoin)
     {
         var origin =
             ImGui.GetCursorScreenPos();
 
-        var thumbHeight = Ui(92f);
         var size =
-            new Vector2(width, height);
+            new Vector2(
+                width,
+                height);
+
+        var cardMax =
+            origin +
+            size;
 
         var drawList =
             ImGui.GetWindowDrawList();
 
         ImGui.InvisibleButton(
-            $"##watchParty_{id}",
+            $"##watchPartyCard_{room.HostAccountId}",
             size);
 
-        var hovered =
+        var cardHovered =
             ImGui.IsItemHovered();
 
         // ---------------------------------------------------------
-        // Card background
+        // Card background and outline
         // ---------------------------------------------------------
 
         drawList.AddRectFilled(
             origin,
-            origin + size,
+            cardMax,
             ImGui.GetColorU32(
-                hovered
+                cardHovered
                     ? CardBgHover
                     : CardBg),
-            10f);
+            Ui(10f));
+
+        drawList.AddRect(
+            origin,
+            cardMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    cardHovered
+                        ? 0.58f
+                        : 0.22f)),
+            Ui(10f),
+            ImDrawFlags.None,
+            Ui(1f));
 
         // ---------------------------------------------------------
-        // Artwork
+        // Room artwork
         // ---------------------------------------------------------
 
-        IDalamudTextureWrap? imageWrap = null;
+        var headerHeight =
+            Ui(120f);
 
-        if (imageName is null)
-        {
-            if (homeHero is { } hero)
-            {
-                imageWrap = hero;
-            }
-        }
-        else
-        {
-            imageWrap =
-                GetCapabilityImage(imageName)?
-                    .GetWrapOrDefault();
-        }
+        IDalamudTextureWrap? imageWrap =
+            homeHero;
 
         if (imageWrap is not null)
         {
@@ -4352,7 +6180,7 @@ internal sealed partial class MainWindow
                     imageWrap.Width,
                     imageWrap.Height,
                     width,
-                    thumbHeight);
+                    headerHeight);
 
             drawList.AddImageRounded(
                 imageWrap.Handle,
@@ -4360,38 +6188,11 @@ internal sealed partial class MainWindow
                 origin +
                 new Vector2(
                     width,
-                    thumbHeight),
+                    headerHeight),
                 uv0,
                 uv1,
                 uint.MaxValue,
-                10f,
-                ImDrawFlags.RoundCornersTop);
-
-            drawList.AddRectFilledMultiColor(
-     origin,
-     origin + size,
-     ImGui.GetColorU32(
-         new Vector4(0.01f, 0.01f, 0.02f, 0.95f)),
-     ImGui.GetColorU32(
-         new Vector4(0.01f, 0.01f, 0.02f, 0.05f)),
-     ImGui.GetColorU32(
-         new Vector4(0.01f, 0.01f, 0.02f, 0.05f)),
-     ImGui.GetColorU32(
-         new Vector4(0.01f, 0.01f, 0.02f, 0.70f)));
-
-            drawList.AddRectFilled(
-                origin,
-                origin +
-                new Vector2(
-                    width,
-                    thumbHeight),
-                ImGui.GetColorU32(
-                    new Vector4(
-                        0f,
-                        0f,
-                        0f,
-                        hovered ? 0.08f : 0.15f)),
-                10f,
+                Ui(10f),
                 ImDrawFlags.RoundCornersTop);
         }
         else
@@ -4401,377 +6202,932 @@ internal sealed partial class MainWindow
                 origin +
                 new Vector2(
                     width,
-                    thumbHeight),
+                    headerHeight),
                 ImGui.GetColorU32(
                     new Vector4(
                         Accent.X,
                         Accent.Y,
                         Accent.Z,
-                        0.08f)),
-                10f,
+                        0.16f)),
+                Ui(10f),
                 ImDrawFlags.RoundCornersTop);
         }
 
-        // ---------------------------------------------------------
-        // Watcher badge on thumbnail
-        // ---------------------------------------------------------
-
-        var watcherSize =
-            ImGui.CalcTextSize(watcherText);
-
-        var watcherMin =
+        //
+        // Artwork shading keeps the two header badges readable.
+        //
+        drawList.AddRectFilledMultiColor(
+            origin,
             origin +
             new Vector2(
-                Ui(8f),
-                Ui(8f));
-
-        var watcherMax =
-            watcherMin +
-            new Vector2(
-                watcherSize.X + 12f,
-                watcherSize.Y + 6f);
-
-        drawList.AddRectFilled(
-            watcherMin,
-            watcherMax,
+                width,
+                headerHeight),
             ImGui.GetColorU32(
                 new Vector4(
                     0f,
                     0f,
                     0f,
-                    0.65f)),
-            5f);
-
-        drawList.AddText(
-            watcherMin +
-            new Vector2(
-                6f,
-                3f),
-            ImGui.GetColorU32(Vector4.One),
-            watcherText);
+                    0.14f)),
+            ImGui.GetColorU32(
+                new Vector4(
+                    0f,
+                    0f,
+                    0f,
+                    0.14f)),
+            ImGui.GetColorU32(
+                new Vector4(
+                    0f,
+                    0f,
+                    0f,
+                    0.62f)),
+            ImGui.GetColorU32(
+                new Vector4(
+                    0f,
+                    0f,
+                    0f,
+                    0.62f)));
 
         // ---------------------------------------------------------
-        // Featured badge
+        // Currently playing title
         // ---------------------------------------------------------
 
-        if (featured)
+        if (room.HasMedia &&
+            !string.IsNullOrWhiteSpace(
+                room.MediaTitle))
         {
-            const string badgeText =
-                "FEATURED";
+            var fullMediaTitle =
+                room.MediaTitle!;
 
-            var badgeSize =
-                ImGui.CalcTextSize(badgeText);
+            var displayMediaTitle =
+                fullMediaTitle;
 
-            var badgeMin =
-    origin +
-    new Vector2(
-        width - badgeSize.X - 17f,
-        6f);
+            var maximumTitleWidth =
+                MathF.Max(
+                    width -
+                    Ui(20f),
+                    Ui(40f));
 
-            var badgeMax =
-                badgeMin +
+            while (displayMediaTitle.Length > 1 &&
+                   ImGui.CalcTextSize(
+                       displayMediaTitle).X >
+                   maximumTitleWidth)
+            {
+                displayMediaTitle =
+                    displayMediaTitle[..^1];
+            }
+
+            if (!string.Equals(
+                    displayMediaTitle,
+                    fullMediaTitle,
+                    StringComparison.Ordinal))
+            {
+                displayMediaTitle =
+                    displayMediaTitle.TrimEnd() +
+                    "…";
+            }
+
+            var mediaTitleSize =
+                ImGui.CalcTextSize(
+                    displayMediaTitle);
+
+            var mediaTitleMin =
                 new Vector2(
-                    badgeSize.X + 10f,
-                    badgeSize.Y + 5f);
+                    origin.X +
+                    Ui(8f),
+                    origin.Y +
+                    headerHeight -
+                    mediaTitleSize.Y -
+                    Ui(9f));
+
+            var mediaTitleMax =
+                new Vector2(
+                    mediaTitleMin.X +
+                    mediaTitleSize.X +
+                    Ui(12f),
+                    mediaTitleMin.Y +
+                    mediaTitleSize.Y +
+                    Ui(6f));
 
             drawList.AddRectFilled(
-                badgeMin,
-                badgeMax,
-                ImGui.GetColorU32(Accent),
-                5f);
+                mediaTitleMin -
+                UiVec(
+                    6f,
+                    3f),
+                mediaTitleMax -
+                UiVec(
+                    6f,
+                    3f),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        0.015f,
+                        0.02f,
+                        0.035f,
+                        0.88f)),
+                Ui(5f));
 
-            drawList.AddText(
-                badgeMin +
-                new Vector2(5f, 2f),
-                ImGui.GetColorU32(Vector4.One),
-                badgeText);
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                mediaTitleMin,
+                ImGui.GetColorU32(
+                    Vector4.One),
+                displayMediaTitle);
+
+            if (ImGui.IsMouseHoveringRect(
+                    mediaTitleMin,
+                    mediaTitleMax))
+            {
+                ImGui.SetTooltip(
+                    fullMediaTitle);
+            }
         }
 
         // ---------------------------------------------------------
-        // Participant avatars
+        // Playback badge
         // ---------------------------------------------------------
 
-        var avatarY =
-            origin.Y + thumbHeight - Ui(28f);
+        var playbackText =
+            WatchPartyPlaybackStateText(
+                room);
 
- 
+        var playbackColor =
+            WatchPartyPlaybackStateColor(
+                room);
 
-        const int maxVisibleAvatars = 4;
+        var playbackGlyph =
+            WatchPartyPlaybackStateIcon(
+                    room)
+                .ToIconString();
 
-        var visibleAvatars =
-            Math.Min(participantCount, maxVisibleAvatars);
+        Vector2 playbackGlyphSize;
 
-        var extraAvatars =
-            participantCount - visibleAvatars;
-
-        var avatarSize = Ui(22f);
-        var avatarOverlap = Ui(16f);
-
-        var stackWidth =
-            avatarSize +
-            (visibleAvatars - 1) * avatarOverlap +
-            (extraAvatars > 0 ? avatarSize : 0f);
-
-        var avatarX =
-            origin.X + width - stackWidth - 10f;
-
-
-        // For these placeholder rooms, reuse the current user's actual
-        // profile avatar. Real room participants can replace these later.
-        var avatarIcon =
-            CurrentSession?.AvatarIcon;
-
-        var avatarColor =
-            CurrentSession?.AvatarColorHex ??
-            "#9966FA";
-
-        var avatarImage =
-            CurrentSession?.AvatarImageUrl;
-
-
-
-        for (var i = 0; i < visibleAvatars; i++)
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
         {
-            var avatarPos =
-                new Vector2(
-                    avatarX + i * avatarOverlap,
-                    avatarY);
-
-            // Small dark rim around each overlapping portrait.
-            drawList.AddCircleFilled(
-                avatarPos +
-                new Vector2(
-                    avatarSize * 0.5f,
-                    avatarSize * 0.5f),
-                avatarSize * 0.5f + 1.5f,
-                ImGui.GetColorU32(CardBg));
-
-            ImGui.SetCursorScreenPos(
-                avatarPos);
-
-            ImGui.PushID(
-                $"roomAvatar_{title}_{i}");
-
-            DrawAvatarChip(
-                avatarIcon,
-                avatarColor,
-                avatarSize,
-                avatarImage);
-
-            ImGui.PopID();
-        }
-
-        if (extraAvatars > 0)
-        {
-            var plusX =
-                avatarX +
-                visibleAvatars * avatarOverlap;
-
-            var plusPos =
-                new Vector2(
-                    plusX,
-                    avatarY);
-
-            drawList.AddCircleFilled(
-                plusPos +
-                new Vector2(
-                    avatarSize * 0.5f,
-                    avatarSize * 0.5f),
-                avatarSize * 0.5f,
-                ImGui.GetColorU32(CardBgHover));
-
-            var plusText =
-                $"+{extraAvatars}";
-
-            var textSize =
-                ImGui.CalcTextSize(plusText);
-
-            drawList.AddText(
-                plusPos +
-                new Vector2(
-                    (avatarSize - textSize.X) * 0.5f,
-                    (avatarSize - textSize.Y) * 0.5f),
-                ImGui.GetColorU32(Vector4.One),
-                plusText);
-        }
-
-
-
-        // ---------------------------------------------------------
-        // Room title + category icon
-        // ---------------------------------------------------------
-
-        var titleY =
-            origin.Y +
-            thumbHeight +
-            Ui(8f);
-
-        float categoryWidth;
-
-        using (ImRaii.PushFont(UiBuilder.IconFont))
-        {
-            categoryWidth =
+            playbackGlyphSize =
                 ImGui.CalcTextSize(
-                    categoryIcon.ToIconString()).X;
-
-            drawList.AddText(
-                new Vector2(
-                    origin.X + Ui(10f),
-                    titleY),
-                ImGui.GetColorU32(Accent),
-                categoryIcon.ToIconString());
+                    playbackGlyph);
         }
 
-        drawList.AddText(
+        if (!room.HasMedia)
+        {
+            playbackGlyphSize =
+                new Vector2(
+                    Ui(4f),
+                    Ui(4f));
+        }
+
+        var playbackTextSize =
+            ImGui.CalcTextSize(
+                playbackText);
+
+        var badgeHeight =
+            Ui(22f);
+
+        var playbackBadgeWidth =
+            Ui(7f) +
+            playbackGlyphSize.X +
+            Ui(5f) +
+            playbackTextSize.X +
+            Ui(7f);
+
+        var playbackMin =
+            origin +
+            UiVec(
+                8f,
+                8f);
+
+        var playbackMax =
+            playbackMin +
             new Vector2(
-                origin.X + Ui(10f) + categoryWidth + Ui(6f),
-                titleY),
-            ImGui.GetColorU32(Vector4.One),
-            title);
-
-        // ---------------------------------------------------------
-        // Current content pill
-        // ---------------------------------------------------------
-
-        var contentPillHeight = Ui(20f);
-
-        var contentTextSize =
-            ImGui.CalcTextSize(contentText);
-
-        var contentPillMin =
-            new Vector2(
-                origin.X + Ui(10f),
-                titleY + Ui(22f));
-
-        var contentPillMax =
-            contentPillMin +
-            new Vector2(
-                MathF.Min(contentTextSize.X + 16f, width - 20f),
-                contentPillHeight);
+                playbackBadgeWidth,
+                badgeHeight);
 
         drawList.AddRectFilled(
-            contentPillMin,
-            contentPillMax,
+            playbackMin,
+            playbackMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.015f,
+                    0.02f,
+                    0.035f,
+                    0.92f)),
+            Ui(5f));
+
+        drawList.AddRect(
+            playbackMin,
+            playbackMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    playbackColor.X,
+                    playbackColor.Y,
+                    playbackColor.Z,
+                    0.82f)),
+            Ui(5f));
+
+        //
+        // Waiting uses a small hand-drawn dot. Playing and Paused
+        // continue to use their Font Awesome symbols.
+        //
+        if (!room.HasMedia)
+        {
+            drawList.AddCircleFilled(
+                new Vector2(
+                    playbackMin.X +
+                    Ui(7f) +
+                    playbackGlyphSize.X *
+                    0.5f,
+                    playbackMin.Y +
+                    badgeHeight *
+                    0.5f),
+                Ui(3.25f),
+                ImGui.GetColorU32(
+                    playbackColor),
+                16);
+        }
+        else
+        {
+            using (ImRaii.PushFont(
+                       UiBuilder.IconFont))
+            {
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                    new Vector2(
+                        playbackMin.X +
+                        Ui(7f),
+                        playbackMin.Y +
+                        (badgeHeight -
+                         playbackGlyphSize.Y) *
+                        0.5f),
+                    ImGui.GetColorU32(
+                        playbackColor),
+                    playbackGlyph);
+            }
+        }
+
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            new Vector2(
+                playbackMin.X +
+                Ui(7f) +
+                playbackGlyphSize.X +
+                Ui(5f),
+                playbackMin.Y +
+                (badgeHeight -
+                 playbackTextSize.Y) *
+                0.5f),
+            ImGui.GetColorU32(
+                playbackColor),
+            playbackText);
+
+        // ---------------------------------------------------------
+        // Viewer badge
+        // ---------------------------------------------------------
+
+        var viewerText =
+            room.ViewerCount.ToString();
+
+        var viewerTextSize =
+            ImGui.CalcTextSize(
+                viewerText);
+
+        var eyeGlyph =
+            FontAwesomeIcon.Eye
+                .ToIconString();
+
+        Vector2 eyeGlyphSize;
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            eyeGlyphSize =
+                ImGui.CalcTextSize(
+                    eyeGlyph);
+        }
+
+        var viewerBadgeWidth =
+            Ui(7f) +
+            eyeGlyphSize.X +
+            Ui(5f) +
+            viewerTextSize.X +
+            Ui(7f);
+
+        var viewerMin =
+            new Vector2(
+                origin.X +
+                width -
+                viewerBadgeWidth -
+                Ui(8f),
+                origin.Y +
+                Ui(8f));
+
+        var viewerMax =
+            viewerMin +
+            new Vector2(
+                viewerBadgeWidth,
+                badgeHeight);
+
+        drawList.AddRectFilled(
+            viewerMin,
+            viewerMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.015f,
+                    0.02f,
+                    0.035f,
+                    0.92f)),
+            Ui(5f));
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                new Vector2(
+                    viewerMin.X +
+                    Ui(7f),
+                    viewerMin.Y +
+                    (badgeHeight -
+                     eyeGlyphSize.Y) *
+                    0.5f),
+                ImGui.GetColorU32(
+                    Vector4.One),
+                eyeGlyph);
+        }
+
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            new Vector2(
+                viewerMin.X +
+                Ui(7f) +
+                eyeGlyphSize.X +
+                Ui(5f),
+                viewerMin.Y +
+                (badgeHeight -
+                 viewerTextSize.Y) *
+                0.5f),
+            ImGui.GetColorU32(
+                Vector4.One),
+            viewerText);
+
+        if (ImGui.IsMouseHoveringRect(
+                viewerMin,
+                viewerMax))
+        {
+            ImGui.SetTooltip(
+                room.ViewerCount == 1
+                    ? "1 watching"
+                    : $"{room.ViewerCount} watching");
+        }
+
+        // ---------------------------------------------------------
+        // Media medallion
+        // ---------------------------------------------------------
+
+        var categoryGlyph =
+            WatchPartyCategoryIcon(
+                    room)
+                .ToIconString();
+
+        var categoryCenter =
+            new Vector2(
+                origin.X +
+                width * 0.5f,
+                origin.Y +
+                headerHeight -
+                Ui(7f));
+
+        var categoryRadius =
+            Ui(20f);
+
+        drawList.AddCircleFilled(
+            categoryCenter,
+            categoryRadius +
+            Ui(3f),
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.015f,
+                    0.02f,
+                    0.035f,
+                    0.98f)),
+            32);
+
+        drawList.AddCircleFilled(
+            categoryCenter,
+            categoryRadius,
             ImGui.GetColorU32(
                 new Vector4(
                     Accent.X,
                     Accent.Y,
                     Accent.Z,
-                    0.12f)),
-            6f);
+                    0.28f)),
+            32);
 
-        drawList.AddText(
-            contentPillMin +
-            new Vector2(
-                8f,
-                3f),
+        drawList.AddCircle(
+            categoryCenter,
+            categoryRadius,
             ImGui.GetColorU32(
-                new Vector4(
-                    0.82f,
-                    0.78f,
-                    0.95f,
-                    1f)),
-            contentText);
+                AccentHover),
+            32,
+            Ui(1.5f));
 
-        // ---------------------------------------------------------
-        // Host + watcher metadata
-        // ---------------------------------------------------------
-
-        var hostY =
-            origin.Y +
-            thumbHeight +
-            Ui(62f);
-
-        using (ImRaii.PushFont(UiBuilder.IconFont))
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
         {
-            drawList.AddText(
-                new Vector2(
-                    origin.X + 10f,
-                    hostY),
-                ImGui.GetColorU32(new Vector4(1f, 0.78f, 0.25f, 1f)),
-                FontAwesomeIcon.Crown.ToIconString());
+            var categoryGlyphSize =
+                ImGui.CalcTextSize(
+                    categoryGlyph);
+
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                categoryCenter -
+                categoryGlyphSize *
+                0.5f,
+                ImGui.GetColorU32(
+                    Vector4.One),
+                categoryGlyph);
         }
 
-        drawList.AddText(
-            new Vector2(
-                origin.X + 29f,
-                hostY),
-            ImGui.GetColorU32(MutedText),
-            "Hosted by ");
+        // ---------------------------------------------------------
+        // Host identity
+        // ---------------------------------------------------------
 
-        var hostedByWidth = ImGui.CalcTextSize("Hosted by ").X;
+        var avatarSize =
+            Ui(34f);
 
-        drawList.AddText(
-            new Vector2(
-                origin.X + 29f + hostedByWidth,
-                hostY),
-            ImGui.GetColorU32(new Vector4(0.55f, 0.35f, 1.0f, 1.0f)),
-            hostName);
+        var avatarPos =
+             new Vector2(
+                 origin.X +
+                 Ui(10f),
+                 origin.Y +
+                 headerHeight +
+                 Ui(10f));
 
-        var metaY =
-            origin.Y +
-            thumbHeight +
-            Ui(102f);
+        var hostName =
+            string.IsNullOrWhiteSpace(
+                room.HostDisplayName)
+                ? "Unknown Host"
+                : room.HostDisplayName;
 
-        // Location row
-        using (ImRaii.PushFont(UiBuilder.IconFont))
+        //
+        // Use the same unrestricted profile resolver used by Watch
+        // Party chat. This first tries the direct server profile route
+        // and then the public account-search fallback.
+        //
+        if (!string.IsNullOrWhiteSpace(
+                room.HostAccountId))
         {
-            drawList.AddText(
-                new Vector2(
-                    origin.X + 10f,
-                    metaY - 20f),
-                ImGui.GetColorU32(Accent),
-                FontAwesomeIcon.MapMarkerAlt.ToIconString());
+            EnsurePartyAvatarLoaded(
+                room.HostAccountId,
+                hostName);
         }
 
-        drawList.AddText(
+        PartyAvatarInfo? hostAvatar =
+       null;
+
+        if (!string.IsNullOrWhiteSpace(
+                room.HostAccountId) &&
+            partyAvatarCache.TryGetValue(
+                room.HostAccountId,
+                out var cachedHostAvatar))
+        {
+            hostAvatar =
+                cachedHostAvatar;
+        }
+
+        if (hostAvatar is not null &&
+            (
+                !string.IsNullOrWhiteSpace(
+                    hostAvatar.AvatarIcon) ||
+                !string.IsNullOrWhiteSpace(
+                    hostAvatar.AvatarImageUrl)
+            ))
+        {
+            ImGui.SetCursorScreenPos(
+                avatarPos);
+
+            ImGui.PushID(
+                $"homeRoomHost_{room.HostAccountId}");
+
+            DrawAvatarChip(
+                hostAvatar.AvatarIcon,
+                hostAvatar.AvatarColorHex,
+                avatarSize,
+                hostAvatar.AvatarImageUrl);
+
+            ImGui.PopID();
+        }
+        else
+        {
+            //
+            // The lookup may still be loading, may have failed, or the
+            // host may not have selected an avatar. Always show a user
+            // symbol rather than leaving the circle empty.
+            //
+            var fallbackCenter =
+                avatarPos +
+                new Vector2(
+                    avatarSize * 0.5f,
+                    avatarSize * 0.5f);
+
+            drawList.AddCircleFilled(
+                fallbackCenter,
+                avatarSize * 0.5f,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        0.22f)),
+                32);
+
+            drawList.AddCircle(
+                fallbackCenter,
+                avatarSize * 0.5f,
+                ImGui.GetColorU32(
+                    new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        0.62f)),
+                32,
+                Ui(1f));
+
+            var fallbackGlyph =
+                FontAwesomeIcon.User
+                    .ToIconString();
+
+            Vector2 fallbackGlyphSize;
+
+            using (ImRaii.PushFont(
+                       UiBuilder.IconFont))
+            {
+                fallbackGlyphSize =
+                    ImGui.CalcTextSize(
+                        fallbackGlyph);
+
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                    fallbackCenter -
+                    fallbackGlyphSize *
+                    0.5f,
+                    ImGui.GetColorU32(
+                        AccentHover),
+                    fallbackGlyph);
+            }
+        }
+
+        var hostedByText =
+            $"Hosted by: {hostName}";
+
+        var hostTextPos =
             new Vector2(
-                origin.X + 29f,
-                metaY - 14f),
+                avatarPos.X +
+                avatarSize +
+                Ui(8f),
+                avatarPos.Y +
+                (avatarSize -
+                 ImGui.GetTextLineHeight()) *
+                0.5f);
+
+        var hostTextWidth =
+            MathF.Max(
+                origin.X +
+                width -
+                Ui(10f) -
+                hostTextPos.X,
+                Ui(30f));
+
+        var displayHostText =
+            hostedByText;
+
+        while (displayHostText.Length > 1 &&
+               ImGui.CalcTextSize(
+                   displayHostText).X >
+               hostTextWidth)
+        {
+            displayHostText =
+                displayHostText[..^1];
+        }
+
+        if (!string.Equals(
+                displayHostText,
+                hostedByText,
+                StringComparison.Ordinal))
+        {
+            displayHostText =
+                displayHostText.TrimEnd() +
+                "…";
+        }
+
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            hostTextPos,
             ImGui.GetColorU32(
-                new Vector4(
-                    0.72f,
-                    0.68f,
-                    0.95f,
-                    0.85f)),
-            locationText);
+                Vector4.One),
+            displayHostText);
 
-
-       
-
-  
+        if (ImGui.IsMouseHoveringRect(
+                hostTextPos,
+                hostTextPos +
+                new Vector2(
+                    hostTextWidth,
+                    ImGui.GetTextLineHeight())))
+        {
+            ImGui.SetTooltip(
+                hostedByText);
+        }
 
         // ---------------------------------------------------------
-        // Join button
+        // Description
         // ---------------------------------------------------------
 
-        var buttonHeight = Ui(24f);
-        var statusWidth = Ui(32f);
-        var buttonGap = Ui(6f);
+        var description =
+            WatchPartyDescription(
+                room);
 
-        var joinMin =
+        var descriptionMin =
             new Vector2(
-                origin.X + Ui(8f),
-                origin.Y + height - buttonHeight - Ui(8f));
+                origin.X +
+                Ui(10f),
+                origin.Y +
+                headerHeight +
+                Ui(52f));
 
-        var joinMax =
+        var descriptionHeight =
+            Ui(46f);
+
+        var descriptionMax =
             new Vector2(
                 origin.X +
                 width -
-                statusWidth -
-                buttonGap -
-                8f,
-                joinMin.Y + buttonHeight);
+                Ui(10f),
+                descriptionMin.Y +
+                descriptionHeight);
 
-        var statusMin =
-            new Vector2(
-                joinMax.X + buttonGap,
-                joinMin.Y);
+        drawList.AddRectFilled(
+            descriptionMin,
+            descriptionMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.09f)),
+            Ui(6f));
 
-        var statusMax =
+        drawList.AddRect(
+            descriptionMin,
+            descriptionMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.13f)),
+            Ui(6f));
+
+        var descriptionTextMin =
+            descriptionMin +
+            UiVec(
+                7f,
+                6f);
+
+        DrawWrappedLines(
+            drawList,
+            descriptionTextMin,
+            MathF.Max(
+                descriptionMax.X -
+                descriptionTextMin.X -
+                Ui(7f),
+                Ui(40f)),
+            ImGui.GetTextLineHeight(),
+            2,
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.88f,
+                    0.88f,
+                    0.94f,
+                    1f)),
+            description);
+
+        if (ImGui.IsMouseHoveringRect(
+                descriptionMin,
+                descriptionMax))
+        {
+            ImGui.SetTooltip(
+                description);
+        }
+
+        // ---------------------------------------------------------
+        // Location
+        // ---------------------------------------------------------
+
+        var location =
+            WatchPartyLocation(
+                room);
+
+        var locationY =
+            descriptionMax.Y +
+            Ui(8f);
+
+        var mapGlyph =
+            FontAwesomeIcon.MapMarkerAlt
+                .ToIconString();
+
+        Vector2 mapGlyphSize;
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            mapGlyphSize =
+                ImGui.CalcTextSize(
+                    mapGlyph);
+
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                new Vector2(
+                    origin.X +
+                    Ui(11f),
+                    locationY),
+                ImGui.GetColorU32(
+                    AccentHover),
+                mapGlyph);
+        }
+
+        var locationTextX =
+            origin.X +
+            Ui(11f) +
+            mapGlyphSize.X +
+            Ui(6f);
+
+        var locationAvailableWidth =
+            MathF.Max(
+                origin.X +
+                width -
+                Ui(10f) -
+                locationTextX,
+                Ui(30f));
+
+        const int locationDisplayLimit =
+            30;
+
+        //
+        // Limit the visible card text to 30 characters. The complete
+        // location remains available through the hover tooltip.
+        //
+        var displayLocation =
+            location.Length >
+            locationDisplayLimit
+                ? location[
+                    ..locationDisplayLimit]
+                : location;
+
+        //
+        // Retain the width-based safeguard for cards displayed in a
+        // narrow resized window.
+        //
+        while (displayLocation.Length > 1 &&
+               ImGui.CalcTextSize(
+                   displayLocation + "…").X >
+               locationAvailableWidth)
+        {
+            displayLocation =
+                displayLocation[..^1];
+        }
+
+        if (!string.Equals(
+                displayLocation,
+                location,
+                StringComparison.Ordinal))
+        {
+            displayLocation =
+                displayLocation.TrimEnd() +
+                "…";
+        }
+
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
-                origin.X + width - 8f,
-                joinMin.Y + buttonHeight);
+                locationTextX,
+                locationY),
+            ImGui.GetColorU32(
+                new Vector4(
+                    MutedText.X,
+                    MutedText.Y,
+                    MutedText.Z,
+                    0.94f)),
+            displayLocation);
+
+        // Include both the pin and the location text in the hover area.
+        // The visible card continues showing only the location.
+        if (ImGui.IsMouseHoveringRect(
+                new Vector2(
+                    origin.X +
+                    Ui(8f),
+                    locationY -
+                    Ui(3f)),
+                new Vector2(
+                    locationTextX +
+                    locationAvailableWidth,
+                    locationY +
+                    ImGui.GetTextLineHeight() +
+                    Ui(3f))))
+        {
+            ImGui.SetTooltip(
+                WatchPartyLocationTooltip(
+                    room));
+        }
+
+        // ---------------------------------------------------------
+        // Visibility and media tags
+        // ---------------------------------------------------------
+
+        var tagsY =
+           locationY +
+           Ui(30f);
+
+        var visibilityColor =
+            WatchPartyVisibilityColor(
+                room.Kind);
+
+        var visibilityWidth =
+              DrawWatchPartyTag(
+                  drawList,
+                  new Vector2(
+                      origin.X +
+                      Ui(10f),
+                      tagsY),
+                  WatchPartyVisibilityIcon(
+                      room.Kind),
+                  WatchPartyVisibilityText(
+                      room.Kind),
+                  visibilityColor);
+
+        var categoryX =
+            origin.X +
+            Ui(10f) +
+            visibilityWidth +
+            Ui(7f);
+
+        var categoryWidth =
+            DrawWatchPartyTag(
+                drawList,
+                new Vector2(
+                    categoryX,
+                    tagsY),
+                WatchPartyCategoryIcon(
+                    room),
+                WatchPartyCategoryText(
+                    room),
+                AccentHover);
+
+        if (WatchPartyIsAdultOnly(
+                room))
+        {
+            DrawWatchPartyAdultTag(
+                drawList,
+                new Vector2(
+                    categoryX +
+                    categoryWidth +
+                    Ui(7f),
+                    tagsY));
+        }
+
+        // ---------------------------------------------------------
+        // Join and access controls
+        // ---------------------------------------------------------
+
+        var buttonHeight =
+            Ui(30f);
+
+        var accessButtonWidth =
+            buttonHeight;
+
+        var buttonGap =
+            Ui(6f);
+
+        var buttonsY =
+            origin.Y +
+            height -
+            buttonHeight -
+            Ui(8f);
+
+        var joinMin =
+            new Vector2(
+                origin.X +
+                Ui(8f),
+                buttonsY);
+
+        var accessMax =
+            new Vector2(
+                origin.X +
+                width -
+                Ui(8f),
+                buttonsY +
+                buttonHeight);
+
+        var accessMin =
+            new Vector2(
+                accessMax.X -
+                accessButtonWidth,
+                buttonsY);
+
+        var joinMax =
+            new Vector2(
+                accessMin.X -
+                buttonGap,
+                buttonsY +
+                buttonHeight);
 
         var mouse =
             ImGui.GetMousePos();
@@ -4782,158 +7138,330 @@ internal sealed partial class MainWindow
             mouse.Y >= joinMin.Y &&
             mouse.Y <= joinMax.Y;
 
-        var statusHovered =
-            mouse.X >= statusMin.X &&
-            mouse.X <= statusMax.X &&
-            mouse.Y >= statusMin.Y &&
-            mouse.Y <= statusMax.Y;
+        var accessHovered =
+            mouse.X >= accessMin.X &&
+            mouse.X <= accessMax.X &&
+            mouse.Y >= accessMin.Y &&
+            mouse.Y <= accessMax.Y;
 
         drawList.AddRectFilled(
             joinMin,
             joinMax,
             ImGui.GetColorU32(
-                locked
-                    ? new Vector4(
-                        CardBgHover.X,
-                        CardBgHover.Y,
-                        CardBgHover.Z,
-                        0.55f)
-                    : joinHovered
-                        ? AccentHover
-                        : featured
-                            ? Accent
-                            : new Vector4(
-                                CardBgHover.X,
-                                CardBgHover.Y,
-                                CardBgHover.Z,
-                                0.92f)),
-            5f);
-
-        if (!featured && !locked)
-        {
-            drawList.AddRect(
-                joinMin,
-                joinMax,
-                ImGui.GetColorU32(
-                    new Vector4(
-                        Accent.X,
-                        Accent.Y,
-                        Accent.Z,
-                        0.24f)),
-                5f);
-        }
+                joinHovered
+                    ? AccentHover
+                    : Accent),
+            Ui(6f));
 
         const string joinText =
             "Join Room";
 
         var joinTextSize =
-            ImGui.CalcTextSize(joinText);
+            ImGui.CalcTextSize(
+                joinText);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 joinMin.X +
                 (joinMax.X -
                  joinMin.X -
-                 joinTextSize.X) * 0.5f,
+                 joinTextSize.X) *
+                0.5f,
                 joinMin.Y +
                 (buttonHeight -
-                 joinTextSize.Y) * 0.5f),
-ImGui.GetColorU32(
-    locked
-        ? new Vector4(
-            MutedText.X,
-            MutedText.Y,
-            MutedText.Z,
-            0.55f)
-        : Vector4.One),
+                 joinTextSize.Y) *
+                0.5f),
+            ImGui.GetColorU32(
+                Vector4.One),
             joinText);
 
-        // ---------------------------------------------------------
-        // Room visibility status
-        // ---------------------------------------------------------
-
-        using (ImRaii.PushFont(UiBuilder.IconFont))
-        {
-            var statusIcon =
-                locked
-                    ? FontAwesomeIcon.Lock
-                    : FontAwesomeIcon.LockOpen;
-
-            var glyph =
-                statusIcon.ToIconString();
-
-            var glyphSize =
-                ImGui.CalcTextSize(glyph);
-
-            drawList.AddText(
-                new Vector2(
-                    statusMin.X +
-                    (statusWidth - glyphSize.X) * 0.5f,
-                    statusMin.Y +
-                    (buttonHeight - glyphSize.Y) * 0.5f),
-                ImGui.GetColorU32(
-                    locked
-                        ? MutedText
-                        : new Vector4(
-                            0.65f,
-                            0.75f,
-                            0.90f,
-                            1f)),
-                glyph);
-        }
-
-        // ---------------------------------------------------------
-        // Hover border
-        // ---------------------------------------------------------
-
-        if (hovered)
-        {
-            drawList.AddRect(
-                origin,
-                origin + size,
-                ImGui.GetColorU32(
-                    new Vector4(
+        drawList.AddRectFilled(
+            accessMin,
+            accessMax,
+            ImGui.GetColorU32(
+                accessHovered
+                    ? new Vector4(
                         Accent.X,
                         Accent.Y,
                         Accent.Z,
-                        0.45f)),
-                10f,
-                ImDrawFlags.None,
-                1f);
+                        0.20f)
+                    : new Vector4(
+                        0.025f,
+                        0.03f,
+                        0.055f,
+                        1f)),
+            Ui(6f));
+
+        drawList.AddRect(
+            accessMin,
+            accessMax,
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    accessHovered
+                        ? 0.95f
+                        : 0.58f)),
+            Ui(6f));
+
+        var accessGlyph =
+            (room.Kind == RoomKind.Locked
+                ? FontAwesomeIcon.Lock
+                : FontAwesomeIcon.Unlock)
+            .ToIconString();
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            var accessGlyphSize =
+                ImGui.CalcTextSize(
+                    accessGlyph);
+
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                new Vector2(
+                    accessMin.X +
+                    (accessButtonWidth -
+                     accessGlyphSize.X) *
+                    0.5f,
+                    accessMin.Y +
+                    (buttonHeight -
+                     accessGlyphSize.Y) *
+                    0.5f),
+                ImGui.GetColorU32(
+                    room.Kind == RoomKind.Locked
+                        ? visibilityColor
+                        : AccentHover),
+                accessGlyph);
         }
 
-        // ---------------------------------------------------------
-        // Restore the card as the active ImGui layout item
-        // ---------------------------------------------------------
-        //
-        // DrawAvatarChip() creates its own ImGui items. Without this,
-        // ImGui.SameLine() thinks the last item was the final tiny
-        // avatar instead of this entire room card, which causes the
-        // following cards to staircase diagonally.
-        //
-        // Re-reserve the exact card rectangle so the next SameLine()
-        // positions itself from the full card again.
-        ImGui.SetCursorScreenPos(origin);
+        if (joinHovered ||
+            accessHovered)
+        {
+            ImGui.SetMouseCursor(
+                ImGuiMouseCursor.Hand);
+        }
 
-        ImGui.Dummy(size);
+        if (accessHovered)
+        {
+            ImGui.SetTooltip(
+                room.Kind == RoomKind.Locked
+                    ? "Password required"
+                    : "Open room");
+        }
 
-        if (joinHovered &&
+        if ((joinHovered ||
+             accessHovered) &&
             onJoin is not null &&
-            ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            ImGui.IsMouseClicked(
+                ImGuiMouseButton.Left))
         {
             onJoin();
         }
+
+        //
+        // DrawAvatarChip created an ImGui item after the original card button.
+        // Restore the full card as the current layout item so SameLine and
+        // wrapping use the complete card rectangle.
+        //
+        ImGui.SetCursorScreenPos(
+            origin);
+
+        ImGui.Dummy(
+            size);
+    }
+
+    private float DrawWatchPartyTag(
+       ImDrawListPtr drawList,
+       Vector2 origin,
+       FontAwesomeIcon icon,
+       string text,
+       Vector4 color)
+    {
+        var glyph =
+            icon.ToIconString();
+
+        const float iconScale =
+            0.82f;
+
+        Vector2 glyphSize;
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            SetUiFontScale(
+                iconScale);
+
+            glyphSize =
+                ImGui.CalcTextSize(
+                    glyph);
+
+            SetUiFontScale(
+                1f);
+        }
+
+        var textSize =
+            ImGui.CalcTextSize(
+                text);
+
+        var height =
+            Ui(22f);
+
+        var width =
+            Ui(7f) +
+            glyphSize.X +
+            Ui(5f) +
+            textSize.X +
+            Ui(8f);
+
+        var max =
+            origin +
+            new Vector2(
+                width,
+                height);
+
+        drawList.AddRectFilled(
+            origin,
+            max,
+            ImGui.GetColorU32(
+                new Vector4(
+                    color.X,
+                    color.Y,
+                    color.Z,
+                    0.09f)),
+            Ui(5f));
+
+        drawList.AddRect(
+            origin,
+            max,
+            ImGui.GetColorU32(
+                new Vector4(
+                    color.X,
+                    color.Y,
+                    color.Z,
+                    0.72f)),
+            Ui(5f));
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            SetUiFontScale(
+                iconScale);
+
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                new Vector2(
+                    origin.X +
+                    Ui(7f),
+                    origin.Y +
+                    (height -
+                     glyphSize.Y) *
+                    0.5f),
+                ImGui.GetColorU32(
+                    color),
+                glyph);
+
+            SetUiFontScale(
+                1f);
+        }
+
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            new Vector2(
+                origin.X +
+                Ui(7f) +
+                glyphSize.X +
+                Ui(5f),
+                origin.Y +
+                (height -
+                 textSize.Y) *
+                0.5f),
+            ImGui.GetColorU32(
+                color),
+            text);
+
+        return width;
+    }
+
+    private float DrawWatchPartyAdultTag(
+     ImDrawListPtr drawList,
+     Vector2 origin)
+    {
+        const string text =
+            "18+";
+
+        var textSize =
+            ImGui.CalcTextSize(
+                text);
+
+        var color =
+            new Vector4(
+                1.00f,
+                0.28f,
+                0.32f,
+                1f);
+
+        var height =
+            Ui(22f);
+
+        var width =
+            textSize.X +
+            Ui(14f);
+
+        var max =
+            origin +
+            new Vector2(
+                width,
+                height);
+
+        drawList.AddRectFilled(
+            origin,
+            max,
+            ImGui.GetColorU32(
+                new Vector4(
+                    color.X,
+                    color.Y,
+                    color.Z,
+                    0.12f)),
+            Ui(5f));
+
+        drawList.AddRect(
+            origin,
+            max,
+            ImGui.GetColorU32(
+                new Vector4(
+                    color.X,
+                    color.Y,
+                    color.Z,
+                    0.82f)),
+            Ui(5f));
+
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            new Vector2(
+                origin.X +
+                (width -
+                 textSize.X) *
+                0.5f,
+                origin.Y +
+                (height -
+                 textSize.Y) *
+                0.5f),
+            ImGui.GetColorU32(
+                color),
+            text);
+
+        return width;
     }
 
     private void DrawCreateWatchPartyCard(
-     float width,
-     float height)
+        float width,
+        float height)
     {
         var origin =
             ImGui.GetCursorScreenPos();
 
         var size =
-            new Vector2(width, height);
+            new Vector2(
+                width,
+                height);
 
         var drawList =
             ImGui.GetWindowDrawList();
@@ -4956,7 +7484,7 @@ ImGui.GetColorU32(
                         CardBg.Y,
                         CardBg.Z,
                         0.45f)),
-            10f);
+            Ui(10f));
 
         DrawDashedRect(
             drawList,
@@ -4967,18 +7495,23 @@ ImGui.GetColorU32(
                     Accent.X,
                     Accent.Y,
                     Accent.Z,
-                    hovered ? 0.75f : 0.40f)),
-            10f);
+                    hovered
+                        ? 0.75f
+                        : 0.40f)),
+            Ui(10f));
 
         var centerX =
-            origin.X + width * 0.5f;
+            origin.X +
+            width * 0.5f;
 
         var iconCenter =
             new Vector2(
                 centerX,
-                origin.Y + 44f);
+                origin.Y +
+                Ui(44f));
 
-        const float circleRadius = 17f;
+        var circleRadius =
+            Ui(16f);
 
         drawList.AddCircleFilled(
             iconCenter,
@@ -4988,23 +7521,26 @@ ImGui.GetColorU32(
                     Accent.X,
                     Accent.Y,
                     Accent.Z,
-                    hovered ? 0.30f : 0.20f)));
+                    hovered
+                        ? 0.30f
+                        : 0.20f)));
 
-        using (ImRaii.PushFont(UiBuilder.IconFont))
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
         {
             var glyph =
-                FontAwesomeIcon.Plus.ToIconString();
+                FontAwesomeIcon.Plus
+                    .ToIconString();
 
             var glyphSize =
-                ImGui.CalcTextSize(glyph);
+                ImGui.CalcTextSize(
+                    glyph);
 
-            drawList.AddText(
-                new Vector2(
-                    iconCenter.X -
-                    glyphSize.X * 0.5f,
-                    iconCenter.Y -
-                    glyphSize.Y * 0.5f),
-                ImGui.GetColorU32(AccentHover),
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                iconCenter -
+                glyphSize * 0.5f,
+                ImGui.GetColorU32(
+                    AccentHover),
                 glyph);
         }
 
@@ -5012,83 +7548,103 @@ ImGui.GetColorU32(
             "Watch With Friends";
 
         var titleSize =
-            ImGui.CalcTextSize(title);
+            ImGui.CalcTextSize(
+                title);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
-                centerX - titleSize.X * 0.5f,
-                origin.Y + 72f),
-            ImGui.GetColorU32(Vector4.One),
+                centerX -
+                titleSize.X * 0.5f,
+                origin.Y +
+                Ui(70f)),
+            ImGui.GetColorU32(
+                Vector4.One),
             title);
 
         const string subtitle1 =
             "Create or join a room to";
 
         const string subtitle2 =
-            "watch videos together in Eorzea";
-
-
+            "watch together in Eorzea";
 
         var subtitle1Size =
-            ImGui.CalcTextSize(subtitle1);
+            ImGui.CalcTextSize(
+                subtitle1);
 
         var subtitle2Size =
-            ImGui.CalcTextSize(subtitle2);
+            ImGui.CalcTextSize(
+                subtitle2);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 centerX -
                 subtitle1Size.X * 0.5f,
-                origin.Y + 96f),
-            ImGui.GetColorU32(MutedText),
+                origin.Y +
+                Ui(94f)),
+            ImGui.GetColorU32(
+                MutedText),
             subtitle1);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 centerX -
                 subtitle2Size.X * 0.5f,
-                origin.Y + 113f),
-            ImGui.GetColorU32(MutedText),
+                origin.Y +
+                Ui(111f)),
+            ImGui.GetColorU32(
+                MutedText),
             subtitle2);
 
         // ---------------------------------------------------------
-        // Placeholder actions
+        // Actions
         // ---------------------------------------------------------
 
-        const float buttonGap = 8f;
-        var buttonHeight = Ui(28f);
-        var horizontalPadding = Ui(12f);
+        var buttonGap =
+            Ui(8f);
+
+        var buttonHeight =
+            Ui(28f);
+
+        var horizontalPadding =
+            Ui(12f);
 
         var buttonWidth =
-            (width - horizontalPadding * 2f - buttonGap) * 0.5f;
+            (width -
+             horizontalPadding * 2f -
+             buttonGap) *
+            0.5f;
 
         var buttonsY =
-            origin.Y + height - buttonHeight - Ui(10f);
+            origin.Y +
+            height -
+            buttonHeight -
+            Ui(10f);
 
         var newRoomMin =
             new Vector2(
-                origin.X + horizontalPadding,
+                origin.X +
+                horizontalPadding,
                 buttonsY);
 
         var newRoomMax =
             new Vector2(
-                newRoomMin.X + buttonWidth,
-                buttonsY + buttonHeight);
+                newRoomMin.X +
+                buttonWidth,
+                buttonsY +
+                buttonHeight);
 
         var joinRoomMin =
             new Vector2(
-                newRoomMax.X + buttonGap,
+                newRoomMax.X +
+                buttonGap,
                 buttonsY);
 
         var joinRoomMax =
             new Vector2(
-                joinRoomMin.X + buttonWidth,
-                buttonsY + buttonHeight);
-
-
-        // ---------------------------------------------------------
-        // New Room button
-        // ---------------------------------------------------------
+                joinRoomMin.X +
+                buttonWidth,
+                buttonsY +
+                buttonHeight);
 
         var mousePos =
             ImGui.GetMousePos();
@@ -5099,6 +7655,16 @@ ImGui.GetColorU32(
             mousePos.Y >= newRoomMin.Y &&
             mousePos.Y <= newRoomMax.Y;
 
+        var joinRoomHovered =
+            mousePos.X >= joinRoomMin.X &&
+            mousePos.X <= joinRoomMax.X &&
+            mousePos.Y >= joinRoomMin.Y &&
+            mousePos.Y <= joinRoomMax.Y;
+
+        // ---------------------------------------------------------
+        // New Room
+        // ---------------------------------------------------------
+
         drawList.AddRectFilled(
             newRoomMin,
             newRoomMax,
@@ -5106,32 +7672,32 @@ ImGui.GetColorU32(
                 newRoomHovered
                     ? AccentHover
                     : Accent),
-            6f);
+            Ui(6f));
 
-        const string newRoomText = "New Room";
+        const string newRoomText =
+            "New Room";
 
         var newRoomTextSize =
-            ImGui.CalcTextSize(newRoomText);
+            ImGui.CalcTextSize(
+                newRoomText);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 newRoomMin.X +
-                    (buttonWidth - newRoomTextSize.X) * 0.5f,
+                (buttonWidth -
+                 newRoomTextSize.X) *
+                0.5f,
                 newRoomMin.Y +
-                    (buttonHeight - newRoomTextSize.Y) * 0.5f),
-            ImGui.GetColorU32(Vector4.One),
+                (buttonHeight -
+                 newRoomTextSize.Y) *
+                0.5f),
+            ImGui.GetColorU32(
+                Vector4.One),
             newRoomText);
 
-
         // ---------------------------------------------------------
-        // Join Room button
+        // Join Room
         // ---------------------------------------------------------
-
-        var joinRoomHovered =
-            mousePos.X >= joinRoomMin.X &&
-            mousePos.X <= joinRoomMax.X &&
-            mousePos.Y >= joinRoomMin.Y &&
-            mousePos.Y <= joinRoomMax.Y;
 
         drawList.AddRectFilled(
             joinRoomMin,
@@ -5140,7 +7706,7 @@ ImGui.GetColorU32(
                 joinRoomHovered
                     ? CardBgHover
                     : CardBg),
-            6f);
+            Ui(6f));
 
         drawList.AddRect(
             joinRoomMin,
@@ -5150,43 +7716,48 @@ ImGui.GetColorU32(
                     Accent.X,
                     Accent.Y,
                     Accent.Z,
-                    joinRoomHovered ? 0.9f : 0.55f)),
-            6f);
+                    joinRoomHovered
+                        ? 0.90f
+                        : 0.55f)),
+            Ui(6f));
 
-        const string joinRoomText = "Join Room";
+        const string joinRoomText =
+            "Join Room";
 
         var joinRoomTextSize =
-            ImGui.CalcTextSize(joinRoomText);
+            ImGui.CalcTextSize(
+                joinRoomText);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 joinRoomMin.X +
-                    (buttonWidth - joinRoomTextSize.X) * 0.5f,
+                (buttonWidth -
+                 joinRoomTextSize.X) *
+                0.5f,
                 joinRoomMin.Y +
-                    (buttonHeight - joinRoomTextSize.Y) * 0.5f),
+                (buttonHeight -
+                 joinRoomTextSize.Y) *
+                0.5f),
             ImGui.GetColorU32(
                 joinRoomHovered
                     ? Vector4.One
                     : MutedText),
             joinRoomText);
 
-        if (newRoomHovered || joinRoomHovered)
+        if (newRoomHovered ||
+            joinRoomHovered)
         {
             ImGui.SetMouseCursor(
                 ImGuiMouseCursor.Hand);
         }
 
-        if (hovered)
-        {
-            ImGui.SetMouseCursor(
-                ImGuiMouseCursor.Hand);
-        }
-
-        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        if (ImGui.IsMouseClicked(
+                ImGuiMouseButton.Left))
         {
             if (newRoomHovered)
             {
-                StartWatchParty(goToPlayer: true);
+                StartWatchParty(
+                    goToPlayer: true);
             }
             else if (joinRoomHovered)
             {
@@ -5282,19 +7853,19 @@ ImGui.GetColorU32(
         var artWidth = MathF.Max(avail - textWidth - gap, 220f);
 
         ImGui.BeginGroup();
-        ImGui.SetWindowFontScale(1.75f);
+        SetUiFontScale(1.75f);
         ImGui.TextUnformatted("Welcome to ");
         ImGui.SameLine(0, 0);
         ImGui.TextColored(Accent, "Alpha Channel");
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(1f);
 
-        ImGui.Dummy(new Vector2(0, 2));
+        ImGui.Dummy(UiVec(0, 2));
 
-        ImGui.SetWindowFontScale(1.15f);
+        SetUiFontScale(1.15f);
         ImGui.TextColored(MutedText, "Cast. Watch. Together.");
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(1f);
 
-        ImGui.Dummy(new Vector2(0, 6));
+        ImGui.Dummy(UiVec(0, 6));
 
         ImGui.PushTextWrapPos(ImGui.GetCursorPos().X + textWidth);
         ImGui.TextWrapped(
@@ -5302,7 +7873,7 @@ ImGui.GetColorU32(
             "share screens, and enjoy moments together with friends wherever you are.");
         ImGui.PopTextWrapPos();
 
-        ImGui.Dummy(new Vector2(0, 18));
+        ImGui.Dummy(UiVec(0, 18));
 
         var inviteHeight = 170f;
         var inviteWidth = ImGui.GetContentRegionAvail().X * 0.82f;
@@ -5316,7 +7887,7 @@ ImGui.GetColorU32(
             ImGui.GetColorU32(new Vector4(CardBg.X, CardBg.Y, CardBg.Z, 0.45f)),
             14f);
 
-        using (ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, new Vector2(16, 14)))
+        using (ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, UiVec(16, 14)))
         using (var invite = ImRaii.Child(
     "##inviteFriends",
     new Vector2(inviteWidth, inviteHeight),
@@ -5325,8 +7896,8 @@ ImGui.GetColorU32(
         {
             if (invite)
             {
-                var imageSize = new Vector2(56, 56);
-                var imageOffset = new Vector2(12, 12);
+                var imageSize = UiVec(56, 56);
+                var imageOffset = UiVec(12, 12);
 
                 var addFriendWrap = addFriendImage?.GetWrapOrDefault();
 
@@ -5349,19 +7920,19 @@ ImGui.GetColorU32(
 
                 ImGui.BeginGroup();
 
-                ImGui.Dummy(new Vector2(0, 6));
+                ImGui.Dummy(UiVec(0, 6));
 
-                ImGui.SetWindowFontScale(1.3f);
+                SetUiFontScale(1.3f);
                 ImGui.TextUnformatted("Invite your friends to watch with you!");
-                ImGui.SetWindowFontScale(1f);
+                SetUiFontScale(1f);
 
                 ImGui.TextColored(
     MutedText,
     "Add your friends to host watch parties, share virtual screens,\nand watch together in sync across Eorzea.");
 
-                ImGui.Dummy(new Vector2(0, 2));
+                ImGui.Dummy(UiVec(0, 2));
 
-                ImGui.SetNextItemWidth(inviteWidth - 250);
+                ImGui.SetNextItemWidth(inviteWidth - Ui(250));
 
                 ImGui.InputTextWithHint(
                     "##friendName",
@@ -5381,7 +7952,7 @@ ImGui.GetColorU32(
                                .Push(ImGuiCol.ButtonActive, AccentActive)
                                .Push(ImGuiCol.Text, Vector4.One))
                     {
-                        if (ImGui.Button("##addFriend", new Vector2(120, 34)))
+                        if (ImGui.Button("##addFriend", UiVec(120, 34)))
                         {
                             // Add friend action later
                         }
@@ -5394,18 +7965,18 @@ ImGui.GetColorU32(
                             var icon = FontAwesomeIcon.UserPlus.ToIconString();
                             var iconSize = ImGui.CalcTextSize(icon);
 
-                            ImGui.GetWindowDrawList().AddText(
-                                buttonMin + new Vector2(14, (buttonSize.Y - iconSize.Y) * 0.5f),
+                            ImGui.GetWindowDrawList().AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                                buttonMin + new Vector2(Ui(14), (buttonSize.Y - iconSize.Y) * 0.5f),
                                 ImGui.GetColorU32(Vector4.One),
                                 icon);
                         }
 
-                        ImGui.GetWindowDrawList().AddText(
-    buttonMin + new Vector2(36, 7),
+                        ImGui.GetWindowDrawList().AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+    buttonMin + UiVec(36, 7),
     ImGui.GetColorU32(Vector4.One),
     "Add Friend");
 
-                        ImGui.Dummy(new Vector2(0, 12));
+                        ImGui.Dummy(UiVec(0, 12));
                     }
                 }
 
@@ -5509,14 +8080,14 @@ ImGui.GetColorU32(
         drawList.AddLine(
             new Vector2(ImGui.GetCursorScreenPos().X, lineY),
             new Vector2(
-                ImGui.GetCursorScreenPos().X + (availWidth - titleSize.X) * 0.5f - 12,
+                ImGui.GetCursorScreenPos().X + (availWidth - titleSize.X) * 0.5f - Ui(12),
                 lineY),
             lineColor,
             1f);
 
         drawList.AddLine(
             new Vector2(
-                ImGui.GetCursorScreenPos().X + (availWidth + titleSize.X) * 0.5f + 12,
+                ImGui.GetCursorScreenPos().X + (availWidth + titleSize.X) * 0.5f + Ui(12),
                 lineY),
             new Vector2(
                 ImGui.GetCursorScreenPos().X + availWidth,
@@ -5531,7 +8102,7 @@ ImGui.GetColorU32(
 
         ImGui.SetCursorPosX(ImGui.GetStyle().WindowPadding.X);
 
-        ImGui.Dummy(new Vector2(0, 2));
+        ImGui.Dummy(UiVec(0, 2));
 
         var avail = ImGui.GetContentRegionAvail().X;
 
@@ -5606,13 +8177,17 @@ Hex(0x34D399),
 
         DrawCapabilityCard(
             cardWidth, cardHeight, iconSize, titleY, bodyY, gapAfterTitle,
-            FontAwesomeIcon.ThLarge,
+            FontAwesomeIcon.Comment,
 Hex(0x38BDF8),
 "browse-apps.png",
-"Browse Apps",
-"Open chat, Hub, Tweeter, and more.",
-"App Store →",
-() => currentPage = HomePage.Apps);
+"Alpha Chat",
+"Open private messages and group chats with friends.",
+"Open chat →",
+() =>
+{
+    conversationsDirty = true;
+    currentPage = HomePage.Messages;
+});
     }
 
     // Fixed-size tile: background + hit target only claim layout; copy is DrawList-wrapped inside.
@@ -5640,9 +8215,7 @@ Hex(0x38BDF8),
                 ImDrawFlags.None, 1.5f);
         }
 
-        var discOrigin = origin + new Vector2(
-            12f,
-            12f);
+        var discOrigin = origin + UiVec(12f, 12f);
 
 
         var image = GetCapabilityImage(imageName);
@@ -5668,8 +8241,8 @@ Hex(0x38BDF8),
         var lineH = ImGui.GetTextLineHeight();
 
         var textPos = origin + new Vector2(
-            12f + 48f + 16f,
-            18f);
+            Ui(12f) + Ui(48f) + Ui(16f),
+            Ui(18f));
         var titleBottom = DrawWrappedLines(drawList, textPos, wrapWidth, lineH, 2,
             ImGui.GetColorU32(Vector4.One), title);
         var bodyBottom = DrawWrappedLines(
@@ -5681,8 +8254,8 @@ Hex(0x38BDF8),
             ImGui.GetColorU32(MutedText),
             body);
 
-        drawList.AddText(
-            new Vector2(origin.X + 16, origin.Y + height - 24),
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            new Vector2(origin.X + Ui(16), origin.Y + height - Ui(24)),
             ImGui.GetColorU32(color),
             actionText);
     }
@@ -5702,7 +8275,7 @@ Hex(0x38BDF8),
                 return;
             }
 
-            drawList.AddText(new Vector2(pos.X, y), color, value);
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), new Vector2(pos.X, y), color, value);
             y += lineHeight;
             linesDrawn++;
         }
@@ -5766,8 +8339,8 @@ Hex(0x38BDF8),
     {
         const float pad = 12f;
         const float badge = 24f;
-        const float badgeGap = 10f;
-        const float titleGap = 4f;
+        var badgeGap = Ui(10f);
+        var titleGap = Ui(4f);
 
         // Full inner width for wrapped body — no side column stealing space.
         var wrapWidth = MathF.Max(40f, width - (pad * 2f));
@@ -5787,7 +8360,7 @@ Hex(0x38BDF8),
         drawList.AddCircleFilled(badgeCenter, badge * 0.5f, ImGui.GetColorU32(color));
         var num = number.ToString();
         var numSize = ImGui.CalcTextSize(num);
-        drawList.AddText(badgeCenter - numSize * 0.5f, ImGui.GetColorU32(Vector4.One), num);
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), badgeCenter - numSize * 0.5f, ImGui.GetColorU32(Vector4.One), num);
 
         // Title to the right of the badge; body on the next row across the full card width.
         // PushTextWrapPos is window-local X (not screen).
@@ -5808,7 +8381,7 @@ Hex(0x38BDF8),
         {
             var glyph = icon.ToIconString();
             var glyphSize = ImGui.CalcTextSize(glyph);
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 origin + new Vector2(width - pad - glyphSize.X, pad),
                 ImGui.GetColorU32(new Vector4(color.X, color.Y, color.Z, 0.35f)),
                 glyph);
@@ -5850,7 +8423,8 @@ Hex(0x38BDF8),
         }
     }
 
-    private void DoJoin(string hostName, string? password = null)
+    private void DoJoin(
+        string hostName, string? password = null, string? visibleHostName = null)
     {
         if (hostName.Length == 0)
         {
@@ -5864,25 +8438,18 @@ Hex(0x38BDF8),
             return;
         }
 
-        var engine =
-            screenController.Engine;
+        //
+        // This is a new room, so its content may offer the TV prompt once.
+        //
+        ResetViewerTvSpawnPrompt();
 
-        if (engine.IsPlayingSnes ||
-            engine.IsPlayingGameBoy)
-        {
-            Plugin.ChatGui.Print(
-                "[AlphaChannel] End gameplay before joining a Watch Party.");
-
-            joinError =
-                "End gameplay before joining a Watch Party.";
-
-            return;
-        }
-
-        clearQueueWhenJoined = true;
+        clearQueueWhenJoined =
+            true;
 
         joinedHostDisplayName =
-            hostName.Trim();
+            string.IsNullOrWhiteSpace(visibleHostName)
+                ? hostName.Trim()
+                : visibleHostName.Trim();
 
         gameplayStreamOfferDismissed =
     false;
@@ -5904,9 +8471,6 @@ Hex(0x38BDF8),
             ? $"{item.ActorDisplayName} joined {item.Metadata}'s watch-along"
             : $"{item.ActorDisplayName} joined a watch-along",
         "FriendAccepted" => $"{item.ActorDisplayName} accepted a friend request",
-        "PostLiked" => $"{item.ActorDisplayName} liked your post",
-        "PostReplied" => $"{item.ActorDisplayName} replied to your post",
-        "Mentioned" => $"{item.ActorDisplayName} mentioned you",
         "VenueSaved" => item.Metadata is { Length: > 0 }
             ? $"{item.ActorDisplayName} saved a venue: {item.Metadata}"
             : $"{item.ActorDisplayName} saved a venue",

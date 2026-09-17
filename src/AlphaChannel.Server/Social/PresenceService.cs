@@ -16,12 +16,38 @@ internal sealed class PresenceService(
     // every tick with no diff-check (see ConnectionHandler's own comment on why), so NotifyAsync
     // needs to be safe to call that often without hammering the database or spamming friends with
     // identical pushes on every tick.
-    private readonly ConcurrentDictionary<string, (bool Online, string? WatchingLabel)> lastPushed = new();
+    private readonly ConcurrentDictionary<
+    string,
+    (
+        bool Online,
+        string? WatchingLabel,
+        bool HostingJoinableWatchParty
+    )> lastPushed = new();
 
     public async Task NotifyAsync(string accountIdString, bool online, CancellationToken cancellationToken)
     {
-        var watchingLabel = online ? PresenceLabels.WatchingLabel(accountIdString, rooms, directory, liveDirectory) : null;
-        var current = (online, watchingLabel);
+        var watchingLabel =
+            online
+                ? PresenceLabels.WatchingLabel(
+                    accountIdString,
+                    rooms,
+                    directory,
+                    liveDirectory)
+                : null;
+
+        var hostingJoinableWatchParty =
+            online &&
+            PresenceLabels.HostingJoinableWatchParty(
+                accountIdString,
+                rooms);
+
+        var current =
+            (
+                Online: online,
+                WatchingLabel: watchingLabel,
+                HostingJoinableWatchParty:
+                    hostingJoinableWatchParty
+            );
         if (lastPushed.TryGetValue(accountIdString, out var previous) && previous == current)
         {
             return;
@@ -73,6 +99,8 @@ internal sealed class PresenceService(
                 AccountId = accountIdString,
                 Online = online,
                 WatchingLabel = watchingLabel,
+                HostingJoinableWatchParty =
+                    hostingJoinableWatchParty,
             }, cancellationToken).ConfigureAwait(false);
         }
     }

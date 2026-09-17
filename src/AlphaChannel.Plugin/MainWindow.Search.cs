@@ -1,10 +1,11 @@
+using System.Collections.Concurrent;
 using AlphaChannel.Contracts;
 using AlphaChannel.Plugin.Video;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Utility.Raii;
-using System.Diagnostics;
 using System.Text.Json;
+
 
 namespace AlphaChannel.Plugin;
 
@@ -13,30 +14,94 @@ internal sealed partial class MainWindow
     private readonly VideoUrlResolver searchResolver = new();
     private readonly TwitchChannelChecker twitchChecker = new();
     private string searchQuery = string.Empty;
-    private string cookiesPathInput = Plugin.Cfg.YouTubeCookiesPath ?? string.Empty;
-    private string? cookiesSearchError;
-    private bool youtubeSignInHelp;
-    private bool youtubeShowAdvancedCookies;
 
     // Written from RunSearchAsync's continuation, which resumes on an arbitrary thread pool thread
     // (not the main thread Draw() runs on) - same reasoning as Plugin.cs's pendingRemoteState.
+    private enum VideoSearchOrder
+    {
+        Relevance,
+        Shortest,
+        Longest
+    }
+
+    private enum VideoDurationFilter
+    {
+        Any,
+        UnderFiveMinutes,
+        FiveToTwentyMinutes,
+        OverTwentyMinutes
+    }
+
     private volatile bool isSearching;
+
     private volatile List<VideoSearchEntry>? searchResults;
 
-    // Home media-hub YouTube shelf.
-    // Kept separate from Player search so Home doesn't overwrite the user's Browse results.
+    private VideoSearchOrder youtubeSearchOrder =
+        VideoSearchOrder.Relevance;
+
+    private VideoDurationFilter youtubeDurationFilter =
+        VideoDurationFilter.Any;
+
+    // ---------------------------------------------------------
+    // Shared Topics cache / Home YouTube shelf
+    // ---------------------------------------------------------
+    //
+    // Home never performs its own YouTube searches. It selects up to five
+    // enabled topics and builds its shelf entirely from the shared Browse
+    // Topics cache.
+    //
     private volatile bool isLoadingHomeYouTube;
-    private volatile List<VideoSearchEntry>? homeYouTubeResults;
-    private bool homeYouTubeRequested;
-    private DateTime homeYouTubeCacheTime;
-    private readonly Random trendingRandom = new();
+
+    private volatile List<VideoSearchEntry>?
+        homeYouTubeResults;
+
+    private readonly Random trendingRandom =
+        new();
+
+    private readonly HashSet<string>
+        homeYouTubeSelectedTopics =
+            new(StringComparer.OrdinalIgnoreCase);
+
+    //
+    // Ensures startup cache preparation runs once per plugin load.
+    //
+    private bool topicVideoStartupRequested;
+
+    //
+    // Debounces topic changes made through Settings so several nearby changes
+    // result in one cache refresh.
+    //
+    private int topicSettingsRefreshGeneration;
 
     // Browse Videos full-page discovery
+    private static readonly TimeSpan BrowseVideoCacheDuration =
+        TimeSpan.FromHours(3);
+
     private volatile bool isLoadingBrowseVideos;
-    private volatile Dictionary<string, List<VideoSearchEntry>>? browseVideoResults;
+
+    private volatile Dictionary<string, List<VideoSearchEntry>>?
+        browseVideoResults;
+
     private DateTime browseVideoCacheTime;
+
+    //
+    // Identifies the exact subscribed-topic collection used to build the
+    // current Browse cache. Changing topic settings therefore invalidates
+    // the cache immediately, even when it is less than three hours old.
+    //
+    private string? browseVideoTopicSignature;
+
+    private int browseVideoExpectedTopicCount;
+
     private bool browseVideoRequested;
+
     private CancellationTokenSource? browseVideosCts;
+
+    //
+    // Prevents an older cancelled request from publishing over a newer
+    // refresh if cancellation and completion happen at nearly the same time.
+    //
+    private int browseVideoLoadGeneration;
 
     // Youtube Trending
     // s
@@ -50,38 +115,670 @@ internal sealed partial class MainWindow
     private bool ffxivYouTubeRequested;
 
     // Dailymotion search (kept separate from YouTube)
-    private string dailymotionSearchQuery = string.Empty;
+    private string dailymotionSearchQuery =
+        string.Empty;
+
     private volatile bool isSearchingDailymotion;
-    private volatile List<VideoSearchEntry>? dailymotionSearchResults;
-    private volatile string? dailymotionSearchError;
 
-    private string twitchChannelInput = string.Empty;
+    private volatile List<VideoSearchEntry>?
+        dailymotionSearchResults;
+
+    private volatile string?
+        dailymotionSearchError;
+
+    private VideoSearchOrder dailymotionSearchOrder =
+        VideoSearchOrder.Relevance;
+
+    private VideoDurationFilter dailymotionDurationFilter =
+        VideoDurationFilter.Any;
+
+    private string twitchChannelInput =
+        string.Empty;
+
     private volatile bool isCheckingTwitch;
-    private volatile TwitchStreamInfo? twitchResult;
-    private volatile string? twitchError;
 
-    private bool trendingDirty = true;
-    private TwitchStreamDto[] trendingStreams = [];
+    private volatile TwitchStreamInfo?
+        twitchResult;
+
+    private volatile string?
+        twitchError;
+
+    private volatile bool twitchResultIsOffline;
+
+    private volatile string?
+        twitchCheckedChannelName;
+
+    private bool trendingDirty =
+        true;
+
+    private TwitchStreamDto[] trendingStreams =
+        [];
+
+    private const int MaximumFavouriteTwitchChannels =
+        20;
+
+    private static readonly TimeSpan TwitchFavouriteCacheDuration =
+        TimeSpan.FromMinutes(15);
+
+    private sealed record TwitchFavouriteStatus(
+        string ChannelName,
+        TwitchStreamInfo? Stream,
+        bool IsOffline,
+        string? Error,
+        DateTime CheckedAtUtc);
+
+    private readonly ConcurrentDictionary<string, TwitchFavouriteStatus>
+        twitchFavouriteStatuses =
+            new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly SemaphoreSlim twitchFavouriteCheckGate =
+        new(
+            2,
+            2);
+
+    private volatile bool isRefreshingTwitchFavourites;
+
+    private DateTime? twitchFavouritesLastRefreshUtc;
+
+    private static List<VideoSearchEntry> FilterAndOrderSearchResults(
+    IReadOnlyList<VideoSearchEntry> results,
+    VideoSearchOrder order,
+    VideoDurationFilter durationFilter)
+    {
+        IEnumerable<VideoSearchEntry> filtered =
+            results;
+
+        filtered =
+            durationFilter switch
+            {
+                VideoDurationFilter.UnderFiveMinutes =>
+                    filtered.Where(
+                        result =>
+                            result.Duration is { } duration &&
+                            duration <
+                            TimeSpan.FromMinutes(5)),
+
+                VideoDurationFilter.FiveToTwentyMinutes =>
+                    filtered.Where(
+                        result =>
+                            result.Duration is { } duration &&
+                            duration >=
+                            TimeSpan.FromMinutes(5) &&
+                            duration <=
+                            TimeSpan.FromMinutes(20)),
+
+                VideoDurationFilter.OverTwentyMinutes =>
+                    filtered.Where(
+                        result =>
+                            result.Duration is { } duration &&
+                            duration >
+                            TimeSpan.FromMinutes(20)),
+
+                _ =>
+                    filtered
+            };
+
+        filtered =
+            order switch
+            {
+                VideoSearchOrder.Shortest =>
+                    filtered
+                        .OrderBy(
+                            result =>
+                                result.Duration ??
+                                TimeSpan.MaxValue),
+
+                VideoSearchOrder.Longest =>
+                    filtered
+                        .OrderByDescending(
+                            result =>
+                                result.Duration ??
+                                TimeSpan.Zero),
+
+                _ =>
+                    filtered
+            };
+
+        return filtered.ToList();
+    }
+
+    private static string GetVideoSearchOrderName(
+        VideoSearchOrder order)
+    {
+        return order switch
+        {
+            VideoSearchOrder.Shortest =>
+                "Shortest",
+
+            VideoSearchOrder.Longest =>
+                "Longest",
+
+            _ =>
+                "Relevance"
+        };
+    }
+
+    private static string GetVideoDurationFilterName(
+        VideoDurationFilter filter)
+    {
+        return filter switch
+        {
+            VideoDurationFilter.UnderFiveMinutes =>
+                "Under 5 min",
+
+            VideoDurationFilter.FiveToTwentyMinutes =>
+                "5–20 min",
+
+            VideoDurationFilter.OverTwentyMinutes =>
+                "Over 20 min",
+
+            _ =>
+                "Any"
+        };
+    }
+
+    private void DrawVideoSearchFilters(
+    string id,
+    ref VideoSearchOrder order,
+    ref VideoDurationFilter durationFilter)
+    {
+        var orderWidth = Ui(170f);
+
+        var durationWidth = Ui(160f);
+
+        const float gap =
+            10f;
+
+        var controlsWidth =
+            orderWidth +
+            durationWidth +
+            gap;
+
+        var rightEdge =
+            ImGui.GetWindowPos().X +
+            ImGui.GetContentRegionMax().X;
+
+        //
+        // Keep both controls on the same row as the result count.
+        //
+
+        ImGui.SameLine();
+
+        var currentPosition =
+            ImGui.GetCursorScreenPos();
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                rightEdge -
+                controlsWidth,
+                currentPosition.Y));
+
+        ImGui.SetNextItemWidth(
+            orderWidth);
+
+        if (ImGui.BeginCombo(
+                $"##searchOrder_{id}",
+                $"Order: {GetVideoSearchOrderName(order)}"))
+        {
+            foreach (var option in new[]
+                     {
+                     VideoSearchOrder.Relevance,
+                     VideoSearchOrder.Shortest,
+                     VideoSearchOrder.Longest
+                 })
+            {
+                var selected =
+                    order == option;
+
+                if (ImGui.Selectable(
+                        GetVideoSearchOrderName(option),
+                        selected))
+                {
+                    order =
+                        option;
+                }
+
+                if (selected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.SameLine(
+            0f,
+            gap);
+
+        ImGui.SetNextItemWidth(
+            durationWidth);
+
+        if (ImGui.BeginCombo(
+                $"##searchDuration_{id}",
+                $"Duration: {GetVideoDurationFilterName(durationFilter)}"))
+        {
+            foreach (var option in new[]
+                     {
+                     VideoDurationFilter.Any,
+                     VideoDurationFilter.UnderFiveMinutes,
+                     VideoDurationFilter.FiveToTwentyMinutes,
+                     VideoDurationFilter.OverTwentyMinutes
+                 })
+            {
+                var selected =
+                    durationFilter == option;
+
+                if (ImGui.Selectable(
+                        GetVideoDurationFilterName(option),
+                        selected))
+                {
+                    durationFilter =
+                        option;
+                }
+
+                if (selected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+    }
+
+    private void DrawVideoSearchResultsGrid(
+    string id,
+    IReadOnlyList<VideoSearchEntry> results)
+    {
+        var resultsHeight =
+            MathF.Max(
+                180f,
+                ImGui.GetContentRegionAvail().Y -
+                8f);
+
+        using var resultsChild =
+            ImRaii.Child(
+                $"##videoSearchResults_{id}",
+                new Vector2(
+                    -1f,
+                    resultsHeight),
+                false,
+                ImGuiWindowFlags.None);
+
+        if (!resultsChild)
+        {
+            return;
+        }
+
+        var columnGap = Ui(10f);
+
+        var rowGap = Ui(10f);
+
+        var availableWidth =
+            ImGui.GetContentRegionAvail().X;
+
+        var cardWidth =
+            (availableWidth -
+             columnGap) /
+            2f;
+
+        for (var index = 0;
+             index < results.Count;
+             index++)
+        {
+            if ((index % 2) != 0)
+            {
+                ImGui.SameLine(
+                    0f,
+                    columnGap);
+            }
+
+            DrawVideoSearchResultCard(
+                id,
+                index,
+                results[index],
+                new Vector2(
+                    cardWidth,
+                    Ui(112f)));
+
+            var completedRow =
+                (index % 2) != 0;
+
+            var finalCard =
+                index ==
+                results.Count - 1;
+
+            if (completedRow ||
+                finalCard)
+            {
+                ImGui.Dummy(
+                    new Vector2(
+                        0f,
+                        rowGap));
+            }
+        }
+    }
+
+    private void DrawVideoSearchResultCard(
+        string sourceId,
+        int index,
+        VideoSearchEntry result,
+        Vector2 size)
+    {
+        ImGui.PushID(
+            $"{sourceId}_{index}");
+
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.ChildRounding,
+                   8f))
+        using (ImRaii.PushColor(
+                   ImGuiCol.ChildBg,
+                   new Vector4(
+                       0.045f,
+                       0.06f,
+                       0.10f,
+                       1f)))
+        using (var card = ImRaii.Child(
+                   "##videoSearchCard",
+                   size,
+                   false,
+                   ImGuiWindowFlags.NoScrollbar |
+                   ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            if (card)
+            {
+                var origin =
+                    ImGui.GetCursorScreenPos();
+
+                var drawList =
+                    ImGui.GetWindowDrawList();
+
+                var innerPadding = Ui(8f);
+
+                var thumbnailHeight =
+                    size.Y -
+                    (innerPadding * 2f);
+
+                var thumbnailWidth =
+                    thumbnailHeight *
+                    (16f / 9f);
+
+                var thumbnailMinimum =
+                    new Vector2(
+                        origin.X +
+                        innerPadding,
+                        origin.Y +
+                        innerPadding);
+
+                var thumbnailMaximum =
+                    thumbnailMinimum +
+                    new Vector2(
+                        thumbnailWidth,
+                        thumbnailHeight);
+
+                //
+                // Draw a quiet placeholder while the thumbnail downloads.
+                //
+
+                drawList.AddRectFilled(
+                    thumbnailMinimum,
+                    thumbnailMaximum,
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            0.025f,
+                            0.035f,
+                            0.065f,
+                            1f)),
+                    7f);
+
+                var thumbnail =
+                    thumbnails.Get(
+                        result.ThumbnailUrl);
+
+                if (thumbnail is not null)
+                {
+                    drawList.AddImageRounded(
+                        thumbnail.Handle,
+                        thumbnailMinimum,
+                        thumbnailMaximum,
+                        Vector2.Zero,
+                        Vector2.One,
+                        uint.MaxValue,
+                        7f);
+                }
+
+                var contentX =
+                    thumbnailMaximum.X +
+                    12f;
+
+                var contentRight =
+                    origin.X +
+                    size.X -
+                    10f;
+
+                //
+                // Title
+                //
+
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        contentX,
+                        origin.Y + Ui(9f)));
+
+                ImGui.PushTextWrapPos(
+                    contentRight);
+
+                ImGui.TextColored(
+                    Vector4.One,
+                    TruncateVideoTitle(
+                        result.Title));
+
+                ImGui.PopTextWrapPos();
+
+                //
+                // Creator and duration
+                //
+
+                var metadataParts =
+                    new List<string> { result.ChannelName };
+
+                if (result.Duration is { } duration)
+                {
+                    metadataParts.Add(
+                        FormatTime((float)duration.TotalSeconds));
+                }
+
+                if (result.ViewCount is { } views)
+                {
+                    metadataParts.Add(
+                        FormatViewCount(views));
+                }
+
+                var metadata =
+                    string.Join("  •  ", metadataParts);
+
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        contentX,
+                        origin.Y + Ui(46f)));
+
+                SetUiFontScale(
+                    0.84f);
+
+                ImGui.TextColored(
+                    MutedText,
+                    metadata);
+
+                SetUiFontScale(
+                    1f);
+
+                //
+                // Actions
+                //
+
+                var playSize =
+                    UiVec(68f, 26f);
+
+                var addSize =
+                    UiVec(62f, 26f);
+
+                var buttonGap = Ui(8f);
+
+                var actionsWidth =
+                    playSize.X +
+                    addSize.X +
+                    buttonGap;
+
+                var actionsX =
+                    MathF.Max(
+                        contentX,
+                        contentRight -
+                        actionsWidth);
+
+                var actionsY =
+                    origin.Y +
+                    size.Y -
+                    playSize.Y -
+                    8f;
+
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        actionsX,
+                        actionsY));
+
+                using (ImRaii.PushStyle(
+                           ImGuiStyleVar.FrameRounding,
+                           6f))
+                using (ImRaii.PushColor(
+                           ImGuiCol.Button,
+                           Accent)
+                           .Push(
+                               ImGuiCol.ButtonHovered,
+                               AccentHover)
+                           .Push(
+                               ImGuiCol.ButtonActive,
+                               AccentActive))
+                {
+                    var buttonPosition =
+                        ImGui.GetCursorScreenPos();
+
+                    if (ImGui.Button(
+                            "##play",
+                            playSize))
+                    {
+                        HandlePlayNow(
+                            new VideoQueueEntry(
+                                result.Url,
+                                result.Title,
+                                result.ChannelName,
+                                result.Duration,
+                                result.ThumbnailUrl));
+                    }
+
+                    DrawPlayerActionButtonContent(
+                        buttonPosition,
+                        playSize,
+                        FontAwesomeIcon.Play,
+                        "Play",
+                        Vector4.One);
+                }
+
+                ImGui.SameLine(
+                    0f,
+                    buttonGap);
+
+                using (ImRaii.PushStyle(
+                           ImGuiStyleVar.FrameRounding,
+                           6f))
+                using (ImRaii.PushColor(
+                           ImGuiCol.Button,
+                           new Vector4(
+                               0.055f,
+                               0.07f,
+                               0.115f,
+                               1f))
+                           .Push(
+                               ImGuiCol.ButtonHovered,
+                               new Vector4(
+                                   0.075f,
+                                   0.095f,
+                                   0.15f,
+                                   1f))
+                           .Push(
+                               ImGuiCol.ButtonActive,
+                               new Vector4(
+                                   0.075f,
+                                   0.095f,
+                                   0.15f,
+                                   1f)))
+                {
+                    var buttonPosition =
+                        ImGui.GetCursorScreenPos();
+
+                    if (ImGui.Button(
+                            "##add",
+                            addSize))
+                    {
+                        HandleAddToQueue(
+                            new VideoQueueEntry(
+                                result.Url,
+                                result.Title,
+                                result.ChannelName,
+                                result.Duration,
+                                result.ThumbnailUrl));
+
+                        if (!ShouldUseViewerMediaActions)
+                        {
+                            queueAddedFeedbackUntil =
+                                ImGui.GetTime() +
+                                2.0;
+                        }
+                    }
+
+                    drawList.AddRect(
+                        buttonPosition,
+                        buttonPosition +
+                        addSize,
+                        ImGui.GetColorU32(
+                            new Vector4(
+                                MutedText.X,
+                                MutedText.Y,
+                                MutedText.Z,
+                                0.16f)),
+                        6f,
+                        ImDrawFlags.None,
+                        1f);
+
+                    DrawPlayerActionButtonContent(
+                        buttonPosition,
+                        addSize,
+                        FontAwesomeIcon.Plus,
+                        "Add",
+                        Vector4.One);
+                }
+            }
+        }
+
+        ImGui.PopID();
+    }
 
     // Manual YouTube/Twitch panels — Player source tabs call these directly.
     private void DrawYouTubeSearch()
     {
-        ImGui.SetWindowFontScale(1.15f);
+        SetUiFontScale(1.15f);
 
         ImGui.TextColored(
             Vector4.One,
             "Search YouTube");
 
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(1f);
 
-        ImGui.Dummy(new Vector2(0f, 10f));
+        ImGui.Dummy(UiVec(0f, 10f));
 
-        DrawYouTubeLoginBanner();
-
-        ImGui.Dummy(new Vector2(0f, 8f));
 
         // Search field
-        ImGui.SetNextItemWidth(-66f);
+        ImGui.SetNextItemWidth(-Ui(66f));
 
         bool submitted;
 
@@ -90,7 +787,7 @@ internal sealed partial class MainWindow
             8f)
             .Push(
                 ImGuiStyleVar.FramePadding,
-                new Vector2(14f, 10f)))
+                UiVec(14f, 10f)))
         using (ImRaii.PushColor(
             ImGuiCol.FrameBg,
             new Vector4(0.045f, 0.06f, 0.105f, 1f))
@@ -103,7 +800,7 @@ internal sealed partial class MainWindow
         {
             submitted = ImGui.InputTextWithHint(
                 "##search",
-                "Search YouTube...",
+                "Enter a YouTube URL or search term...",
                 ref searchQuery,
                 200,
                 ImGuiInputTextFlags.EnterReturnsTrue);
@@ -119,7 +816,7 @@ internal sealed partial class MainWindow
             8f)
             .Push(
                 ImGuiStyleVar.FramePadding,
-                new Vector2(12f, 10f)))
+                UiVec(12f, 10f)))
         using (ImRaii.PushColor(
             ImGuiCol.Button,
             Accent)
@@ -133,7 +830,7 @@ internal sealed partial class MainWindow
         {
             clicked = ImGui.Button(
                 FontAwesomeIcon.Search.ToIconString(),
-                new Vector2(48f, 0f));
+                UiVec(48f, 0f));
         }
 
         if ((submitted || clicked) &&
@@ -146,7 +843,7 @@ internal sealed partial class MainWindow
 
         if (isSearching)
         {
-            ImGui.Dummy(new Vector2(0f, 6f));
+            ImGui.Dummy(UiVec(0f, 6f));
 
             ImGui.TextColored(
                 MutedText,
@@ -159,335 +856,129 @@ internal sealed partial class MainWindow
             return;
         }
 
-        ImGui.Dummy(new Vector2(0f, 16f));
+        var displayedResults =
+            FilterAndOrderSearchResults(
+                results,
+                youtubeSearchOrder,
+                youtubeDurationFilter);
+
+        ImGui.Dummy(
+            UiVec(0f, 16f));
 
         ImGui.TextColored(
       Accent,
-      $"Results ({results.Count})");
+      $"Results ({displayedResults.Count})");
 
-        // Small explanation beside the result count.
-        ImGui.SameLine(0f, 8f);
+        DrawVideoSearchFilters(
+            "youtube",
+            ref youtubeSearchOrder,
+            ref youtubeDurationFilter);
 
-        ImGui.SetWindowFontScale(0.72f);
+        ImGui.Dummy(
+            UiVec(0f, 8f));
 
-        ImGui.TextColored(
-            MutedText,
-            "Showing first 15 results");
+        ImGui.Dummy(UiVec(0f, 8f));
 
-        ImGui.SetWindowFontScale(1f);
-
-        // Temporary queue confirmation on the right.
-        if (ImGui.GetTime() < queueAddedFeedbackUntil)
+        if (displayedResults.Count == 0)
         {
-            const string feedbackText = "Video added to queue";
-
-            var feedbackTextSize = ImGui.CalcTextSize(feedbackText);
-
-            ImGui.SameLine(
-                ImGui.GetContentRegionMax().X -
-                feedbackTextSize.X -
-                22f);
-
-            using (ImRaii.PushFont(UiBuilder.IconFont))
-            {
-                ImGui.TextColored(
-                    Good,
-                    FontAwesomeIcon.Check.ToIconString());
-            }
-
-            ImGui.SameLine(0f, 6f);
+            ImGui.Dummy(
+                UiVec(0f, 20f));
 
             ImGui.TextColored(
-                Good,
-                feedbackText);
-        }
+                MutedText,
+                "No videos match the selected filters.");
 
-        ImGui.Dummy(new Vector2(0f, 8f));
-
-        // Only the search results scroll.
-        // Keep the heading and search box fixed above.
-
-        // Only the search results scroll.
-        // Keep the heading and search box fixed above.
-        var resultsHeight = MathF.Max(
-            120f,
-            ImGui.GetContentRegionAvail().Y - 8f);
-
-        using var resultsChild = ImRaii.Child(
-            "##youtubeResults",
-            new Vector2(-1f, resultsHeight),
-            false,
-            ImGuiWindowFlags.None);
-
-        if (!resultsChild)
-        {
             return;
         }
 
-        for (var index = 0; index < results.Count; index++)
-        {
-            var result = results[index];
-
-            ImGui.PushID(index);
-
-            var rowHeight = Ui(64f);
-
-            using (ImRaii.PushStyle(
-                ImGuiStyleVar.ChildRounding,
-                8f))
-            using (ImRaii.PushColor(
-                ImGuiCol.ChildBg,
-                new Vector4(0.045f, 0.06f, 0.10f, 1f)))
-            using (var row = ImRaii.Child(
-                $"##youtubeResult_{index}",
-                new Vector2(-1f, rowHeight),
-                false,
-                ImGuiWindowFlags.NoScrollbar |
-                ImGuiWindowFlags.NoScrollWithMouse))
-            {
-                if (row)
-                {
-                    var rowOrigin = ImGui.GetCursorScreenPos();
-
-                    // Thumbnail
-                    var thumbnail = thumbnails.Get(
-                        result.ThumbnailUrl);
-
-                    var thumbWidth = 96f;
-                    var thumbHeight = rowHeight;
-
-                    if (thumbnail is not null)
-                    {
-                        ImGui.GetWindowDrawList().AddImageRounded(
-                            thumbnail.Handle,
-                            rowOrigin,
-                            rowOrigin + new Vector2(
-                                thumbWidth,
-                                thumbHeight),
-                            Vector2.Zero,
-                            Vector2.One,
-                            uint.MaxValue,
-                            8f);
-                    }
-
-                    // Content starts to the right of thumbnail
-                    var contentX =
-                        rowOrigin.X +
-                        thumbWidth +
-                        12f;
-
-                    var controlsWidth = 145f;
-
-                    var textWidth =
-                        ImGui.GetWindowWidth() -
-                        thumbWidth -
-                        controlsWidth -
-                        28f;
-
-                    ImGui.SetCursorScreenPos(
-                        new Vector2(
-                            contentX,
-                            rowOrigin.Y + 10f));
-
-                    ImGui.PushTextWrapPos(
-    contentX + textWidth);
-
-                    ImGui.TextColored(
-                        Vector4.One,
-                        TruncateVideoTitle(result.Title));
-
-                    ImGui.PopTextWrapPos();
-
-                    var meta =
-                        result.Duration is { } duration
-                            ? $"{result.ChannelName}  •  {FormatTime((float)duration.TotalSeconds)}"
-                            : result.ChannelName;
-
-                    ImGui.SetCursorScreenPos(
-                        new Vector2(
-                            contentX,
-                            rowOrigin.Y + 36f));
-
-                    ImGui.TextColored(
-                        MutedText,
-                        meta);
-
-                    // Play button
-                    var playSize =
-                        new Vector2(68f, 26f);
-
-                    var playPos =
-                        new Vector2(
-                            rowOrigin.X +
-                            ImGui.GetWindowWidth() -
-                            186f,
-                            rowOrigin.Y +
-                            rowHeight -
-                            playSize.Y -
-                            6f);
-
-                    ImGui.SetCursorScreenPos(
-                        playPos);
-
-                    using (ImRaii.PushStyle(
-                        ImGuiStyleVar.FrameRounding,
-                        6f))
-                    using (ImRaii.PushColor(
-                        ImGuiCol.Button,
-                        Accent)
-                        .Push(
-                            ImGuiCol.ButtonHovered,
-                            AccentHover)
-                        .Push(
-                            ImGuiCol.ButtonActive,
-                            AccentActive))
-                    {
-                        var buttonPos =
-                            ImGui.GetCursorScreenPos();
-
-                        if (ImGui.Button(
-                            $"##play_{index}",
-                            playSize))
-                        {
-                            HandlePlayNow(
-                                new VideoQueueEntry(
-                                    result.Url,
-                                    result.Title,
-                                    result.ChannelName,
-                                    result.Duration,
-                                    result.ThumbnailUrl));
-                        }
-
-                        DrawPlayerActionButtonContent(
-                            buttonPos,
-                            playSize,
-                            FontAwesomeIcon.Play,
-                            "Play",
-                            Vector4.One);
-                    }
-
-                    // Add button
-                    var addSize =
-    new Vector2(62f, 26f);
-
-                    ImGui.SetCursorScreenPos(
-                        new Vector2(
-                            playPos.X +
-                            playSize.X +
-                            8f,
-                            playPos.Y));
-
-                    using (ImRaii.PushStyle(
-                        ImGuiStyleVar.FrameRounding,
-                        6f))
-                    using (ImRaii.PushColor(
-                        ImGuiCol.Button,
-                        new Vector4(
-                            0.055f,
-                            0.07f,
-                            0.115f,
-                            1f))
-                        .Push(
-                            ImGuiCol.ButtonHovered,
-                            new Vector4(
-                                0.075f,
-                                0.095f,
-                                0.15f,
-                                1f))
-                        .Push(
-                            ImGuiCol.ButtonActive,
-                            new Vector4(
-                                0.075f,
-                                0.095f,
-                                0.15f,
-                                1f)))
-                    {
-                        var buttonPos =
-                            ImGui.GetCursorScreenPos();
-
-                        if (ImGui.Button(
-                            $"##add_{index}",
-                            addSize))
-                        {
-                            HandleAddToQueue(
-                                new VideoQueueEntry(
-                                    result.Url,
-                                    result.Title,
-                                    result.ChannelName,
-                                    result.Duration,
-                                    result.ThumbnailUrl));
-
-                            if (!ShouldUseViewerMediaActions)
-                            {
-                                queueAddedFeedbackUntil =
-                                    ImGui.GetTime() + 2.0;
-                            }
-                        }
-                        ImGui.GetWindowDrawList().AddRect(
-                            buttonPos,
-                            buttonPos + addSize,
-                            ImGui.GetColorU32(
-                                new Vector4(
-                                    MutedText.X,
-                                    MutedText.Y,
-                                    MutedText.Z,
-                                    0.16f)),
-                            8f,
-                            ImDrawFlags.None,
-                            1f);
-
-                        DrawPlayerActionButtonContent(
-                            buttonPos,
-                            addSize,
-                            FontAwesomeIcon.Plus,
-                            "Add",
-                            Vector4.One);
-                    }
-                }
-            }
-
-            ImGui.PopID();
-
-            ImGui.Dummy(
-                new Vector2(0f, 8f));
-        }
-
-        
+        DrawVideoSearchResultsGrid(
+            "youtube",
+            displayedResults);
     }
 
     private void DrawDailymotionSearch()
     {
-        ImGui.SetWindowFontScale(1.15f);
+        SetUiFontScale(1.15f);
 
         ImGui.TextColored(
             Vector4.One,
             "Search Dailymotion");
 
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(1f);
 
-        ImGui.Dummy(new Vector2(0f, 10f));
+        ImGui.Dummy(UiVec(0f, 10f));
 
-        ImGui.SetNextItemWidth(-66f);
+        ImGui.SetNextItemWidth(
+     -66f);
 
         bool submitted;
 
         using (ImRaii.PushStyle(
-            ImGuiStyleVar.FrameRounding,
-            8f))
+                   ImGuiStyleVar.FrameRounding,
+                   8f)
+                   .Push(
+                       ImGuiStyleVar.FramePadding,
+                       UiVec(14f, 10f)))
+        using (ImRaii.PushColor(
+                   ImGuiCol.FrameBg,
+                   new Vector4(
+                       0.045f,
+                       0.06f,
+                       0.105f,
+                       1f))
+                   .Push(
+                       ImGuiCol.FrameBgHovered,
+                       new Vector4(
+                           0.065f,
+                           0.085f,
+                           0.14f,
+                           1f))
+                   .Push(
+                       ImGuiCol.FrameBgActive,
+                       new Vector4(
+                           0.065f,
+                           0.085f,
+                           0.14f,
+                           1f)))
         {
-            submitted = ImGui.InputTextWithHint(
-                "##dailymotionSearch",
-                "Search Dailymotion...",
-                ref dailymotionSearchQuery,
-                200,
-                ImGuiInputTextFlags.EnterReturnsTrue);
+            submitted =
+                ImGui.InputTextWithHint(
+                    "##dailymotionSearch",
+                    "Enter a Dailymotion URL or search term...",
+                    ref dailymotionSearchQuery,
+                    200,
+                    ImGuiInputTextFlags.EnterReturnsTrue);
         }
 
-        ImGui.SameLine();
+        ImGui.SameLine(
+            0f,
+            10f);
 
-        var clicked = ImGui.Button(
-            "Search##dailymotion",
-            new Vector2(80, 0));
+        bool clicked;
+
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.FrameRounding,
+                   8f)
+                   .Push(
+                       ImGuiStyleVar.FramePadding,
+                       UiVec(12f, 10f)))
+        using (ImRaii.PushColor(
+                   ImGuiCol.Button,
+                   Accent)
+                   .Push(
+                       ImGuiCol.ButtonHovered,
+                       AccentHover)
+                   .Push(
+                       ImGuiCol.ButtonActive,
+                       AccentActive))
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            clicked =
+                ImGui.Button(
+                    FontAwesomeIcon.Search.ToIconString(),
+                    UiVec(48f, 0f));
+        }
 
         if ((submitted || clicked) &&
             !string.IsNullOrWhiteSpace(dailymotionSearchQuery) &&
@@ -522,264 +1013,43 @@ internal sealed partial class MainWindow
             return;
         }
 
+        var displayedResults =
+            FilterAndOrderSearchResults(
+                results,
+                dailymotionSearchOrder,
+                dailymotionDurationFilter);
 
-        ImGui.Dummy(new Vector2(0f, 16f));
-
-        ImGui.TextColored(
-            Accent,
-            $"Results ({results.Count})");
-
-        ImGui.SameLine(0f, 8f);
-
-        ImGui.SetWindowFontScale(0.72f);
+        ImGui.Dummy(
+            UiVec(0f, 16f));
 
         ImGui.TextColored(
-            MutedText,
-            "Showing first 15 results");
+     Accent,
+     $"Results ({displayedResults.Count})");
 
-        ImGui.SetWindowFontScale(1f);
+        DrawVideoSearchFilters(
+            "dailymotion",
+            ref dailymotionSearchOrder,
+            ref dailymotionDurationFilter);
 
-        ImGui.Dummy(new Vector2(0f, 8f));
-        using (var child = ImRaii.Child(
-    "dailymotionResults",
-    new Vector2(
-        0,
-        Ui(300f)),
-    false))
+        ImGui.Dummy(
+            UiVec(0f, 8f));
+
+        ImGui.Dummy(UiVec(0f, 8f));
+        if (displayedResults.Count == 0)
         {
-            if (child)
-            {
-                foreach (var result in results)
-        {
-            var index = results.IndexOf(result);
-
-            ImGui.PushID($"dailymotion_{index}");
-
-            var rowHeight = Ui(64f);
-
-            using (ImRaii.PushStyle(
-                ImGuiStyleVar.ChildRounding,
-                8f))
-            using (ImRaii.PushColor(
-                ImGuiCol.ChildBg,
-                new Vector4(0.045f, 0.06f, 0.10f, 1f)))
-            using (var row = ImRaii.Child(
-                $"##dailymotionResult_{index}",
-                new Vector2(-1f, rowHeight),
-                false,
-                ImGuiWindowFlags.NoScrollbar |
-                ImGuiWindowFlags.NoScrollWithMouse))
-            {
-                if (row)
-                {
-                    var rowOrigin = ImGui.GetCursorScreenPos();
-
-                    // Thumbnail
-                    var thumbnail = thumbnails.Get(result.ThumbnailUrl);
-
-                    const float thumbWidth = 96f;
-
-                    if (thumbnail is not null)
-                    {
-                        ImGui.GetWindowDrawList().AddImageRounded(
-                            thumbnail.Handle,
-                            rowOrigin,
-                            rowOrigin + new Vector2(
-                                thumbWidth,
-                                rowHeight),
-                            Vector2.Zero,
-                            Vector2.One,
-                            uint.MaxValue,
-                            8f);
-                    }
-
-                    // Text area
-                    var contentX =
-                        rowOrigin.X +
-                        thumbWidth +
-                        12f;
-
-                    const float controlsWidth = 145f;
-
-                    var textWidth =
-                        ImGui.GetWindowWidth() -
-                        thumbWidth -
-                        controlsWidth -
-                        28f;
-
-
-                    ImGui.SetCursorScreenPos(
-                        new Vector2(
-                            contentX,
-                            rowOrigin.Y + 10f));
-
-                    ImGui.PushTextWrapPos(
-    contentX + textWidth);
-
-                    ImGui.TextColored(
-                        Vector4.One,
-                        TruncateVideoTitle(result.Title));
-
-                    ImGui.PopTextWrapPos();
-
-
-                    var meta =
-                        result.Duration is { } duration
-                            ? $"{result.ChannelName}  •  {FormatTime((float)duration.TotalSeconds)}"
-                            : result.ChannelName;
-
-                    ImGui.SetCursorScreenPos(
-                        new Vector2(
-                            contentX,
-                            rowOrigin.Y + 36f));
-
-                    ImGui.TextColored(
-                        MutedText,
-                        meta);
-
-
-                    // Play button
-                    var playSize =
-                      new Vector2(68f, 26f);
-
-                    var playPos =
-                        new Vector2(
-                            rowOrigin.X +
-                            ImGui.GetWindowWidth() -
-                            174f,
-                        rowOrigin.Y +
-                        rowHeight -
-                        playSize.Y -
-                        6f);
-
-                    ImGui.SetCursorScreenPos(playPos);
-
-                    using (ImRaii.PushStyle(
-                        ImGuiStyleVar.FrameRounding,
-                        6f))
-                    using (ImRaii.PushColor(
-                        ImGuiCol.Button,
-                        Accent)
-                        .Push(
-                            ImGuiCol.ButtonHovered,
-                            AccentHover)
-                        .Push(
-                            ImGuiCol.ButtonActive,
-                            AccentActive))
-                    {
-                        var buttonPos =
-                            ImGui.GetCursorScreenPos();
-
-                                if (ImGui.Button(
-                                    $"##dmPlay_{index}",
-                                    playSize))
-                                {
-                                    HandlePlayNow(
-                                        new VideoQueueEntry(
-                                            result.Url,
-                                            result.Title,
-                                            result.ChannelName,
-                                            result.Duration,
-                                            result.ThumbnailUrl));
-                                }
-
-                                DrawPlayerActionButtonContent(
-                            buttonPos,
-                            playSize,
-                            FontAwesomeIcon.Play,
-                            "Play",
-                            Vector4.One);
-                    }
-
-
-                    // Add button
-                    var addSize =
-    new Vector2(62f, 26f);
-
-                    ImGui.SetCursorScreenPos(
-                        new Vector2(
-                            playPos.X +
-                            playSize.X +
-                            8f,
-                            playPos.Y));
-
-                    using (ImRaii.PushStyle(
-                        ImGuiStyleVar.FrameRounding,
-                        6f))
-                    using (ImRaii.PushColor(
-                        ImGuiCol.Button,
-                        new Vector4(
-                            0.055f,
-                            0.07f,
-                            0.115f,
-                            1f))
-                        .Push(
-                            ImGuiCol.ButtonHovered,
-                            new Vector4(
-                                0.075f,
-                                0.095f,
-                                0.15f,
-                                1f))
-                        .Push(
-                            ImGuiCol.ButtonActive,
-                            new Vector4(
-                                0.075f,
-                                0.095f,
-                                0.15f,
-                                1f)))
-                    {
-                        var buttonPos =
-                            ImGui.GetCursorScreenPos();
-
-                                if (ImGui.Button(
-                                    $"##dmAdd_{index}",
-                                    addSize))
-                                {
-                                    HandleAddToQueue(
-                                        new VideoQueueEntry(
-                                            result.Url,
-                                            result.Title,
-                                            result.ChannelName,
-                                            result.Duration,
-                                            result.ThumbnailUrl));
-
-                                    if (!ShouldUseViewerMediaActions)
-                                    {
-                                        queueAddedFeedbackUntil =
-                                            ImGui.GetTime() + 2.0;
-                                    }
-                                }
-
-                                ImGui.GetWindowDrawList().AddRect(
-                            buttonPos,
-                            buttonPos + addSize,
-                            ImGui.GetColorU32(
-                                new Vector4(
-                                    MutedText.X,
-                                    MutedText.Y,
-                                    MutedText.Z,
-                                    0.16f)),
-                            8f,
-                            ImDrawFlags.None,
-                            1f);
-
-                        DrawPlayerActionButtonContent(
-                            buttonPos,
-                            addSize,
-                            FontAwesomeIcon.Plus,
-                            "Add",
-                            Vector4.One);
-                    }
-                }
-            }
-
-            ImGui.PopID();
-
             ImGui.Dummy(
-                new Vector2(0f, 8f));
+                UiVec(0f, 20f));
+
+            ImGui.TextColored(
+                MutedText,
+                "No videos match the selected filters.");
+
+            return;
         }
-            }
-        }
+
+        DrawVideoSearchResultsGrid(
+            "dailymotion",
+            displayedResults);
     }
 
     private List<TrendingTopic> GetEnabledTrendingTopics()
@@ -997,9 +1267,143 @@ internal sealed partial class MainWindow
                 "best sports moments"
                 ]));
         }
+        if (Plugin.Cfg.TrendingCartoons)
+        {
+            topics.Add(new(
+                "Cartoons",
+                [
+                    "new cartoons",
+            "animated shows",
+            "cartoon clips"
+                ]));
+        }
+
+        if (Plugin.Cfg.TrendingHorror)
+        {
+            topics.Add(new(
+                "Horror",
+                [
+                    "horror movies",
+            "scary videos",
+            "horror stories"
+                ]));
+        }
+
+        if (Plugin.Cfg.TrendingSciFi)
+        {
+            topics.Add(new(
+                "Sci-Fi",
+                [
+                    "science fiction movies",
+            "sci-fi news",
+            "science fiction videos"
+                ]));
+        }
+
+        if (Plugin.Cfg.TrendingComedy)
+        {
+            topics.Add(new(
+                "Comedy",
+                [
+                    "comedy videos",
+            "funny sketches",
+            "stand up comedy"
+                ]));
+        }
+
+        if (Plugin.Cfg.TrendingMinecraft)
+        {
+            topics.Add(new(
+                "Minecraft",
+                [
+                    "Minecraft videos",
+            "Minecraft builds",
+            "Minecraft gameplay"
+                ]));
+        }
+
+        if (Plugin.Cfg.TrendingArtsAndCrafts)
+        {
+            topics.Add(new(
+                "Arts & Crafts",
+                [
+                    "arts and crafts",
+            "creative craft ideas",
+            "art projects"
+                ]));
+        }
+
+        if (Plugin.Cfg.TrendingCosplaying)
+        {
+            topics.Add(new(
+                "Cosplaying",
+                [
+                    "cosplay tutorials",
+            "cosplay showcases",
+            "cosplay conventions"
+                ]));
+        }
+
+        if (Plugin.Cfg.TrendingDiy)
+        {
+            topics.Add(new(
+                "DIY",
+                [
+                    "DIY projects",
+            "DIY tutorials",
+            "creative DIY ideas"
+                ]));
+        }
+
+        if (Plugin.Cfg.TrendingUrbanExploration)
+        {
+            topics.Add(new(
+                "Urban Exploration",
+                [
+                    "urban exploration",
+            "abandoned places exploration",
+            "exploring abandoned buildings"
+                ]));
+        }
+
+        if (Plugin.Cfg.TrendingFashion)
+        {
+            topics.Add(new(
+                "Fashion",
+                [
+                    "fashion trends",
+            "fashion inspiration",
+            "style ideas"
+                ]));
+        }
+
+        if (Plugin.Cfg.TrendingDisney)
+        {
+            topics.Add(new(
+                "Disney",
+                [
+                    "Disney news",
+            "Disney movies",
+            "Disney parks"
+                ]));
+        }
+
+        if (Plugin.Cfg.TrendingFantasy)
+        {
+            topics.Add(new(
+                "Fantasy",
+                [
+                    "fantasy movies",
+            "fantasy worlds",
+            "fantasy stories"
+                ]));
+        }
 
         return topics;
     }
+
+    private int GetSubscribedTopicCount() =>
+    GetEnabledTrendingTopics().Count;
 
     private static double GetTrendingScore(VideoSearchEntry video)
     {
@@ -1068,219 +1472,699 @@ internal sealed partial class MainWindow
         }
     }
 
-    private async Task LoadHomeYouTubeAsync(bool forceRefresh = false)
+    private void SelectNewHomeYouTubeTopics(
+        IEnumerable<string>? availableTopics = null)
+    {
+        var availableTopicSet =
+            availableTopics?.ToHashSet(
+                StringComparer.OrdinalIgnoreCase);
+
+        var enabledTopics =
+            GetEnabledTrendingTopics()
+                .Where(
+                    topic =>
+                        availableTopicSet is null ||
+                        availableTopicSet.Contains(
+                            topic.Name))
+                .Select(
+                    topic =>
+                        topic.Name)
+                .Distinct(
+                    StringComparer.OrdinalIgnoreCase)
+                .OrderBy(
+                    _ =>
+                        trendingRandom.Next())
+                .Take(
+                    5)
+                .ToList();
+
+        homeYouTubeSelectedTopics.Clear();
+
+        foreach (var topic in enabledTopics)
+        {
+            homeYouTubeSelectedTopics.Add(
+                topic);
+        }
+    }
+
+    private void RebuildHomeYouTubeFromBrowseCache(
+        bool chooseNewTopics,
+        bool selectOnlyCachedTopics = false)
+    {
+        RestorePersistedBrowseVideoCache();
+
+        var cache =
+            browseVideoResults;
+
+        if (chooseNewTopics ||
+            homeYouTubeSelectedTopics.Count == 0)
+        {
+            SelectNewHomeYouTubeTopics(
+                selectOnlyCachedTopics
+                    ? cache?.Keys
+                    : null);
+        }
+
+        if (cache is not { Count: > 0 } ||
+            homeYouTubeSelectedTopics.Count == 0)
+        {
+            homeYouTubeResults =
+                [];
+
+            isLoadingHomeYouTube =
+                isLoadingBrowseVideos;
+
+            return;
+        }
+
+        var candidates =
+            homeYouTubeSelectedTopics
+                .Where(
+                    topic =>
+                        cache.ContainsKey(
+                            topic))
+                .SelectMany(
+                    topic =>
+                        cache[topic])
+                .Where(
+                    video =>
+                        !string.IsNullOrWhiteSpace(
+                            video.Url))
+                .GroupBy(
+                    video =>
+                        GetYouTubeVideoId(
+                            video.Url) ??
+                        video.Url,
+                    StringComparer.OrdinalIgnoreCase)
+                .Select(
+                    group =>
+                        group.First())
+                .OrderByDescending(
+                    GetTrendingScore)
+                .Take(
+                    5)
+                .ToList();
+
+        homeYouTubeResults =
+            candidates;
+
+        isLoadingHomeYouTube =
+            false;
+    }
+
+    private async Task PrepareTopicVideosForLaunchAsync(
+        bool forceRefresh)
     {
         try
         {
-            // Use cached results for 20 minutes unless manually refreshed.
-            if (false)
+            RestorePersistedBrowseVideoCache();
+
+            //
+            // Immediately populate Home from the previous cache if possible.
+            // A stale cache remains useful while its replacement downloads.
+            //
+            RebuildHomeYouTubeFromBrowseCache(
+                chooseNewTopics: true);
+
+            if (homeYouTubeResults is not
+                { Count: > 0 })
             {
-                return;
+                isLoadingHomeYouTube =
+                    true;
             }
 
-            var topics = GetEnabledTrendingTopics();
-            // Safety fallback - treat all topics as enabled.
-            if (topics.Count < 3)
-            {
-                topics =
-   [
-       new("Gaming", ["trending gaming videos", "gaming news", "new game releases"]),
-    new("MMORPG", ["MMORPG news", "new MMORPG releases", "MMORPG gameplay"]),
-    new("Final Fantasy", ["Final Fantasy XIV", "FFXIV news", "FF14 gameplay"]),
-    new("Anime", ["anime trailers", "anime trending", "anime news"]),
-    new("Movies", ["movie trailers", "movie news", "best movies"]),
-    new("TV Shows", ["new TV shows", "TV show trailers", "TV show news"]),
-    new("Music", ["new music releases", "music trending", "latest songs"]),
-    new("Memes", ["funny memes", "viral memes", "meme compilation"]),
-    new("Wildlife", ["amazing wildlife documentary", "wildlife discoveries", "animal documentary"]),
-    new("Architecture", ["amazing architecture", "modern architecture design", "unique buildings"]),
-    new("Science", ["science discoveries", "latest science news", "amazing science"]),
-    new("Space", ["space discoveries", "NASA news", "universe documentary"]),
-    new("History", ["history documentary", "historical discoveries", "ancient history"]),
-    new("Technology", ["latest technology news", "new technology", "future technology"]),
-    new("Pets", ["cute pets", "funny animals", "adorable pets"]),
-    new("Food", ["amazing food", "cooking videos", "food discoveries"]),
-    new("Travel", ["beautiful places travel", "travel discoveries", "amazing destinations"]),
-    new("Cars", ["car news", "supercars", "car reviews"]),
-    new("Sports", ["sports highlights", "sports news", "best sports moments"])
-   ];
-            }
-
-
-            var selectedTopics = topics
-                .OrderBy(_ => trendingRandom.Next())
-                .Take(3)
-                .ToList();
-
-
-            var searches = selectedTopics
-     .Select(topic =>
-         searchResolver.SearchWithMetadataAsync(
-             topic.SearchQueries[
-                 trendingRandom.Next(topic.SearchQueries.Length)],
-             5,
-             CancellationToken.None))
-     .ToList();
-
-            var searchResults = await Task
-                .WhenAll(searches)
+            await LoadBrowseVideosAsync(
+                    forceRefresh)
                 .ConfigureAwait(false);
-
-            var results = searchResults
-                .SelectMany(x => x)
-                .ToList();
-
-            homeYouTubeResults = results
-                .GroupBy(x => x.Url)
-                .Select(x => x.First())
-                .OrderByDescending(GetTrendingScore)
-                .Take(5)
-                .ToList();
-
-            foreach (var video in homeYouTubeResults)
-            {
-                AepLog.Warning(
-                    $"[TRENDING TEST] {video.Title} | {video.Url}");
-            }
-
-            homeYouTubeCacheTime = DateTime.UtcNow;
         }
         catch (Exception exception)
         {
             AepLog.Warning(
-                $"[Home] Failed to load YouTube shelf: {exception.Message}");
+                $"[Topic Videos] Startup preparation failed: " +
+                $"{exception.Message}");
 
-            homeYouTubeResults = [];
-        }
-        finally
-        {
-            isLoadingHomeYouTube = false;
+            isLoadingHomeYouTube =
+                false;
         }
     }
 
-    private async Task LoadBrowseVideosAsync(bool forceRefresh = false)
+    private void EnsureTopicVideoStartup()
+    {
+        if (topicVideoStartupRequested)
+        {
+            return;
+        }
+
+        topicVideoStartupRequested =
+            true;
+
+        _ =
+            PrepareTopicVideosForLaunchAsync(
+                forceRefresh: false);
+    }
+
+    private void RefreshHomeYouTubeFromCache()
+    {
+        //
+        // This is deliberately a cache-only operation. The Home refresh
+        // button must never perform a YouTube request or alter cache age.
+        //
+        RebuildHomeYouTubeFromBrowseCache(
+            chooseNewTopics: true);
+    }
+
+    private void NotifyTopicSettingsChanged()
+    {
+        //
+        // Give the Home shelf a new selection immediately from whatever
+        // matching cached results are currently available.
+        //
+        RebuildHomeYouTubeFromBrowseCache(
+            chooseNewTopics: true);
+
+        var refreshGeneration =
+            Interlocked.Increment(
+                ref topicSettingsRefreshGeneration);
+
+        _ =
+            RefreshTopicVideosAfterSettingsChangeAsync(
+                refreshGeneration);
+    }
+
+    private async Task RefreshTopicVideosAfterSettingsChangeAsync(
+        int refreshGeneration)
     {
         try
         {
-            browseVideosCts?.Cancel();
-            browseVideosCts = new CancellationTokenSource();
-            // Reuse Browse results for 20 minutes unless manually refreshed.
-            if (!forceRefresh &&
-                browseVideoResults is { Count: > 0 } &&
-                DateTime.UtcNow - browseVideoCacheTime < TimeSpan.FromMinutes(20))
+            //
+            // A short debounce prevents several quickly changed checkboxes
+            // from starting and cancelling several complete YouTube pulls.
+            //
+            await Task.Delay(
+                    TimeSpan.FromMilliseconds(
+                        500))
+                .ConfigureAwait(false);
+
+            if (refreshGeneration !=
+                topicSettingsRefreshGeneration)
             {
                 return;
             }
 
-            var topics = GetEnabledTrendingTopics();
+            browseVideoRequested =
+                true;
 
+            await LoadBrowseVideosAsync(
+                    forceRefresh: true)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning(
+                $"[Topic Videos] Settings refresh failed: " +
+                $"{exception.Message}");
+        }
+    }
+
+    private static string GetBrowseTopicSignature(
+    IEnumerable<TrendingTopic> topics)
+    {
+        return string.Join(
+            "\u001F",
+            topics
+                .Select(
+                    topic =>
+                        topic.Name)
+                .OrderBy(
+                    name =>
+                        name,
+                    StringComparer.OrdinalIgnoreCase));
+    }
+
+    private void RestorePersistedBrowseVideoCache()
+    {
+        if (browseVideoResults is not null)
+        {
+            return;
+        }
+
+        var persisted =
+            Plugin.Cfg.BrowseVideoTopicCache;
+
+        if (persisted.Count == 0 ||
+            Plugin.Cfg.BrowseVideoCacheUpdatedUtc ==
+            default ||
+            string.IsNullOrWhiteSpace(
+                Plugin.Cfg.BrowseVideoCacheTopicSignature))
+        {
+            return;
+        }
+
+        try
+        {
+            var restored =
+                new Dictionary<string, List<VideoSearchEntry>>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            foreach (var topic in persisted)
+            {
+                var videos =
+                    topic.Value
+                        .Where(
+                            video =>
+                                !string.IsNullOrWhiteSpace(
+                                    video.Url))
+                        .Select(
+                            video =>
+                                new VideoSearchEntry(
+                                    video.Title,
+                                    video.Url,
+                                    video.ChannelName,
+                                    video.DurationSeconds is { } seconds
+                                        ? TimeSpan.FromSeconds(
+                                            seconds)
+                                        : null,
+                                    video.ThumbnailUrl,
+                                    video.ViewCount,
+                                    video.UploadDate,
+                                    video.ChannelId))
+                        .ToList();
+
+                if (videos.Count > 0)
+                {
+                    restored[topic.Key] =
+                        videos;
+                }
+            }
+
+            if (restored.Count == 0)
+            {
+                return;
+            }
+
+            browseVideoResults =
+                restored;
+
+            browseVideoCacheTime =
+                Plugin.Cfg.BrowseVideoCacheUpdatedUtc;
+
+            browseVideoTopicSignature =
+                Plugin.Cfg.BrowseVideoCacheTopicSignature;
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning(
+                $"[Browse Videos] Failed to restore cached videos: " +
+                $"{exception.Message}");
+
+            Plugin.Cfg.BrowseVideoTopicCache.Clear();
+
+            Plugin.Cfg.BrowseVideoCacheUpdatedUtc =
+                default;
+
+            Plugin.Cfg.BrowseVideoCacheTopicSignature =
+                null;
+
+            Plugin.Cfg.Save();
+        }
+    }
+
+    private void PersistBrowseVideoCache()
+    {
+        if (browseVideoResults is not { Count: > 0 } ||
+            string.IsNullOrWhiteSpace(
+                browseVideoTopicSignature) ||
+            browseVideoCacheTime ==
+            default)
+        {
+            return;
+        }
+
+        Plugin.Cfg.BrowseVideoTopicCache =
+            browseVideoResults.ToDictionary(
+                topic =>
+                    topic.Key,
+                topic =>
+                    topic.Value
+                        .Select(
+                            video =>
+                                new CachedBrowseVideoRecord
+                                {
+                                    Title =
+                                        video.Title,
+
+                                    Url =
+                                        video.Url,
+
+                                    ChannelName =
+                                        video.ChannelName,
+
+                                    DurationSeconds =
+                                        video.Duration?.TotalSeconds,
+
+                                    ThumbnailUrl =
+                                        video.ThumbnailUrl,
+
+                                    ViewCount =
+                                        video.ViewCount,
+
+                                    UploadDate =
+                                        video.UploadDate,
+
+                                    ChannelId =
+                                        video.ChannelId
+                                })
+                        .ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
+        Plugin.Cfg.BrowseVideoCacheUpdatedUtc =
+            browseVideoCacheTime;
+
+        Plugin.Cfg.BrowseVideoCacheTopicSignature =
+            browseVideoTopicSignature;
+
+        Plugin.Cfg.Save();
+    }
+
+    private void ClearPersistedBrowseVideoCache()
+    {
+        Plugin.Cfg.BrowseVideoTopicCache.Clear();
+
+        Plugin.Cfg.BrowseVideoCacheUpdatedUtc =
+            default;
+
+        Plugin.Cfg.BrowseVideoCacheTopicSignature =
+            null;
+
+        Plugin.Cfg.Save();
+    }
+
+    private async Task LoadBrowseVideosAsync(
+        bool forceRefresh = false)
+    {
+        RestorePersistedBrowseVideoCache();
+
+        var topics =
+            GetEnabledTrendingTopics();
+
+        var topicSignature =
+            GetBrowseTopicSignature(
+                topics);
+
+        var cacheIsUsable =
+            !forceRefresh &&
+            browseVideoResults is { Count: > 0 } &&
+            string.Equals(
+                browseVideoTopicSignature,
+                topicSignature,
+                StringComparison.Ordinal) &&
+            DateTime.UtcNow -
+            browseVideoCacheTime <
+            BrowseVideoCacheDuration;
+
+        if (cacheIsUsable)
+        {
+            browseVideoExpectedTopicCount =
+                topics.Count;
+
+            isLoadingBrowseVideos =
+                false;
+
+            RebuildHomeYouTubeFromBrowseCache(
+                chooseNewTopics:
+                    homeYouTubeSelectedTopics.Count == 0);
+
+            return;
+        }
+
+        browseVideosCts?.Cancel();
+        browseVideosCts?.Dispose();
+
+        var cancellation =
+            new CancellationTokenSource();
+
+        browseVideosCts =
+            cancellation;
+
+        var loadGeneration =
+            Interlocked.Increment(
+                ref browseVideoLoadGeneration);
+
+        isLoadingBrowseVideos =
+            true;
+
+        browseVideoExpectedTopicCount =
+            topics.Count;
+
+        var previousTopicSignature =
+            browseVideoTopicSignature;
+
+        browseVideoTopicSignature =
+            topicSignature;
+
+        try
+        {
             if (topics.Count == 0)
             {
-                browseVideoResults = [];
+                browseVideoResults =
+                    [];
+
+                browseVideoCacheTime =
+                    DateTime.UtcNow;
+
+                ClearPersistedBrowseVideoCache();
+
                 return;
             }
 
-            // Pick up to 8 topics for the full Browse page.
-            var selectedTopics = topics
-                .OrderBy(_ => trendingRandom.Next())
-                .ToList();
+            var previousResultsMatchTopics =
+                browseVideoResults is { Count: > 0 } &&
+                string.Equals(
+                    previousTopicSignature,
+                    topicSignature,
+                    StringComparison.Ordinal);
 
-            // Start with an empty dictionary so rows can appear
-            // progressively as each batch finishes.
+            var workingResults =
+                previousResultsMatchTopics
+                    ? new Dictionary<string, List<VideoSearchEntry>>(
+                        browseVideoResults!,
+                        StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, List<VideoSearchEntry>>(
+                        StringComparer.OrdinalIgnoreCase);
+
             browseVideoResults =
-                new Dictionary<string, List<VideoSearchEntry>>();
+                new Dictionary<string, List<VideoSearchEntry>>(
+                    workingResults,
+                    StringComparer.OrdinalIgnoreCase);
 
-            // Load in batches of 3.
-            const int batchSize = 3;
+            var selectedTopics =
+                topics.ToList();
+
+            const int batchSize =
+                3;
+
+            var initialHomeTopicTarget =
+                Math.Min(
+                    batchSize,
+                    selectedTopics.Count);
+
+            var initialHomePublished =
+                previousResultsMatchTopics ||
+                homeYouTubeResults is { Count: > 0 };
+
+            const int resultsPerTopic =
+                15;
 
             for (var batchStart = 0;
                  batchStart < selectedTopics.Count;
                  batchStart += batchSize)
             {
-                var batch = selectedTopics
-                    .Skip(batchStart)
-                    .Take(batchSize)
-                    .ToList();
+                cancellation.Token
+                    .ThrowIfCancellationRequested();
 
-                var searches = batch
-                    .Select(async topic =>
-                    {
-                        var query =
-                            topic.SearchQueries[
-                                trendingRandom.Next(
-                                    topic.SearchQueries.Length)];
+                var batch =
+                    selectedTopics
+                        .Skip(
+                            batchStart)
+                        .Take(
+                            batchSize)
+                        .ToList();
 
-                        var results = await searchResolver
-                            .SearchAsync(
-                                query,
-                                15,
-                                browseVideosCts.Token)
-                            .ConfigureAwait(false);
+                var pendingSearches =
+                    batch
+                        .Select(
+                            topic =>
+                                (
+                                    Topic: topic,
+                                    Query:
+                                        topic.SearchQueries[
+                                            trendingRandom.Next(
+                                                topic.SearchQueries.Length)]
+                                ))
+                        .Select(
+                            async request =>
+                            {
+                                //
+                                // SearchAsync always performs a fresh discovery
+                                // request. Metadata enrichment remains cache-aware.
+                                //
+                                var searchResults =
+                                    await searchResolver
+                                        .SearchAsync(
+                                            request.Query,
+                                            resultsPerTopic,
+                                            cancellation.Token)
+                                        .ConfigureAwait(false);
 
-                        browseVideoResults[topic.Name] = results;
+                                var candidates =
+                                    searchResults
+                                        .GroupBy(
+                                            result =>
+                                                result.Url,
+                                            StringComparer.OrdinalIgnoreCase)
+                                        .Select(
+                                            group =>
+                                                group.First())
+                                        .Take(
+                                            resultsPerTopic)
+                                        .ToList();
 
-                        var ranked = results
-      .GroupBy(x => x.Url)
-      .Select(x => x.First())
-      .Take(10)
-      .ToList();
+                                var enriched =
+                                    await Task.WhenAll(
+                                            candidates.Select(
+                                                video =>
+                                                    searchResolver
+                                                        .EnrichSearchResultAsync(
+                                                            video,
+                                                            cancellation.Token)))
+                                        .ConfigureAwait(false);
 
-                        var enriched = await Task.WhenAll(
-                            ranked.Select(
-                                video =>
-                                    searchResolver.EnrichSearchResultAsync(
-                                        video,
-                                        browseVideosCts.Token)));
+                                return
+                                    (
+                                        request.Topic.Name,
+                                        Results:
+                                            enriched
+                                                .OrderByDescending(
+                                                    GetTrendingScore)
+                                                .Take(
+                                                    resultsPerTopic)
+                                                .ToList()
+                                    );
+                            })
+                        .ToArray();
 
-                        ranked = enriched
-                            .OrderByDescending(GetTrendingScore)
-                            .ToList();
+                var loadedBatch =
+                    await Task.WhenAll(
+                            pendingSearches)
+                        .ConfigureAwait(false);
 
-                        return new
-                        {
-                            topic.Name,
-                            Results = ranked
-                        };
-                    })
-                    .ToList();
+                cancellation.Token
+                    .ThrowIfCancellationRequested();
 
-                var loadedBatch = await Task
-                    .WhenAll(searches)
-                    .ConfigureAwait(false);
-
-                // Create a NEW dictionary when publishing the batch.
-                // This avoids modifying the dictionary that DrawVideoGrid()
-                // may currently be enumerating on the UI thread.
-                var updatedResults =
-                    new Dictionary<string, List<VideoSearchEntry>>(
-                        browseVideoResults);
-
-                foreach (var loadedTopic in loadedBatch)
+                if (loadGeneration !=
+                    browseVideoLoadGeneration)
                 {
-                    if (loadedTopic.Results.Count == 0)
-                    {
-                        continue;
-                    }
-
-                    updatedResults[loadedTopic.Name] =
-                        loadedTopic.Results;
+                    return;
                 }
 
-                browseVideoResults = updatedResults;
+                var updatedResults =
+                    new Dictionary<string, List<VideoSearchEntry>>(
+                        workingResults,
+                        StringComparer.OrdinalIgnoreCase);
+
+                foreach (var loadedTopic in
+                         loadedBatch)
+                {
+                    updatedResults.Remove(
+                        loadedTopic.Name);
+
+                    if (loadedTopic.Results.Count >
+                        0)
+                    {
+                        updatedResults[
+                            loadedTopic.Name] =
+                            loadedTopic.Results;
+                    }
+                }
+
+                workingResults =
+                    updatedResults;
+
+                browseVideoResults =
+                    new Dictionary<string, List<VideoSearchEntry>>(
+                        workingResults,
+                        StringComparer.OrdinalIgnoreCase);
+
+                // A new installation has no persisted Topics cache. Publish
+                // Home as soon as three topic feeds have usable results rather
+                // than waiting for every subscribed topic to finish. Restrict
+                // the random Home selection to completed topics for this first
+                // publication; the final rebuild below uses the full cache.
+                if (!initialHomePublished &&
+                    workingResults.Count >=
+                    initialHomeTopicTarget)
+                {
+                    RebuildHomeYouTubeFromBrowseCache(
+                        chooseNewTopics: true,
+                        selectOnlyCachedTopics: true);
+
+                    initialHomePublished =
+                        homeYouTubeResults is { Count: > 0 };
+                }
             }
 
-            browseVideoCacheTime = DateTime.UtcNow;
+            if (loadGeneration ==
+        browseVideoLoadGeneration)
+            {
+                browseVideoCacheTime =
+                    DateTime.UtcNow;
+
+                PersistBrowseVideoCache();
+
+                //
+                // Every successful shared-cache rebuild gives Home a new selection.
+                //
+                RebuildHomeYouTubeFromBrowseCache(
+                    chooseNewTopics: true);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal when a newer refresh or topic change replaces this load.
         }
         catch (Exception exception)
         {
             AepLog.Warning(
-                $"[Browse Videos] Failed to load videos: {exception.Message}");
+                $"[Browse Videos] Failed to load videos: " +
+                $"{exception.Message}");
 
-            browseVideoResults = [];
+            if (loadGeneration ==
+                    browseVideoLoadGeneration &&
+                browseVideoResults is null)
+            {
+                browseVideoResults =
+                    [];
+            }
         }
         finally
         {
-            isLoadingBrowseVideos = false;
+            if (loadGeneration ==
+                browseVideoLoadGeneration)
+            {
+                isLoadingBrowseVideos =
+                    false;
+
+                if (homeYouTubeResults is not
+                    { Count: > 0 })
+                {
+                    RebuildHomeYouTubeFromBrowseCache(
+                        chooseNewTopics:
+                            homeYouTubeSelectedTopics.Count == 0);
+                }
+
+                isLoadingHomeYouTube =
+                    false;
+            }
         }
     }
 
@@ -1288,7 +2172,41 @@ internal sealed partial class MainWindow
     {
         try
         {
-            ffxivYouTubeResults = await searchResolver
+            // Restore before the first await so saved cards appear immediately,
+            // including while an expired cache is being refreshed.
+            try
+            {
+                ffxivYouTubeResults = Plugin.Cfg.FfxivVideoCache?
+                    .Where(video => video is not null && !string.IsNullOrWhiteSpace(video.Url))
+                    .Take(10)
+                    .Select(video => new VideoSearchEntry(
+                        video.Title,
+                        video.Url,
+                        video.ChannelName,
+                        video.DurationSeconds is { } seconds
+                            ? TimeSpan.FromSeconds(seconds)
+                            : null,
+                        video.ThumbnailUrl,
+                        video.ViewCount,
+                        video.UploadDate,
+                        video.ChannelId))
+                    .ToList();
+            }
+            catch (Exception exception)
+            {
+                AepLog.Warning($"[Home] Failed to restore FFXIV video cache: {exception.Message}");
+            }
+
+            var cacheAge = DateTime.UtcNow - Plugin.Cfg.FfxivVideoCacheUpdatedUtc;
+            if (ffxivYouTubeResults is { Count: > 0 } &&
+                Plugin.Cfg.FfxivVideoCacheUpdatedUtc != default &&
+                cacheAge >= TimeSpan.Zero &&
+                cacheAge < BrowseVideoCacheDuration)
+            {
+                return;
+            }
+
+            var refreshed = await searchResolver
                 .SearchLatestAggregatedAsync(
                     [
                         "ffxiv",
@@ -1298,6 +2216,30 @@ internal sealed partial class MainWindow
                     10,
                     CancellationToken.None)
                 .ConfigureAwait(false);
+
+            // Search failures can return an empty list rather than throw.
+            // Keep the previous cards and timestamp so a later load can retry.
+            if (refreshed.Count == 0)
+            {
+                return;
+            }
+
+            ffxivYouTubeResults = refreshed;
+            Plugin.Cfg.FfxivVideoCache = refreshed
+                .Select(video => new CachedBrowseVideoRecord
+                {
+                    Title = video.Title,
+                    Url = video.Url,
+                    ChannelName = video.ChannelName,
+                    DurationSeconds = video.Duration?.TotalSeconds,
+                    ThumbnailUrl = video.ThumbnailUrl,
+                    ViewCount = video.ViewCount,
+                    UploadDate = video.UploadDate,
+                    ChannelId = video.ChannelId
+                })
+                .ToList();
+            Plugin.Cfg.FfxivVideoCacheUpdatedUtc = DateTime.UtcNow;
+            Plugin.Cfg.Save();
         }
         catch (Exception exception)
         {
@@ -1305,7 +2247,6 @@ internal sealed partial class MainWindow
                 $"[Home] Failed to load FFXIV YouTube shelf: {exception.Message}");
 
 
-            ffxivYouTubeResults = [];
         }
         finally
         {
@@ -1313,17 +2254,26 @@ internal sealed partial class MainWindow
         }
     }
 
-    private async Task RunSearchAsync(string query)
+    private async Task RunSearchAsync(
+        string query)
     {
-        searchResults = await searchResolver.SearchAsync(query, 15,CancellationToken.None).ConfigureAwait(false);
-        isSearching = false;
+        searchResults =
+            await searchResolver.SearchAsync(
+                    query,
+                    50,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+
+        isSearching =
+            false;
     }
 
     private async Task RunDailymotionSearchAsync(string query)
     {
         try
         {
-            using var http = new HttpClient();
+            using var http =
+                Net.PluginHttpClients.CreateMetadataClient();
 
             var encoded =
                 Uri.EscapeDataString(query);
@@ -1331,8 +2281,8 @@ internal sealed partial class MainWindow
             var url =
      "https://api.dailymotion.com/videos" +
      $"?search={encoded}" +
-     $"&limit=15" +
-     "&fields=id,title,thumbnail_url,duration";
+     $"&limit=50" +
+     "&fields=id,title,thumbnail_url,duration,views_total";
 
             var json =
                 await http.GetStringAsync(url);
@@ -1379,6 +2329,12 @@ internal sealed partial class MainWindow
                             ? TimeSpan.FromSeconds(seconds)
                             : null;
 
+                    long? viewCount =
+                        video.TryGetProperty("views_total", out var viewsValue) &&
+                        viewsValue.TryGetInt64(out var views)
+                            ? views
+                            : null;
+
                     AepLog.Warning(
                         $"[Dailymotion] Queue URL: {watchUrl}");
 
@@ -1388,7 +2344,8 @@ internal sealed partial class MainWindow
                             watchUrl,
                             "Dailymotion",
                             duration,
-                            thumbnail));
+                            thumbnail,
+                            viewCount));
                 }
             }
 
@@ -1408,298 +2365,6 @@ internal sealed partial class MainWindow
         }
     }
 
-    private bool IsYouTubeLoggedIn() =>
-        YouTubeCookieExport.LooksSignedIn(Plugin.Cfg.YouTubeCookiesPath) ||
-        (!YouTubeCookieExport.NeedsNativeExport() &&
-         YouTubeBrowserCookies.Find(
-             Plugin.Cfg.YouTubeCookiesBrowser,
-             Plugin.Cfg.YouTubeCookiesProfilePath) is not null);
-
-    private void ApplyYouTubeSessionToPlayer() =>
-        YouTubeCookieExport.ApplyToPlayer(Plugin.Cfg, video);
-
-    private static void OpenYouTubeInBrowser()
-    {
-        try
-        {
-            var xdg = YouTubeBrowserCookies.ToYtDlpPath("/usr/bin/xdg-open");
-            if (File.Exists(xdg))
-            {
-                Process.Start(new ProcessStartInfo(xdg)
-                {
-                    ArgumentList = { "https://www.youtube.com" },
-                    UseShellExecute = false,
-                });
-                return;
-            }
-
-            Process.Start(new ProcessStartInfo("https://www.youtube.com") { UseShellExecute = true });
-        }
-        catch (Exception exception)
-        {
-            AepLog.Warning($"[YouTube] Failed to open browser: {exception.Message}");
-        }
-    }
-
-    private void ConnectYouTubeBrowser(YouTubeBrowserProfile profile)
-    {
-        Plugin.Cfg.YouTubeCookiesBrowser = profile.BrowserId;
-        Plugin.Cfg.YouTubeCookiesProfilePath = profile.ProfilePath;
-        Plugin.Cfg.UseFirefoxCookies = string.Equals(profile.BrowserId, "firefox", StringComparison.OrdinalIgnoreCase);
-        Plugin.Cfg.Save();
-        youtubeSignInHelp = false;
-        _ = Task.Run(() => YouTubeCookieExport.Export(
-            Plugin.Cfg,
-            video,
-            profile.BrowserId,
-            profile.ProfilePath));
-    }
-
-    private void SignOutYouTube()
-    {
-        YouTubeCookieExport.DeleteManagedFile();
-        Plugin.Cfg.YouTubeCookiesBrowser = null;
-        Plugin.Cfg.YouTubeCookiesProfilePath = null;
-        Plugin.Cfg.UseFirefoxCookies = false;
-        Plugin.Cfg.YouTubeCookiesPath = null;
-        cookiesPathInput = string.Empty;
-        YouTubeCookieExport.LastError = null;
-        YouTubeCookieExport.Status = null;
-        Plugin.Cfg.Save();
-        ApplyYouTubeSessionToPlayer();
-        youtubeSignInHelp = false;
-    }
-
-    private string YouTubeLoginStatusText()
-    {
-        if (YouTubeCookieExport.Busy)
-        {
-            return YouTubeCookieExport.Status ?? "Copying YouTube cookies from your browser…";
-        }
-
-        if (YouTubeCookieExport.LooksSignedIn(Plugin.Cfg.YouTubeCookiesPath))
-        {
-            var connected = YouTubeBrowserCookies.Find(
-                Plugin.Cfg.YouTubeCookiesBrowser,
-                Plugin.Cfg.YouTubeCookiesProfilePath);
-            return connected is { } profile
-                ? $"Signed in via {profile.Label}. Takes effect on the next video."
-                : "Signed in via cookies.txt. Takes effect on the next video.";
-        }
-
-        if (!YouTubeCookieExport.NeedsNativeExport() &&
-            !string.IsNullOrWhiteSpace(Plugin.Cfg.YouTubeCookiesBrowser))
-        {
-            return $"Connected via {Plugin.Cfg.YouTubeCookiesBrowser}. Takes effect on the next video.";
-        }
-
-        return "Not signed in. Age-restricted videos need a YouTube login.";
-    }
-
-    private void DrawYouTubeLoginBanner()
-    {
-        if (IsYouTubeLoggedIn())
-        {
-            ImGui.TextColored(Good, YouTubeLoginStatusText());
-            return;
-        }
-
-        ImGui.TextColored(MutedText, "Sign in to YouTube for age-restricted videos.");
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Sign in##youtubeSearch"))
-        {
-            currentPage = HomePage.Settings;
-            settingsTab = SettingsTab.Account;
-            youtubeSignInHelp = true;
-            OpenYouTubeInBrowser();
-        }
-    }
-
-    private void DrawYouTubeLoginSettings()
-    {
-        var loggedIn = IsYouTubeLoggedIn();
-
-        ImGui.TextColored(
-            Vector4.One,
-            "YouTube");
-
-        ImGui.Dummy(new Vector2(0f, 4f));
-        ImGui.TextColored(loggedIn ? Good : MutedText, YouTubeLoginStatusText());
-        if (YouTubeCookieExport.LastError is { Length: > 0 } exportError)
-        {
-            ImGui.Dummy(new Vector2(0f, 4f));
-            ImGui.TextWrapped(exportError);
-        }
-
-        ImGui.Dummy(new Vector2(0f, 10f));
-
-        if (YouTubeCookieExport.Busy)
-        {
-            ImGui.TextColored(MutedText, "Leave the browser open until this finishes.");
-            return;
-        }
-
-        if (!loggedIn)
-        {
-            using (ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, 8f))
-            using (ImRaii.PushColor(ImGuiCol.Button, Accent)
-                .Push(ImGuiCol.ButtonHovered, AccentHover)
-                .Push(ImGuiCol.ButtonActive, AccentActive))
-            {
-                if (ImGui.Button("Open YouTube to sign in", new Vector2(Ui(220f), Ui(36f))))
-                {
-                    youtubeSignInHelp = true;
-                    OpenYouTubeInBrowser();
-                }
-            }
-
-            ImGui.Dummy(new Vector2(0f, 10f));
-            ImGui.TextWrapped(
-                "Opens YouTube in your browser. Sign in there, then click Use for that browser so AlphaChannel can copy the session.");
-
-            ImGui.Dummy(new Vector2(0f, 10f));
-
-            var detected = YouTubeBrowserCookies.Detect();
-            var detectedByKey = detected
-                .GroupBy(profile => profile.Key, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-
-            var buttonWidth = Ui(148f);
-            var buttonHeight = Ui(32f);
-            var gap = Ui(8f);
-            var rowWidth = ImGui.GetContentRegionAvail().X;
-            var used = 0f;
-
-            foreach (var kind in YouTubeBrowserCookies.Catalog)
-            {
-                var found = detectedByKey.TryGetValue(kind.Key, out var profile);
-                if (used > 0f && used + buttonWidth > rowWidth)
-                {
-                    used = 0f;
-                }
-                else if (used > 0f)
-                {
-                    ImGui.SameLine(0f, gap);
-                }
-
-                if (found)
-                {
-                    if (ImGui.Button(
-                            $"Use {kind.Label}##ytBrowser_{kind.Key}",
-                            new Vector2(buttonWidth, buttonHeight)))
-                    {
-                        ConnectYouTubeBrowser(profile);
-                    }
-                }
-                else
-                {
-                    using (ImRaii.Disabled())
-                    {
-                        ImGui.Button(
-                            $"{kind.Label}##ytMissing_{kind.Key}",
-                            new Vector2(buttonWidth, buttonHeight));
-                    }
-
-                    if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                    {
-                        ImGui.SetTooltip($"{kind.Label} was not found on this machine.");
-                    }
-                }
-
-                used += buttonWidth + gap;
-            }
-        }
-        else if (ImGui.Button("Sign out of YouTube", new Vector2(Ui(180f), Ui(34f))))
-        {
-            SignOutYouTube();
-        }
-
-        ImGui.Dummy(new Vector2(0f, 12f));
-        ImGui.Checkbox("Advanced: cookies.txt file", ref youtubeShowAdvancedCookies);
-        if (youtubeShowAdvancedCookies)
-        {
-            ImGui.Dummy(new Vector2(0f, 6f));
-            DrawCookiesSettings();
-        }
-    }
-
-    // Opt-in workaround for age-restricted videos, which yt-dlp otherwise refuses outright. Only
-    // ever stores/uses a file path the player supplies themselves - see Configuration's own note
-    // on why this isn't something the plugin generates or transmits.
-    private void DrawCookiesSettings()
-    {
-        ImGui.TextWrapped(
-            "Export Netscape cookies.txt from a logged-in YouTube session (browser extension: Get cookies.txt LOCALLY), then save the path.");
-
-        ImGui.Spacing();
-        ImGui.SetNextItemWidth(-70f);
-        ImGui.InputTextWithHint("##cookiesPath", "Path to cookies.txt", ref cookiesPathInput, 260);
-        ImGui.SameLine();
-        if (ImGui.Button("Save##cookies"))
-        {
-            var path = string.IsNullOrWhiteSpace(cookiesPathInput) ? null : cookiesPathInput.Trim();
-            Plugin.Cfg.YouTubeCookiesPath = path;
-            if (!string.IsNullOrEmpty(path) && File.Exists(path))
-            {
-                Plugin.Cfg.YouTubeCookiesBrowser = null;
-                Plugin.Cfg.YouTubeCookiesProfilePath = null;
-                Plugin.Cfg.UseFirefoxCookies = false;
-            }
-
-            Plugin.Cfg.Save();
-            ApplyYouTubeSessionToPlayer();
-        }
-
-        if (ImGui.SmallButton("Find in Downloads"))
-        {
-            cookiesSearchError = null;
-            var found = FindCookiesFileInDownloads();
-            if (found is not null)
-            {
-                cookiesPathInput = found;
-            }
-            else
-            {
-                cookiesSearchError = "No cookies file found in Downloads - export one first.";
-            }
-        }
-
-        if (cookiesSearchError is { } searchError)
-        {
-            ImGui.TextColored(Danger, searchError);
-        }
-
-        if (!string.IsNullOrEmpty(Plugin.Cfg.YouTubeCookiesPath))
-        {
-            var exists = File.Exists(Plugin.Cfg.YouTubeCookiesPath);
-            ImGui.TextColored(exists ? Good : Danger, exists ? "Cookies file found." : "File not found at that path.");
-        }
-    }
-
-    // Browser cookie-export extensions default to saving into Downloads - this saves typing the
-    // full path out by hand. Picks whichever matching file was modified most recently, in case
-    // there are several from past exports.
-    private static string? FindCookiesFileInDownloads()
-    {
-        try
-        {
-            var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-            if (!Directory.Exists(downloads))
-            {
-                return null;
-            }
-
-            return Directory.GetFiles(downloads, "*cookies*.txt")
-                .OrderByDescending(File.GetLastWriteTimeUtc)
-                .FirstOrDefault();
-        }
-        catch (Exception exception)
-        {
-            AepLog.Warning($"[YouTube] Failed to search Downloads for a cookies file: {exception.Message}");
-            return null;
-        }
-    }
-
     // Real trending data via Twitch's own Helix API (server-side, see Server/Twitch), not scraping.
     private void DrawTwitchTrending()
     {
@@ -1707,7 +2372,7 @@ internal sealed partial class MainWindow
             Accent,
             "Trending on Twitch");
 
-        ImGui.Dummy(new Vector2(0f, 8f));
+        ImGui.Dummy(UiVec(0f, 8f));
 
         if (CurrentSession is not { } session)
         {
@@ -1746,7 +2411,7 @@ internal sealed partial class MainWindow
         {
             if (ImGui.Button(
                 "Refresh",
-                new Vector2(92f, 32f)))
+                UiVec(92f, 32f)))
             {
                 trendingDirty = true;
             }
@@ -1754,7 +2419,7 @@ internal sealed partial class MainWindow
 
         if (trendingStreams.Length == 0)
         {
-            ImGui.Dummy(new Vector2(0f, 6f));
+            ImGui.Dummy(UiVec(0f, 6f));
 
             ImGui.TextColored(
                 MutedText,
@@ -1763,7 +2428,7 @@ internal sealed partial class MainWindow
             return;
         }
 
-        ImGui.Dummy(new Vector2(0f, 10f));
+        ImGui.Dummy(UiVec(0f, 10f));
 
         // Only the trending list scrolls.
         var trendingHeight = MathF.Max(
@@ -1795,7 +2460,7 @@ internal sealed partial class MainWindow
                 new Vector4(0.045f, 0.06f, 0.10f, 1f)))
             using (var row = ImRaii.Child(
                 $"##trending_{stream.ChannelName}",
-                new Vector2(-6f, rowHeight),
+                new Vector2(Ui(-6f), rowHeight),
                 false,
                 ImGuiWindowFlags.NoScrollbar |
                 ImGuiWindowFlags.NoScrollWithMouse))
@@ -1805,7 +2470,7 @@ internal sealed partial class MainWindow
                     var rowOrigin =
                         ImGui.GetCursorScreenPos();
 
-                    const float thumbWidth = 105f;
+                    var thumbWidth = Ui(105f);
 
                     var thumbnail =
                         thumbnails.Get(stream.ThumbnailUrl);
@@ -1829,7 +2494,7 @@ internal sealed partial class MainWindow
                         thumbWidth +
                         12f;
 
-                    const float controlsWidth = 120f;
+                    var controlsWidth = Ui(120f);
 
                     var textWidth =
                         ImGui.GetWindowWidth() -
@@ -1841,7 +2506,7 @@ internal sealed partial class MainWindow
                     ImGui.SetCursorScreenPos(
                         new Vector2(
                             contentX,
-                            rowOrigin.Y + 10f));
+                            rowOrigin.Y + Ui(10f)));
 
                     ImGui.PushTextWrapPos(
                         contentX + textWidth);
@@ -1856,7 +2521,7 @@ internal sealed partial class MainWindow
                     ImGui.SetCursorScreenPos(
                         new Vector2(
                             contentX,
-                            rowOrigin.Y + 40f));
+                            rowOrigin.Y + Ui(40f)));
 
                     ImGui.TextColored(
                         MutedText,
@@ -1866,13 +2531,13 @@ internal sealed partial class MainWindow
 
                     // Play button
                     var playSize =
-                        new Vector2(92f, 34f);
+                        UiVec(92f, 34f);
 
                     var playPos =
                         new Vector2(
                             rowOrigin.X +
                             ImGui.GetWindowWidth() -
-                            104f,
+                            Ui(104f),
                             rowOrigin.Y +
                             (rowHeight - playSize.Y) * 0.5f);
 
@@ -1921,262 +2586,1250 @@ internal sealed partial class MainWindow
             ImGui.PopID();
 
             ImGui.Dummy(
-                new Vector2(0f, 8f));
+                UiVec(0f, 8f));
         }
     }
 
-    // Not a real search - see TwitchChannelChecker's own comment on why. Just checks whether one
-    // named channel is currently live.
+    private IReadOnlyList<string> GetFavouriteTwitchChannels()
+    {
+        Plugin.Cfg.FavouriteTwitchChannels ??=
+            [];
+
+        return Plugin.Cfg.FavouriteTwitchChannels
+            .Where(
+                channel =>
+                    !string.IsNullOrWhiteSpace(
+                        channel))
+            .Distinct(
+                StringComparer.OrdinalIgnoreCase)
+            .OrderBy(
+                channel =>
+                    channel,
+                StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private bool IsFavouriteTwitchChannel(
+        string? channelName)
+    {
+        if (!TwitchChannelChecker.TryNormalizeChannelName(
+                channelName,
+                out var normalizedChannel,
+                out _))
+        {
+            return false;
+        }
+
+        return Plugin.Cfg.FavouriteTwitchChannels.Any(
+            savedChannel =>
+                string.Equals(
+                    savedChannel,
+                    normalizedChannel,
+                    StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool TryAddFavouriteTwitchChannel(
+        string? channelName,
+        out string? error)
+    {
+        error =
+            null;
+
+        if (!TwitchChannelChecker.TryNormalizeChannelName(
+                channelName,
+                out var normalizedChannel,
+                out var normalizationError))
+        {
+            error =
+                normalizationError;
+
+            return false;
+        }
+
+        Plugin.Cfg.FavouriteTwitchChannels ??=
+            [];
+
+        if (Plugin.Cfg.FavouriteTwitchChannels.Any(
+                savedChannel =>
+                    string.Equals(
+                        savedChannel,
+                        normalizedChannel,
+                        StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (Plugin.Cfg.FavouriteTwitchChannels.Count >=
+            MaximumFavouriteTwitchChannels)
+        {
+            error =
+                $"You can save up to " +
+                $"{MaximumFavouriteTwitchChannels} Twitch channels.";
+
+            return false;
+        }
+
+        Plugin.Cfg.FavouriteTwitchChannels.Add(
+            normalizedChannel);
+
+        Plugin.Cfg.FavouriteTwitchChannels =
+            Plugin.Cfg.FavouriteTwitchChannels
+                .Distinct(
+                    StringComparer.OrdinalIgnoreCase)
+                .OrderBy(
+                    savedChannel =>
+                        savedChannel,
+                    StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        Plugin.Cfg.Save();
+
+        return true;
+    }
+
+    private void RemoveFavouriteTwitchChannel(
+        string? channelName)
+    {
+        if (!TwitchChannelChecker.TryNormalizeChannelName(
+                channelName,
+                out var normalizedChannel,
+                out _))
+        {
+            return;
+        }
+
+        Plugin.Cfg.FavouriteTwitchChannels ??=
+            [];
+
+        Plugin.Cfg.FavouriteTwitchChannels.RemoveAll(
+            savedChannel =>
+                string.Equals(
+                    savedChannel,
+                    normalizedChannel,
+                    StringComparison.OrdinalIgnoreCase));
+
+        Plugin.Cfg.Save();
+
+        twitchFavouriteStatuses.TryRemove(
+            normalizedChannel,
+            out _);
+    }
+
+    private void ToggleFavouriteTwitchChannel(
+        string? channelName)
+    {
+        if (IsFavouriteTwitchChannel(
+                channelName))
+        {
+            RemoveFavouriteTwitchChannel(
+                channelName);
+
+            return;
+        }
+
+        if (!TryAddFavouriteTwitchChannel(
+                channelName,
+                out var error))
+        {
+            twitchError =
+                error;
+
+            return;
+        }
+
+        RefreshTwitchFavouritesIfStale(
+            forceRefresh: true);
+    }
+
+    private void RefreshTwitchFavouritesIfStale(
+        bool forceRefresh = false)
+    {
+        if (isRefreshingTwitchFavourites)
+        {
+            return;
+        }
+
+        var favourites =
+            GetFavouriteTwitchChannels();
+
+        if (favourites.Count == 0)
+        {
+            return;
+        }
+
+        var now =
+            DateTime.UtcNow;
+
+        var hasStaleChannel =
+            favourites.Any(
+                channel =>
+                    !twitchFavouriteStatuses.TryGetValue(
+                        channel,
+                        out var status) ||
+                    now -
+                    status.CheckedAtUtc >=
+                    TwitchFavouriteCacheDuration);
+
+        if (!forceRefresh &&
+            !hasStaleChannel)
+        {
+            return;
+        }
+
+        _ = RefreshTwitchFavouritesAsync(
+            forceRefresh);
+    }
+
+    private async Task RefreshTwitchFavouritesAsync(
+        bool forceRefresh)
+    {
+        if (isRefreshingTwitchFavourites)
+        {
+            return;
+        }
+
+        isRefreshingTwitchFavourites =
+            true;
+
+        try
+        {
+            var ytdlpPath =
+                screenController.Engine.Resources
+                    .GetLocationYTDLP();
+
+            if (string.IsNullOrWhiteSpace(
+                    ytdlpPath))
+            {
+                twitchError =
+                    "yt-dlp isn't downloaded yet - try again in a moment.";
+
+                return;
+            }
+
+            var favourites =
+                GetFavouriteTwitchChannels()
+                    .ToArray();
+
+            var refreshStartedAtUtc =
+                DateTime.UtcNow;
+
+            var checks =
+                favourites.Select(
+                    async channel =>
+                    {
+                        if (!forceRefresh &&
+                            twitchFavouriteStatuses.TryGetValue(
+                                channel,
+                                out var existing) &&
+                            refreshStartedAtUtc -
+                            existing.CheckedAtUtc <
+                            TwitchFavouriteCacheDuration)
+                        {
+                            return;
+                        }
+
+                        await twitchFavouriteCheckGate
+                            .WaitAsync()
+                            .ConfigureAwait(false);
+
+                        try
+                        {
+                            var (stream, error, isOffline) =
+        await twitchChecker.CheckLiveAsync(
+                ytdlpPath,
+                channel,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+
+                            twitchFavouriteStatuses[channel] =
+                                new TwitchFavouriteStatus(
+                                    channel,
+                                    stream,
+                                    isOffline,
+                                    error,
+                                    DateTime.UtcNow);
+                        }
+                        catch (Exception exception)
+                        {
+                            AepLog.Warning(
+                                $"[Twitch] Favourite check failed for " +
+                                $"{channel}: {exception.Message}");
+
+                            twitchFavouriteStatuses[channel] =
+     new TwitchFavouriteStatus(
+         channel,
+         null,
+         false,
+         "The channel status could not be checked.",
+         DateTime.UtcNow);
+                        }
+                        finally
+                        {
+                            twitchFavouriteCheckGate.Release();
+                        }
+                    });
+
+            await Task.WhenAll(
+                    checks)
+                .ConfigureAwait(false);
+
+            twitchFavouritesLastRefreshUtc =
+                DateTime.UtcNow;
+        }
+        finally
+        {
+            isRefreshingTwitchFavourites =
+                false;
+        }
+    }
+
+    // Checks whether one named Twitch channel is currently live.
     private void DrawTwitchCheck()
     {
-        ImGui.SetWindowFontScale(1.15f);
+        RefreshTwitchFavouritesIfStale();
+
+        SetUiFontScale(
+            1.15f);
 
         ImGui.TextColored(
             Vector4.One,
-            "Look up a Twitch channel");
+            "Find a Twitch channel");
 
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(
+            1f);
 
-        ImGui.Dummy(new Vector2(0f, 10f));
+        ImGui.Dummy(
+            UiVec(0f, 3f));
 
-        // Channel input
-        ImGui.SetNextItemWidth(-66f);
+        SetUiFontScale(
+            0.84f);
+
+        ImGui.TextColored(
+            MutedText,
+            "Enter a channel name or paste a Twitch URL to see if they're live.");
+
+        SetUiFontScale(
+            1f);
+
+        ImGui.Dummy(
+            UiVec(0f, 12f));
+
+        ImGui.SetNextItemWidth(
+            -66f);
 
         bool submitted;
 
         using (ImRaii.PushStyle(
-            ImGuiStyleVar.FrameRounding,
-            8f)
-            .Push(
-                ImGuiStyleVar.FramePadding,
-                new Vector2(14f, 10f)))
+                   ImGuiStyleVar.FrameRounding,
+                   8f)
+               .Push(
+                   ImGuiStyleVar.FramePadding,
+                   UiVec(14f, 10f)))
         using (ImRaii.PushColor(
-            ImGuiCol.FrameBg,
-            new Vector4(0.045f, 0.06f, 0.105f, 1f))
-            .Push(
-                ImGuiCol.FrameBgHovered,
-                new Vector4(0.065f, 0.085f, 0.14f, 1f))
-            .Push(
-                ImGuiCol.FrameBgActive,
-                new Vector4(0.065f, 0.085f, 0.14f, 1f)))
+                   ImGuiCol.FrameBg,
+                   new Vector4(
+                       0.045f,
+                       0.06f,
+                       0.105f,
+                       1f))
+               .Push(
+                   ImGuiCol.FrameBgHovered,
+                   new Vector4(
+                       0.065f,
+                       0.085f,
+                       0.14f,
+                       1f))
+               .Push(
+                   ImGuiCol.FrameBgActive,
+                   new Vector4(
+                       0.065f,
+                       0.085f,
+                       0.14f,
+                       1f)))
         {
-            submitted = ImGui.InputTextWithHint(
-                "##twitchChannel",
-                "Enter a Twitch channel name...",
-                ref twitchChannelInput,
-                64,
-                ImGuiInputTextFlags.EnterReturnsTrue);
+            submitted =
+                ImGui.InputTextWithHint(
+                    "##twitchChannel",
+                    "Enter a Twitch channel name or URL",
+                    ref twitchChannelInput,
+                    64,
+                    ImGuiInputTextFlags.EnterReturnsTrue);
         }
 
-        ImGui.SameLine(0f, 10f);
+        ImGui.SameLine(
+            0f,
+            10f);
 
-        // Check/search button
         bool clicked;
 
         using (ImRaii.PushStyle(
-            ImGuiStyleVar.FrameRounding,
-            8f)
-            .Push(
-                ImGuiStyleVar.FramePadding,
-                new Vector2(12f, 10f)))
+                   ImGuiStyleVar.FrameRounding,
+                   8f)
+               .Push(
+                   ImGuiStyleVar.FramePadding,
+                   UiVec(12f, 10f)))
         using (ImRaii.PushColor(
-            ImGuiCol.Button,
-            Accent)
-            .Push(
-                ImGuiCol.ButtonHovered,
-                AccentHover)
-            .Push(
-                ImGuiCol.ButtonActive,
-                AccentActive))
-        using (ImRaii.PushFont(UiBuilder.IconFont))
+                   ImGuiCol.Button,
+                   Accent)
+               .Push(
+                   ImGuiCol.ButtonHovered,
+                   AccentHover)
+               .Push(
+                   ImGuiCol.ButtonActive,
+                   AccentActive))
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
         {
-            clicked = ImGui.Button(
-                FontAwesomeIcon.Search.ToIconString(),
-                new Vector2(48f, 0f));
+            clicked =
+                ImGui.Button(
+                    FontAwesomeIcon.Search.ToIconString(),
+                    UiVec(48f, 0f));
         }
 
         if ((submitted || clicked) &&
             twitchChannelInput.Length > 0 &&
             !isCheckingTwitch)
         {
-            isCheckingTwitch = true;
-            twitchResult = null;
-            twitchError = null;
+            isCheckingTwitch =
+                true;
 
-            _ = RunTwitchCheckAsync(
-                twitchChannelInput.Trim());
+            twitchResult =
+                null;
+
+            twitchError =
+                null;
+
+            twitchResultIsOffline =
+                false;
+
+            twitchCheckedChannelName =
+                null;
+
+            _ =
+                RunTwitchCheckAsync(
+                    twitchChannelInput.Trim());
         }
-
-        ImGui.Dummy(new Vector2(0f, 5f));
-
-        ImGui.SetWindowFontScale(0.82f);
-
-ImGui.TextColored(
-    MutedText,
-    "Search a Twitch username to see if they're live and tune in.");
-
-// Temporary queue confirmation on the right.
-if (ImGui.GetTime() < queueAddedFeedbackUntil)
-{
-    const string feedbackText = "Video added to queue";
-
-    var feedbackTextSize =
-        ImGui.CalcTextSize(feedbackText);
-
-    ImGui.SameLine(
-        ImGui.GetContentRegionMax().X -
-        feedbackTextSize.X -
-        22f);
-
-    using (ImRaii.PushFont(UiBuilder.IconFont))
-    {
-        ImGui.TextColored(
-            Good,
-            FontAwesomeIcon.Check.ToIconString());
-    }
-
-    ImGui.SameLine(0f, 6f);
-
-    ImGui.TextColored(
-        Good,
-        feedbackText);
-}
-
-ImGui.SetWindowFontScale(1f);
 
         if (isCheckingTwitch)
         {
-            ImGui.Dummy(new Vector2(0f, 8f));
+            ImGui.Dummy(
+                UiVec(0f, 12f));
 
             ImGui.TextColored(
                 MutedText,
-                "Checking...");
+                "Checking channel...");
         }
 
         if (twitchError is { } error)
         {
-            ImGui.Dummy(new Vector2(0f, 8f));
+            ImGui.Dummy(
+                UiVec(0f, 12f));
 
             ImGui.TextColored(
                 Danger,
                 error);
         }
 
-        if (twitchResult is { } stream)
+        if (!isCheckingTwitch &&
+            (twitchResult is not null ||
+             (twitchResultIsOffline &&
+              twitchCheckedChannelName is not null)))
         {
-            ImGui.Dummy(new Vector2(0f, 16f));
+            ImGui.Dummy(
+                UiVec(0f, 14f));
 
-            var rowHeight = Ui(70f);
+            DrawTwitchSearchedChannelCard();
+        }
 
-            using (ImRaii.PushStyle(
-                ImGuiStyleVar.ChildRounding,
-                8f))
-            using (ImRaii.PushColor(
-                ImGuiCol.ChildBg,
-                new Vector4(0.045f, 0.06f, 0.10f, 1f)))
-            using (var row = ImRaii.Child(
-                "##twitchResult",
-                new Vector2(-1f, rowHeight),
-                false,
-                ImGuiWindowFlags.NoScrollbar |
-                ImGuiWindowFlags.NoScrollWithMouse))
+        if (ImGui.GetTime() <
+            queueAddedFeedbackUntil)
+        {
+            ImGui.Dummy(
+                UiVec(0f, 6f));
+
+            SetUiFontScale(
+                0.82f);
+
+            using (ImRaii.PushFont(
+                       UiBuilder.IconFont))
             {
-                if (row)
+                ImGui.TextColored(
+                    Good,
+                    FontAwesomeIcon.Check.ToIconString());
+            }
+
+            ImGui.SameLine(
+                0f,
+                6f);
+
+            ImGui.TextColored(
+                Good,
+                "Video added to queue");
+
+            SetUiFontScale(
+                1f);
+        }
+
+        ImGui.Dummy(
+            UiVec(0f, 22f));
+
+        DrawTwitchFavourites();
+    }
+
+    private void DrawTwitchSearchedChannelCard()
+    {
+        var stream =
+            twitchResult;
+
+        var channelName =
+            stream?.ChannelName ??
+            twitchCheckedChannelName;
+
+        if (string.IsNullOrWhiteSpace(
+                channelName))
+        {
+            return;
+        }
+
+        var isLive =
+            stream is not null;
+
+        var favourite =
+            IsFavouriteTwitchChannel(
+                channelName);
+
+        var cardHeight =
+            Ui(92f);
+
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.ChildRounding,
+                   9f))
+        using (ImRaii.PushColor(
+                   ImGuiCol.ChildBg,
+                   new Vector4(
+                       0.045f,
+                       0.06f,
+                       0.10f,
+                       1f)))
+        using (var card = ImRaii.Child(
+                   "##twitchSearchedChannelCard",
+                   new Vector2(
+                       -1f,
+                       cardHeight),
+                   false,
+                   ImGuiWindowFlags.NoScrollbar |
+                   ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            if (!card)
+            {
+                return;
+            }
+
+            var origin =
+                ImGui.GetCursorScreenPos();
+
+            var cardWidth =
+                ImGui.GetWindowWidth();
+
+            var drawList =
+                ImGui.GetWindowDrawList();
+
+            drawList.AddRect(
+                origin,
+                origin +
+                new Vector2(
+                    cardWidth,
+                    cardHeight),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        0.20f)),
+                9f,
+                ImDrawFlags.None,
+                1f);
+
+            var imageWidth =
+                Ui(128f);
+
+            var imageInset =
+                Ui(7f);
+
+            if (isLive &&
+                stream is not null)
+            {
+                var thumbnail =
+                    thumbnails.Get(
+                        stream.ThumbnailUrl);
+
+                if (thumbnail is not null)
                 {
-                    var rowOrigin =
-                        ImGui.GetCursorScreenPos();
+                    drawList.AddImageRounded(
+                        thumbnail.Handle,
+                        origin +
+                        new Vector2(
+                            imageInset,
+                            imageInset),
+                        origin +
+                        new Vector2(
+                            imageWidth,
+                            cardHeight -
+                            imageInset),
+                        Vector2.Zero,
+                        Vector2.One,
+                        uint.MaxValue,
+                        7f);
+                }
+                else
+                {
+                    DrawTwitchPlaceholder(
+                        origin +
+                        new Vector2(
+                            imageInset,
+                            imageInset),
+                        new Vector2(
+                            imageWidth -
+                            imageInset,
+                            cardHeight -
+                            (imageInset * 2f)));
+                }
+            }
+            else
+            {
+                DrawTwitchPlaceholder(
+                    origin +
+                    new Vector2(
+                        imageInset,
+                        imageInset),
+                    new Vector2(
+                        imageWidth -
+                        imageInset,
+                        cardHeight -
+                        (imageInset * 2f)));
+            }
 
-                    var thumbWidth = Ui(105f);
-                    var thumbHeight = rowHeight;
+            var contentX =
+                origin.X +
+                imageWidth +
+                Ui(13f);
 
+            var starSize =
+                new Vector2(
+                    Ui(34f),
+                    Ui(34f));
+
+            var addSize =
+                new Vector2(
+                    Ui(68f),
+                    Ui(34f));
+
+            var playSize =
+                new Vector2(
+                    Ui(84f),
+                    Ui(34f));
+
+            var rightPadding =
+                Ui(10f);
+
+            var controlsWidth =
+                starSize.X;
+
+            if (isLive)
+            {
+                controlsWidth +=
+                    Ui(8f) +
+                    addSize.X +
+                    Ui(8f) +
+                    playSize.X;
+            }
+
+            var textWidth =
+                MathF.Max(
+                    Ui(80f),
+                    cardWidth -
+                    (contentX - origin.X) -
+                    controlsWidth -
+                    rightPadding -
+                    Ui(18f));
+
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    contentX,
+                    origin.Y +
+                    Ui(14f)));
+
+            ImGui.TextColored(
+                Vector4.One,
+                FitTwitchText(
+                    channelName,
+                    textWidth));
+
+            ImGui.SameLine(
+                0f,
+                Ui(8f));
+
+            ImGui.TextColored(
+                isLive
+                    ? Good
+                    : MutedText,
+                isLive
+                    ? "LIVE"
+                    : "OFFLINE");
+
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    contentX,
+                    origin.Y +
+                    Ui(46f)));
+
+            var description =
+                isLive &&
+                stream is not null
+                    ? stream.Title
+                    : "This channel is not live right now.";
+
+            ImGui.TextColored(
+                MutedText,
+                FitTwitchText(
+                    PrepareTwitchDisplayText(
+                        description),
+                    textWidth));
+
+            var controlsX =
+                origin.X +
+                cardWidth -
+                controlsWidth -
+                rightPadding;
+
+            var controlsY =
+                origin.Y +
+                ((cardHeight -
+                  starSize.Y) *
+                 0.5f);
+
+            if (isLive &&
+                stream is not null)
+            {
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        controlsX,
+                        controlsY));
+
+                using (ImRaii.PushStyle(
+                           ImGuiStyleVar.FrameRounding,
+                           7f))
+                using (ImRaii.PushColor(
+                           ImGuiCol.Button,
+                           Accent)
+                       .Push(
+                           ImGuiCol.ButtonHovered,
+                           AccentHover)
+                       .Push(
+                           ImGuiCol.ButtonActive,
+                           AccentActive))
+                {
+                    if (ImGui.Button(
+                            "Play##searchedTwitchPlay",
+                            playSize))
+                    {
+                        HandlePlayNow(
+                            new VideoQueueEntry(
+                                stream.Url,
+                                stream.Title,
+                                stream.ChannelName,
+                                null,
+                                stream.ThumbnailUrl));
+                    }
+                }
+
+                controlsX +=
+                    playSize.X +
+                    Ui(8f);
+
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        controlsX,
+                        controlsY));
+
+                using (ImRaii.PushStyle(
+                           ImGuiStyleVar.FrameRounding,
+                           7f))
+                {
+                    if (ImGui.Button(
+                            "Add##searchedTwitchAdd",
+                            addSize))
+                    {
+                        HandleAddToQueue(
+                            new VideoQueueEntry(
+                                stream.Url,
+                                stream.Title,
+                                stream.ChannelName,
+                                null,
+                                stream.ThumbnailUrl));
+
+                        if (!ShouldUseViewerMediaActions)
+                        {
+                            queueAddedFeedbackUntil =
+                                ImGui.GetTime() +
+                                2.0;
+                        }
+                    }
+                }
+
+                controlsX +=
+                    addSize.X +
+                    Ui(8f);
+            }
+
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    controlsX,
+                    controlsY));
+
+            DrawTwitchFavouriteButton(
+                "searchedTwitchFavourite",
+                channelName,
+                favourite,
+                starSize);
+        }
+    }
+
+    private void DrawTwitchFavourites()
+    {
+        var favourites =
+            GetFavouriteTwitchChannels();
+
+        SetUiFontScale(
+            1.08f);
+
+        ImGui.TextColored(
+            Vector4.One,
+            $"Favourite channels ({favourites.Count})");
+
+        SetUiFontScale(
+            1f);
+
+        var refreshWidth =
+            Ui(92f);
+
+        ImGui.SameLine(
+            ImGui.GetContentRegionMax().X -
+            refreshWidth);
+
+        using (ImRaii.Disabled(
+                   isRefreshingTwitchFavourites))
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.FrameRounding,
+                   7f))
+        {
+            if (ImGui.Button(
+                    isRefreshingTwitchFavourites
+                        ? "Checking...##refreshTwitchFavourites"
+                        : "Refresh##refreshTwitchFavourites",
+                    new Vector2(
+                        refreshWidth,
+                        Ui(30f))))
+            {
+                RefreshTwitchFavouritesIfStale(
+                    forceRefresh: true);
+            }
+        }
+
+        ImGui.Dummy(
+            UiVec(0f, 3f));
+
+        SetUiFontScale(
+            0.78f);
+
+        ImGui.TextColored(
+            MutedText,
+            isRefreshingTwitchFavourites
+                ? "Checking saved channel statuses..."
+                : twitchFavouritesLastRefreshUtc is { } refreshedAt
+                    ? $"Last checked {FormatTwitchFavouriteCheckAge(refreshedAt)}"
+                    : "Statuses update automatically every 15 minutes.");
+
+        SetUiFontScale(
+            1f);
+
+        ImGui.Dummy(
+            UiVec(0f, 10f));
+
+        if (favourites.Count == 0)
+        {
+            DrawEmptyTwitchFavourites();
+
+            return;
+        }
+
+        var orderedFavourites =
+            favourites
+                .OrderByDescending(
+                    channel =>
+                        twitchFavouriteStatuses.TryGetValue(
+                            channel,
+                            out var status) &&
+                        status.Stream is not null)
+                .ThenBy(
+                    channel =>
+                        channel,
+                    StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        var availableWidth =
+            ImGui.GetContentRegionAvail().X;
+
+        var gap =
+            Ui(10f);
+
+        var cardWidth =
+            MathF.Max(
+                Ui(260f),
+                (availableWidth - gap) /
+                2f);
+
+        for (var index = 0;
+             index < orderedFavourites.Count;
+             index++)
+        {
+            var channel =
+                orderedFavourites[index];
+
+            twitchFavouriteStatuses.TryGetValue(
+                channel,
+                out var status);
+
+            if (index % 2 == 1)
+            {
+                ImGui.SameLine(
+                    0f,
+                    gap);
+            }
+
+            if (DrawTwitchFavouriteCard(
+                    channel,
+                    status,
+                    cardWidth))
+            {
+                break;
+            }
+        }
+    }
+
+    private bool DrawTwitchFavouriteCard(
+        string channel,
+        TwitchFavouriteStatus? status,
+        float width)
+    {
+        var stream =
+            status?.Stream;
+
+        var isLive =
+            stream is not null;
+
+        var isOffline =
+            status?.IsOffline ==
+            true;
+
+        var hasError =
+            !string.IsNullOrWhiteSpace(
+                status?.Error) &&
+            !isOffline;
+
+        var cardHeight =
+            Ui(104f);
+
+        var removed =
+            false;
+
+        ImGui.PushID(
+            channel);
+
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.ChildRounding,
+                   9f))
+        using (ImRaii.PushColor(
+                   ImGuiCol.ChildBg,
+                   isLive
+                       ? new Vector4(
+                           0.05f,
+                           0.065f,
+                           0.105f,
+                           1f)
+                       : new Vector4(
+                           0.038f,
+                           0.048f,
+                           0.075f,
+                           1f)))
+        using (var card = ImRaii.Child(
+                   "##favouriteTwitchCard",
+                   new Vector2(
+                       width,
+                       cardHeight),
+                   false,
+                   ImGuiWindowFlags.NoScrollbar |
+                   ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            if (card)
+            {
+                var origin =
+                    ImGui.GetCursorScreenPos();
+
+                var cardWidth =
+                    ImGui.GetWindowWidth();
+
+                var drawList =
+                    ImGui.GetWindowDrawList();
+
+                drawList.AddRect(
+                    origin,
+                    origin +
+                    new Vector2(
+                        cardWidth,
+                        cardHeight),
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            isLive
+                                ? Good.X
+                                : MutedText.X,
+                            isLive
+                                ? Good.Y
+                                : MutedText.Y,
+                            isLive
+                                ? Good.Z
+                                : MutedText.Z,
+                            isLive
+                                ? 0.22f
+                                : 0.12f)),
+                    9f,
+                    ImDrawFlags.None,
+                    1f);
+
+                var imageInset =
+                    Ui(7f);
+
+                var imageWidth =
+                    Ui(116f);
+
+                var imageHeight =
+                    cardHeight -
+                    (imageInset * 2f);
+
+                if (isLive &&
+                    stream is not null)
+                {
                     var thumbnail =
-                        thumbnails.Get(stream.ThumbnailUrl);
+                        thumbnails.Get(
+                            stream.ThumbnailUrl);
 
                     if (thumbnail is not null)
                     {
-                        ImGui.GetWindowDrawList().AddImageRounded(
+                        drawList.AddImageRounded(
                             thumbnail.Handle,
-                            rowOrigin,
-                            rowOrigin + new Vector2(
-                                thumbWidth,
-                                thumbHeight),
+                            origin +
+                            new Vector2(
+                                imageInset,
+                                imageInset),
+                            origin +
+                            new Vector2(
+                                imageWidth,
+                                cardHeight -
+                                imageInset),
                             Vector2.Zero,
                             Vector2.One,
                             uint.MaxValue,
-                            8f);
+                            7f);
                     }
+                    else
+                    {
+                        DrawTwitchPlaceholder(
+                            origin +
+                            new Vector2(
+                                imageInset,
+                                imageInset),
+                            new Vector2(
+                                imageWidth -
+                                imageInset,
+                                imageHeight));
+                    }
+                }
+                else
+                {
+                    DrawTwitchPlaceholder(
+                        origin +
+                        new Vector2(
+                            imageInset,
+                            imageInset),
+                        new Vector2(
+                            imageWidth -
+                            imageInset,
+                            imageHeight));
+                }
 
-                    var contentX =
-                        rowOrigin.X +
-                        thumbWidth +
-                        12f;
+                var contentX =
+                    origin.X +
+                    imageWidth +
+                    Ui(11f);
 
-                    const float controlsWidth = 190f;
+                var starSize =
+                    new Vector2(
+                        Ui(30f),
+                        Ui(30f));
 
-                    var textWidth =
-                        ImGui.GetWindowWidth() -
-                        thumbWidth -
-                        controlsWidth -
-                        28f;
+                var rightPadding =
+                    Ui(8f);
 
-                    // Title
+                var actionReserve =
+                    isLive
+                        ? Ui(76f)
+                        : 0f;
+
+                var textWidth =
+                    MathF.Max(
+                        Ui(70f),
+                        cardWidth -
+                        (contentX - origin.X) -
+                        starSize.X -
+                        rightPadding -
+                        Ui(14f) -
+                        actionReserve);
+
+                var displayedChannel =
+                    stream?.ChannelName ??
+                    channel;
+
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        contentX,
+                        origin.Y +
+                        Ui(11f)));
+
+                ImGui.TextColored(
+       Vector4.One,
+       FitTwitchText(
+           displayedChannel,
+           textWidth));
+
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        contentX,
+                        origin.Y +
+                        Ui(35f)));
+
+                ImGui.TextColored(
+                    isLive
+                        ? Good
+                        : hasError
+                            ? Danger
+                            : MutedText,
+                    isLive
+                        ? "LIVE NOW"
+                        : isOffline
+                            ? "OFFLINE"
+                            : hasError
+                                ? "STATUS UNAVAILABLE"
+                                : isRefreshingTwitchFavourites
+                                    ? "CHECKING..."
+                                    : "NOT CHECKED");
+
+                var detailText =
+                    isLive &&
+                    stream is not null
+                        ? stream.Title
+                        : hasError
+                            ? status!.Error!
+                            : isOffline
+                                ? "This channel is not live."
+                                : "Waiting for a status check.";
+
+                SetUiFontScale(
+                    0.78f);
+
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        contentX,
+                        origin.Y +
+                        Ui(61f)));
+
+                ImGui.TextColored(
+                    MutedText,
+                    FitTwitchText(
+                        PrepareTwitchDisplayText(
+                            detailText),
+                        textWidth));
+
+                if (status is not null)
+                {
                     ImGui.SetCursorScreenPos(
                         new Vector2(
                             contentX,
-                            rowOrigin.Y + 11f));
-
-                    ImGui.PushTextWrapPos(
-                        contentX + textWidth);
-
-                    ImGui.TextColored(
-                        Vector4.One,
-                        stream.Title);
-
-                    ImGui.PopTextWrapPos();
-
-                    // Channel metadata
-                    ImGui.SetCursorScreenPos(
-                        new Vector2(
-                            contentX,
-                            rowOrigin.Y + 41f));
+                            origin.Y +
+                            Ui(81f)));
 
                     ImGui.TextColored(
                         MutedText,
-                        $"{stream.ChannelName}  •  Live now");
+                        $"Checked " +
+                        $"{FormatTwitchFavouriteCheckAge(status.CheckedAtUtc)}");
+                }
 
-                    // Play
+                SetUiFontScale(
+                    1f);
+
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        origin.X +
+                        cardWidth -
+                        starSize.X -
+                        rightPadding,
+                        origin.Y +
+                        Ui(8f)));
+
+                if (DrawTwitchFavouriteButton(
+                        "favouriteCard",
+                        channel,
+                        true,
+                        starSize))
+                {
+                    removed =
+                        true;
+                }
+
+                if (isLive &&
+                    stream is not null)
+                {
                     var playSize =
-                        new Vector2(92f, 34f);
-
-                    var playPos =
                         new Vector2(
-                            rowOrigin.X +
-                            ImGui.GetWindowWidth() -
-                            174f,
-                            rowOrigin.Y +
-                            (rowHeight - playSize.Y) * 0.5f);
+                            Ui(68f),
+                            Ui(28f));
 
-                    ImGui.SetCursorScreenPos(playPos);
+                    ImGui.SetCursorScreenPos(
+                        new Vector2(
+                            origin.X +
+                            cardWidth -
+                            playSize.X -
+                            rightPadding,
+                            origin.Y +
+                            cardHeight -
+                            playSize.Y -
+                            Ui(8f)));
 
                     using (ImRaii.PushStyle(
-                        ImGuiStyleVar.FrameRounding,
-                        6f))
+                               ImGuiStyleVar.FrameRounding,
+                               6f))
                     using (ImRaii.PushColor(
-                        ImGuiCol.Button,
-                        Accent)
-                        .Push(
-                            ImGuiCol.ButtonHovered,
-                            AccentHover)
-                        .Push(
-                            ImGuiCol.ButtonActive,
-                            AccentActive))
+                               ImGuiCol.Button,
+                               Accent)
+                           .Push(
+                               ImGuiCol.ButtonHovered,
+                               AccentHover)
+                           .Push(
+                               ImGuiCol.ButtonActive,
+                               AccentActive))
                     {
-                        var buttonPos =
-                            ImGui.GetCursorScreenPos();
-
                         if (ImGui.Button(
-                            "##twitchPlay",
-                            playSize))
+                                "Play##favouritePlay",
+                                playSize))
                         {
                             HandlePlayNow(
                                 new VideoQueueEntry(
@@ -2186,116 +3839,493 @@ ImGui.SetWindowFontScale(1f);
                                     null,
                                     stream.ThumbnailUrl));
                         }
-
-                        DrawPlayerActionButtonContent(
-                            buttonPos,
-                            playSize,
-                            FontAwesomeIcon.Play,
-                            "Play",
-                            Vector4.One);
-                    }
-
-                    // Add
-                    var addSize =
-                        new Vector2(70f, 34f);
-
-                    ImGui.SetCursorScreenPos(
-                        new Vector2(
-                            playPos.X +
-                            playSize.X +
-                            8f,
-                            playPos.Y));
-
-                    using (ImRaii.PushStyle(
-                        ImGuiStyleVar.FrameRounding,
-                        6f))
-                    using (ImRaii.PushColor(
-                        ImGuiCol.Button,
-                        new Vector4(
-                            0.055f,
-                            0.07f,
-                            0.115f,
-                            1f))
-                        .Push(
-                            ImGuiCol.ButtonHovered,
-                            new Vector4(
-                                0.075f,
-                                0.095f,
-                                0.15f,
-                                1f))
-                        .Push(
-                            ImGuiCol.ButtonActive,
-                            new Vector4(
-                                0.075f,
-                                0.095f,
-                                0.15f,
-                                1f)))
-                    {
-                        var buttonPos =
-                            ImGui.GetCursorScreenPos();
-
-                        if (ImGui.Button(
-                "##twitchAdd",
-                addSize))
-                        {
-                            HandleAddToQueue(
-                                new VideoQueueEntry(
-                                    stream.Url,
-                                    stream.Title,
-                                    stream.ChannelName,
-                                    null,
-                                    stream.ThumbnailUrl));
-
-                            if (!ShouldUseViewerMediaActions)
-                            {
-                                queueAddedFeedbackUntil =
-                                    ImGui.GetTime() + 2.0;
-                            }
-                        }
-
-                        ImGui.GetWindowDrawList().AddRect(
-                            buttonPos,
-                            buttonPos + addSize,
-                            ImGui.GetColorU32(
-                                new Vector4(
-                                    MutedText.X,
-                                    MutedText.Y,
-                                    MutedText.Z,
-                                    0.16f)),
-                            8f,
-                            ImDrawFlags.None,
-                            1f);
-
-                        DrawPlayerActionButtonContent(
-                            buttonPos,
-                            addSize,
-                            FontAwesomeIcon.Plus,
-                            "Add",
-                            Vector4.One);
                     }
                 }
             }
         }
 
-        ImGui.Dummy(new Vector2(0f, 18f));
+        ImGui.PopID();
 
-        DrawTwitchTrending();
+        return removed;
     }
 
-    private async Task RunTwitchCheckAsync(string channelName)
+    private bool DrawTwitchFavouriteButton(
+    string id,
+    string channelName,
+    bool favourite,
+    Vector2 size)
     {
-        var ytdlpPath = screenController.Engine.Resources.GetLocationYTDLP();
-        if (ytdlpPath is null)
+        var clicked =
+            false;
+
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.FrameRounding,
+                   7f))
+        using (ImRaii.PushColor(
+                   ImGuiCol.Button,
+                   favourite
+                       ? new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.28f)
+                       : new Vector4(
+                           0.055f,
+                           0.07f,
+                           0.115f,
+                           1f))
+               .Push(
+                   ImGuiCol.ButtonHovered,
+                   favourite
+                       ? new Vector4(
+                           Accent.X,
+                           Accent.Y,
+                           Accent.Z,
+                           0.44f)
+                       : new Vector4(
+                           0.075f,
+                           0.095f,
+                           0.15f,
+                           1f))
+               .Push(
+                   ImGuiCol.ButtonActive,
+                   AccentActive))
         {
-            twitchError = "yt-dlp isn't downloaded yet - try again in a moment.";
-            isCheckingTwitch = false;
+            if (ImGui.Button(
+                    $"##{id}",
+                    size))
+            {
+                ToggleFavouriteTwitchChannel(
+                    channelName);
+
+                clicked =
+                    true;
+            }
+        }
+
+        var buttonMin =
+            ImGui.GetItemRectMin();
+
+        var buttonMax =
+            ImGui.GetItemRectMax();
+
+        var star =
+            FontAwesomeIcon.Star.ToIconString();
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            var starSize =
+                ImGui.CalcTextSize(
+                    star);
+
+            var starPosition =
+                new Vector2(
+                    buttonMin.X +
+                    ((buttonMax.X -
+                      buttonMin.X -
+                      starSize.X) *
+                     0.5f),
+
+                    buttonMin.Y +
+                    ((buttonMax.Y -
+                      buttonMin.Y -
+                      starSize.Y) *
+                     0.5f));
+
+            ImGui.GetWindowDrawList().AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                starPosition,
+                ImGui.GetColorU32(
+                    favourite
+                        ? Vector4.One
+                        : MutedText),
+                star);
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(
+                favourite
+                    ? "Remove from favourites"
+                    : "Add to favourites");
+        }
+
+        return clicked;
+    }
+
+    private void DrawTwitchPlaceholder(
+        Vector2 position,
+        Vector2 size)
+    {
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        drawList.AddRectFilled(
+            position,
+            position + size,
+            ImGui.GetColorU32(
+                new Vector4(
+                    0.025f,
+                    0.035f,
+                    0.06f,
+                    1f)),
+            7f);
+
+        var icon =
+            FontAwesomeIcon.Tv.ToIconString();
+
+        Vector2 iconSize;
+
+        using (ImRaii.PushFont(
+                   UiBuilder.IconFont))
+        {
+            iconSize =
+                ImGui.CalcTextSize(
+                    icon);
+
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                position +
+                new Vector2(
+                    (size.X -
+                     iconSize.X) *
+                    0.5f,
+                    (size.Y -
+                     iconSize.Y) *
+                    0.5f),
+                ImGui.GetColorU32(
+                    MutedText),
+                icon);
+        }
+    }
+
+    private void DrawEmptyTwitchFavourites()
+    {
+        var height =
+            Ui(92f);
+
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.ChildRounding,
+                   9f))
+        using (ImRaii.PushColor(
+                   ImGuiCol.ChildBg,
+                   new Vector4(
+                       0.038f,
+                       0.048f,
+                       0.075f,
+                       1f)))
+        using (var empty = ImRaii.Child(
+                   "##emptyTwitchFavourites",
+                   new Vector2(
+                       -1f,
+                       height),
+                   false,
+                   ImGuiWindowFlags.NoScrollbar |
+                   ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            if (!empty)
+            {
+                return;
+            }
+
+            var origin =
+                ImGui.GetCursorScreenPos();
+
+            using (ImRaii.PushFont(
+                       UiBuilder.IconFont))
+            {
+                ImGui.SetCursorScreenPos(
+                    new Vector2(
+                        origin.X +
+                        Ui(18f),
+                        origin.Y +
+                        Ui(30f)));
+
+                ImGui.TextColored(
+                    Accent,
+                    FontAwesomeIcon.Star.ToIconString());
+            }
+
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    origin.X +
+                    Ui(58f),
+                    origin.Y +
+                    Ui(19f)));
+
+            ImGui.TextColored(
+                Vector4.One,
+                "No favourite channels yet");
+
+            SetUiFontScale(
+                0.82f);
+
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    origin.X +
+                    Ui(58f),
+                    origin.Y +
+                    Ui(49f)));
+
+            ImGui.TextColored(
+                MutedText,
+                "Find a Twitch channel above and use the star to save it here.");
+
+            SetUiFontScale(
+                1f);
+        }
+    }
+
+    private static string FitTwitchText(
+        string? text,
+        float maximumWidth)
+    {
+        if (string.IsNullOrWhiteSpace(
+                text))
+        {
+            return string.Empty;
+        }
+
+        var value =
+            text.Trim();
+
+        if (maximumWidth <= 0f ||
+            ImGui.CalcTextSize(
+                value).X <=
+            maximumWidth)
+        {
+            return value;
+        }
+
+        const string suffix =
+            "...";
+
+        var low =
+            0;
+
+        var high =
+            value.Length;
+
+        while (low < high)
+        {
+            var middle =
+                (low +
+                 high +
+                 1) /
+                2;
+
+            var candidate =
+                value[..middle] +
+                suffix;
+
+            if (ImGui.CalcTextSize(
+                    candidate).X <=
+                maximumWidth)
+            {
+                low =
+                    middle;
+            }
+            else
+            {
+                high =
+                    middle -
+                    1;
+            }
+        }
+
+        return value[..low] +
+               suffix;
+    }
+
+    private static string PrepareTwitchDisplayText(
+    string? text)
+    {
+        if (string.IsNullOrWhiteSpace(
+                text))
+        {
+            return string.Empty;
+        }
+
+        var output =
+            new System.Text.StringBuilder(
+                text.Length);
+
+        var replacedSymbol =
+            false;
+
+        for (var index = 0;
+             index < text.Length;
+             index++)
+        {
+            var character =
+                text[index];
+
+            var isSurrogatePair =
+                char.IsHighSurrogate(
+                    character) &&
+                index + 1 <
+                text.Length &&
+                char.IsLowSurrogate(
+                    text[index + 1]);
+
+            var isUnsupportedSymbol =
+                isSurrogatePair ||
+                character is >= '\u2600' and <= '\u27BF';
+
+            if (isUnsupportedSymbol)
+            {
+                if (!replacedSymbol &&
+                    output.Length > 0 &&
+                    output[^1] != ' ')
+                {
+                    output.Append(
+                        " • ");
+                }
+
+                replacedSymbol =
+                    true;
+
+                if (isSurrogatePair)
+                {
+                    index++;
+                }
+
+                continue;
+            }
+
+            // Remove emoji presentation selectors and joiners.
+            if (character is '\uFE0E' or
+                '\uFE0F' or
+                '\u200D')
+            {
+                continue;
+            }
+
+            output.Append(
+                character);
+
+            if (!char.IsWhiteSpace(
+                    character))
+            {
+                replacedSymbol =
+                    false;
+            }
+        }
+
+        return output
+            .ToString()
+            .Trim()
+            .Trim('•')
+            .Trim();
+    }
+
+    private static string FormatTwitchFavouriteCheckAge(
+        DateTime checkedAtUtc)
+    {
+        var age =
+            DateTime.UtcNow -
+            checkedAtUtc;
+
+        if (age <
+            TimeSpan.FromMinutes(1))
+        {
+            return "just now";
+        }
+
+        if (age <
+            TimeSpan.FromHours(1))
+        {
+            var minutes =
+                Math.Max(
+                    1,
+                    (int)age.TotalMinutes);
+
+            return
+                $"{minutes} min ago";
+        }
+
+        var hours =
+            Math.Max(
+                1,
+                (int)age.TotalHours);
+
+        return
+            $"{hours} hr ago";
+    }
+
+    private async Task RunTwitchCheckAsync(
+    string input)
+    {
+        if (!TwitchChannelChecker.TryNormalizeChannelName(
+                input,
+                out var channelName,
+                out var normalizationError))
+        {
+            twitchResult =
+                null;
+
+            twitchError =
+                normalizationError;
+
+            twitchResultIsOffline =
+                false;
+
+            twitchCheckedChannelName =
+                null;
+
+            isCheckingTwitch =
+                false;
+
             return;
         }
 
-        var (stream, error) = await twitchChecker.CheckLiveAsync(ytdlpPath, channelName, CancellationToken.None)
-            .ConfigureAwait(false);
-        twitchResult = stream;
-        twitchError = error;
-        isCheckingTwitch = false;
+        twitchChannelInput =
+            channelName;
+
+        twitchCheckedChannelName =
+            channelName;
+
+        var ytdlpPath =
+            screenController.Engine.Resources
+                .GetLocationYTDLP();
+
+        if (ytdlpPath is null)
+        {
+            twitchError =
+                "yt-dlp isn't downloaded yet - try again in a moment.";
+
+            twitchResultIsOffline =
+                false;
+
+            isCheckingTwitch =
+                false;
+
+            return;
+        }
+
+        var (stream, error, isOffline) =
+            await twitchChecker.CheckLiveAsync(
+                    ytdlpPath,
+                    channelName,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+
+        twitchResult =
+            stream;
+
+        twitchResultIsOffline =
+            isOffline;
+
+        //
+        // Offline is a valid result and will receive its own result card.
+        // Only genuine failures should render as red errors.
+        //
+
+        twitchError =
+            isOffline
+                ? null
+                : error;
+
+        isCheckingTwitch =
+            false;
     }
 }

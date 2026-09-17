@@ -1,11 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Platforms>AnyCPU;x64</Platforms>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Platforms>AnyCPU;x64</Platforms>
+
+		<Deterministic>true</Deterministic>
+		<PathMap>$(MSBuildProjectDirectory)\..\..=/_/</PathMap>
+	</PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\AlphaChannel.Contracts\AlphaChannel.Contracts.csproj" />

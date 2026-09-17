@@ -15,8 +15,7 @@ namespace AlphaChannel.Plugin;
 // the theme/palette, the name prompt, and watch-along/roster (shared between the Home dashboard's
 // Live Now card and the dedicated Watch-along page). Smart-TV-dashboard look (dark background,
 // purple neon glow border, sidebar nav, rounded cards) built with plain ImGui style pushes plus
-// hand-drawn ImDrawList primitives (MainWindow.Home.cs) where ImGui has no built-in equivalent -
-// not a port of Aetherphone's Typography/Squircle kit, still too much surface area for this tool.
+// hand-drawn ImDrawList primitives (MainWindow.Home.cs) where ImGui has no built-in equivalent.
 internal sealed partial class MainWindow : Window, IDisposable
 {
     // Active palette for this frame - set at the top of Draw() from Cfg.UiTheme so every partial
@@ -56,11 +55,42 @@ internal sealed partial class MainWindow : Window, IDisposable
 
     // First launch experience
     private bool showingFirstLaunch;
+
+    // Tracks the username prompt for this plugin load only. This is not
+    // written to Configuration, so it resets whenever the plugin reloads.
+    private bool launchNamePromptRequested;
+
     private float firstLaunchFadeAlpha = 1f;
     private bool firstLaunchFadingOut;
     private bool firstLaunchStarted;
 
     private bool firstLaunchLoadingComplete;
+
+    private bool firstLaunchWindowDragging;
+
+    private Vector2 firstLaunchWindowDragOffset;
+
+    //
+    // The splash begins immediately, pauses for onboarding after the welcome
+    // text, then resumes its fixed loading sequence after confirmation.
+    //
+    private bool firstLaunchSetupSubmitted;
+    private bool firstLaunchSetupFadingOut;
+
+    private double firstLaunchSetupSubmittedAt;
+    private double firstLaunchLoadingStartedAt;
+
+    private const double FirstLaunchWelcomeDuration =
+        3.5;
+
+    private const double FirstLaunchSetupFadeDuration =
+        0.75;
+
+    private const double FirstLaunchLoadingDuration =
+        16.0;
+
+    private bool roomEndedPlaybackResetPending;
+    private bool hostLeaveConfirmationRequested;
 
     private double firstLaunchStartedAt;
 
@@ -95,16 +125,17 @@ internal sealed partial class MainWindow : Window, IDisposable
         Home,
         Player,
         PlaySnes,
+        // Alpha Channel embedded-browser integration.
+        Browser,
+        InternetArchive,
+        UnifiedSearch,
         VideoGrid,
         Screen,
         WatchAlong,
         Friends,
         Messages,
         Activity,
-        Tweeter,
-        Apps,
-        PluginHub,
-        Venues,
+        PartyDirectory,
         GoLive,
         Settings,
     }
@@ -112,8 +143,18 @@ internal sealed partial class MainWindow : Window, IDisposable
     private readonly ScreenController screenController;
     private readonly VideoPlayer video;
     private readonly AetherStreamQueue queue;
+    private readonly QueueManager queueManager;
     private readonly StreamClient stream;
-    private readonly ThumbnailCache thumbnails = new();
+    private readonly ThumbnailCache thumbnails =
+        new();
+
+    //
+    // User-provided still images and slideshow previews use the strict image
+    // validation path. Ordinary YouTube/Twitch thumbnails remain separate.
+    //
+    private readonly SafeImagePreviewCache imagePreviews =
+        new();
+
     private readonly Action requestRename;
     private readonly SignInFlow signInFlow;
     private readonly AuthClient authClient;
@@ -121,96 +162,167 @@ internal sealed partial class MainWindow : Window, IDisposable
     private readonly ActivityClient activityClient;
     private readonly DmClient dmClient;
     private readonly ReportClient reportClient;
-    private readonly TweeterClient tweeterClient;
-    private readonly PluginHubClient pluginHubClient;
     private readonly VenuesClient venuesClient;
     private readonly LiveClient liveClient;
     private readonly RoomsClient roomsClient;
     private readonly RadioClient radioClient;
     private readonly TwitchClient twitchClient;
     private readonly Crypto.KeyVault keyVault;
-    private readonly Whispers.WhisperMirror whisperMirror;
 
     // Called whenever sign-in/link/sign-out changes what CharacterSession belongs to the currently-
     // played character - the callback (Plugin.cs) is what actually writes Cfg.CharacterSessions and
     // saves, same split as requestRename above (MainWindow owns the UI, Plugin.cs owns persistence).
     private readonly Action<CharacterSession?> onSessionChanged;
-    // Wide media-hub layout: left navigation + spacious content + social rail + compact player bar.
-    private static readonly Vector2 WindowSize = new(1220, 840);
-    private static readonly Vector2 MaxWindowSize = new(3840, 2160);
-    private const float LayoutScaleMin = 0.85f;
-    private const float LayoutScaleMax = 3840f / 1220f;
+    // The approved full-size layout is the largest the normal window may become.
+    // At 85% scale the dashboard remains usable without allowing it to collapse
+    // all the way to the separate minimized capsule dimensions.
+    //
+    // The approved full layout remains the maximum size. Brand-new
+    // installations initially open at approximately 80% of it.
+    //
+    private static readonly Vector2 WindowSize =
+    new(1220f, 840f);
 
-    private float layoutScale = 1f;
+    //
+    // Allow the experimental 1.5x interface preset to use a larger design
+    // canvas. Ordinary presets still apply their own named size.
+    //
+    private static readonly Vector2 MaximumWindowSize =
+        WindowSize * 1.5f;
+
+    private static readonly Vector2 FirstLaunchWindowSize =
+        new(
+            WindowSize.X * 0.90f,
+            WindowSize.Y * 0.90f);
+
+    private static readonly Vector2 MinimumWindowSize =
+        new(950f, 730f);
+
+    private const float FixedLayoutScale =
+     1f;
+
+    private float layoutScale =
+        FixedLayoutScale;
+
+    // Drawing helpers include a small number of static primitives shared by
+    // the partial files. They read this frame-local value so their geometry
+    // follows the active main-window preset as well.
+    private static float activeLayoutScale =
+        FixedLayoutScale;
+
     private bool windowSizeSavePending;
 
-    private void RefreshLayoutScale(Vector2 windowSize)
+    private void RefreshLayoutScale(
+        Vector2 windowSize)
     {
-        if (windowMinimized)
-        {
-            layoutScale = 1f;
-            return;
-        }
+        layoutScale =
+            !windowMinimized &&
+            !showingFirstLaunch &&
+            Plugin.Cfg.WindowSizePreset == UiWindowSizePreset.Uhd
+                ? 1.5f
+                : FixedLayoutScale;
 
-        var sx = windowSize.X / WindowSize.X;
-        var sy = windowSize.Y / WindowSize.Y;
-        layoutScale = Math.Clamp(MathF.Min(sx, sy), LayoutScaleMin, LayoutScaleMax);
+        activeLayoutScale =
+            layoutScale;
     }
 
-    private float Ui(float px) => px * layoutScale;
+    private static float Ui(
+        float px) =>
+        px * activeLayoutScale;
 
-    private Vector2 UiVec(float x, float y) => new(x * layoutScale, y * layoutScale);
+    private static Vector2 UiVec(
+        float x,
+        float y) =>
+        new(
+            x * activeLayoutScale,
+            y * activeLayoutScale);
+
+    // Every explicit font adjustment in the main-window partials is expressed
+    // relative to the 1x design. This preserves the existing rendering at 1x
+    // and applies the UHD multiplier only while that preset is active.
+    private void SetUiFontScale(float relativeScale) =>
+        ImGui.SetWindowFontScale(relativeScale * layoutScale);
 
     private static Vector2 NamedWindowSize(UiWindowSizePreset preset) => preset switch
     {
-        UiWindowSizePreset.FullHd => new Vector2(1920f, 1080f),
-        UiWindowSizePreset.Qhd => new Vector2(2560f, 1440f),
-        UiWindowSizePreset.Uhd => new Vector2(3840f, 2160f),
+        UiWindowSizePreset.FullHd => WindowSize,
+        UiWindowSizePreset.Qhd => WindowSize,
+        UiWindowSizePreset.Uhd => WindowSize * 1.5f,
         _ => WindowSize,
     };
 
-    private Vector2 ViewportMaxSize()
+    private static Vector2 ClampWindowSize(Vector2 size)
     {
-        var work = ImGui.GetMainViewport().WorkSize;
-        var maxX = MaxWindowSize.X;
-        var maxY = MaxWindowSize.Y;
-        if (work.X > 1f && work.Y > 1f)
-        {
-            maxX = MathF.Min(maxX, work.X);
-            maxY = MathF.Min(maxY, work.Y);
-        }
-
-        return new Vector2(maxX, maxY);
-    }
-
-    private Vector2 ClampWindowSize(Vector2 size)
-    {
-        var max = ViewportMaxSize();
-        return new(
-            Math.Clamp(size.X, MinimizedSize.X, MathF.Max(MinimizedSize.X, max.X)),
-            Math.Clamp(size.Y, MinimizedSize.Y, MathF.Max(MinimizedSize.Y, max.Y)));
+        return new Vector2(
+     Math.Clamp(
+                size.X,
+                MinimumWindowSize.X,
+                MaximumWindowSize.X),
+            Math.Clamp(
+                size.Y,
+                MinimumWindowSize.Y,
+                MaximumWindowSize.Y));
     }
 
     private void LoadWindowSizeFromConfig()
     {
-        var cfg = Plugin.Cfg;
-        if (cfg.WindowSizePreset == UiWindowSizePreset.Custom &&
-            cfg.WindowWidth >= MinimizedSize.X &&
-            cfg.WindowHeight >= MinimizedSize.Y)
+        var cfg =
+            Plugin.Cfg;
+
+        //
+        // A valid saved normal-window size must satisfy the normal window's
+        // minimum constraints. This also repairs configurations written by
+        // older builds that accidentally stored the minimized capsule size.
+        //
+        var hasValidCustomSize =
+            cfg.WindowSizePreset ==
+                UiWindowSizePreset.Custom &&
+            cfg.WindowWidth >=
+                650f &&
+            cfg.WindowHeight >=
+                MinimumWindowSize.Y;
+
+        if (hasValidCustomSize)
         {
-            userWindowSize = ClampWindowSize(new Vector2(cfg.WindowWidth, cfg.WindowHeight));
+            userWindowSize =
+                ClampWindowSize(
+                    new Vector2(
+                        cfg.WindowWidth,
+                        cfg.WindowHeight));
         }
-        else if (cfg.WindowSizePreset is UiWindowSizePreset.FullHd or UiWindowSizePreset.Qhd or UiWindowSizePreset.Uhd)
+        else if (cfg.WindowSizePreset is
+                 UiWindowSizePreset.FullHd or
+                 UiWindowSizePreset.Qhd or
+                 UiWindowSizePreset.Uhd)
         {
-            userWindowSize = ClampWindowSize(NamedWindowSize(cfg.WindowSizePreset));
+            userWindowSize =
+                ClampWindowSize(
+                    NamedWindowSize(
+                        cfg.WindowSizePreset));
         }
         else
         {
-            cfg.WindowSizePreset = UiWindowSizePreset.Design;
-            userWindowSize = ClampWindowSize(WindowSize);
+            cfg.WindowSizePreset =
+                UiWindowSizePreset.Design;
+
+            userWindowSize =
+                ClampWindowSize(
+                    WindowSize);
+
+            cfg.WindowWidth =
+                userWindowSize.X;
+
+            cfg.WindowHeight =
+                userWindowSize.Y;
+
+            cfg.Save();
         }
 
-        userResized = true;
+        //
+        // Apply the restored normal size on the first visible frame.
+        //
+        userResized =
+            true;
     }
 
     private void ApplyWindowSizePreset(UiWindowSizePreset preset)
@@ -226,14 +338,15 @@ internal sealed partial class MainWindow : Window, IDisposable
         userResized = true;
         cfg.Save();
     }
-    // Compact capsule chrome while tucked away - wide enough for brand + expand + close.
-    private static readonly Vector2 MinimizedSize = new(276, 40);
-    // Wider capsule when "Watching First Last" is showing (viewer-only join).
-    private static readonly Vector2 MinimizedViewerSize = new(340, 40);
+    // Mini Mode begins as a compact status bar. The player and chat actions
+    // currently open their matching full-size pages; the later detachable
+    // panels can take over those actions without changing this chrome.
+    private static readonly Vector2 MinimizedSize = new(650f, 44f);
     private const int PositionPinFrames = 3;
     private bool windowMinimized;
     private bool userResized;
     private Vector2 userWindowSize = WindowSize;
+
     private bool wasResizing;
     // True after /achannel watch or context-menu Join Stream: stay minimized; screen still
     // draws via ScreenPainter + /rt sync. Requires AlphaChannel on both sides — not Lightless.
@@ -259,10 +372,46 @@ internal sealed partial class MainWindow : Window, IDisposable
     private string createRoomLocation = string.Empty;
     private int createRoomKindIndex;
     private string createRoomPassword = string.Empty;
+    private int createRoomCategoryIndex;
+    private bool createRoomAdultOnly;
+
+    //
+    // Locked-room creation is confirmed through a dedicated password
+    // popup rather than showing the password inside the main form.
+    //
+    private bool createLockedRoomPasswordPopupRequested;
+    private string? createLockedRoomPasswordError;
+
+    //
+    // The locked-room password popup is shared by room creation and
+    // editing an existing hosted room.
+    //
+    private bool createLockedRoomPasswordForRoomEdit;
+
+    //
+    // Host-only editing state for the active Watch Party details tab.
+    //
+    private bool partyRoomEditing;
+
+    private static readonly string[] WatchPartyCategoryOptions =
+    [
+        "YouTube",
+        "Movies",
+        "TV",
+        "Twitch",
+        "Cartoons",
+        "Live Stream",
+        "Gaming",
+        "DJ",
+        "Music",
+        "Images",
+        "Promotional",
+    ];
     private string roomBrowsePassword = string.Empty;
     private string? roomBrowseTitle;
     private RoomDirectoryDto[] roomBrowseList = [];
     private bool roomBrowseLoading;
+    private string? roomBrowseError;
     private RoomDirectoryDto[] homeWatchPartyRooms = [];
     private double homeWatchPartyFetchedAt = -999;
     private bool homeWatchPartyLoading;
@@ -274,7 +423,8 @@ internal sealed partial class MainWindow : Window, IDisposable
 
     private const float DesignSidebarWidth = 210f;
     private float SidebarWidth => Ui(DesignSidebarWidth);
-    private const float BottomBarHeight = 96f;
+    private const float DesignBottomBarHeight = 96f;
+    private static float BottomBarHeight => Ui(DesignBottomBarHeight);
 
     // Borderless Child windows ignore WindowPadding in this ImGui build unless AlwaysUseWindowPadding
     private const ImGuiWindowFlags PaddedChild =
@@ -294,14 +444,34 @@ internal sealed partial class MainWindow : Window, IDisposable
 
     private bool createQueuePopupOpen;
     private int creatingQueueIndex = -1;
+    private bool editingQueueProfile;
     private string newQueueName = string.Empty;
+    private string newQueueIcon = "Tv";
+    private string? queueEditorError;
+
+    private bool deleteQueuePopupOpen;
+    private int deletingQueueIndex = -1;
+    private string deletingQueueName = string.Empty;
+
+    private bool clearQueuePopupOpen;
+    private string clearingQueueName = string.Empty;
+    private int clearingQueueVideoCount;
 
     private Action<string>? onNameConfirmed;
 
     //Scrollbar inactivity timer
     private double lastScrollInteractionTime;
 
-    // Welcome splash particle emit
+    // ---------------------------------------------------------
+    // Welcome splash particles
+    // ---------------------------------------------------------
+
+    private const float FirstLaunchFormWidth =
+      520f;
+
+    private const float FirstLaunchFormHeight =
+        385f;
+
     private sealed class LoadingCardParticle
     {
         public Vector2 Position;
@@ -318,16 +488,121 @@ internal sealed partial class MainWindow : Window, IDisposable
         public double SpawnTime;
 
         public float ShimmerOffset;
+
+        public bool IsLeftSide;
     }
+
+    private static readonly
+        (
+            FontAwesomeIcon Icon,
+            string Title
+        )[]
+        SplashLoadingFeatures =
+        [
+            (
+            FontAwesomeIcon.Music,
+            "Live DJ"
+        ),
+        (
+            FontAwesomeIcon.Users,
+            "Watch Parties"
+        ),
+        (
+            FontAwesomeIcon.Gamepad,
+            "Retro Games"
+        ),
+        (
+            FontAwesomeIcon.Film,
+            "Movies & Shows"
+        )
+        ];
 
     private double lastLoadingCardSpawn;
 
-    private readonly List<LoadingCardParticle> loadingCards = [];
+    //
+    // Blank cards normally choose a random side. After three consecutive
+    // cards on one side, force the next one onto the opposite side.
+    //
+    private bool? lastBlankCardSpawnedLeft;
+
+    private int consecutiveBlankCardsOnSameSide;
+
+    //
+    // Particle positions use screen coordinates. Track the splash area's
+    // previous position so existing particles follow the window when it moves.
+    //
+    private Vector2? previousLoadingCardAreaMinimum;
+
+    private readonly List<LoadingCardParticle>
+        loadingCards =
+            [];
 
     internal bool IsNamePromptActive => namePromptActive;
 
     internal bool ViewerTvEnabled { get; private set; }
     internal Action? OnViewerTvSpawnRequested { get; set; }
+    internal Action? OnMiniPlayerRequested { get; set; }
+    internal Action? OnMiniChatRequested { get; set; }
+    internal Func<bool>? IsMiniPlayerOpen { get; set; }
+
+    private bool viewerTvSpawnPromptRequested;
+    private bool viewerTvSpawnPromptShownForCurrentRoom;
+
+    internal void RequestViewerTvSpawnPrompt()
+    {
+        if (stream.Mode != StreamMode.Viewing ||
+            ViewerTvEnabled ||
+            viewerTvSpawnPromptShownForCurrentRoom)
+        {
+            return;
+        }
+
+        viewerTvSpawnPromptShownForCurrentRoom =
+            true;
+
+        viewerTvSpawnPromptRequested =
+            true;
+    }
+
+    internal void DespawnViewerTv(bool stopPlayback = true)
+    {
+        if (!ViewerTvEnabled)
+        {
+            return;
+        }
+
+        //
+        // Match the Watch Party Spawn/Despawn TV button. Keep
+        // viewerTvSpawnPromptShownForCurrentRoom true so incoming host states
+        // do not immediately ask to spawn the TV again.
+        //
+        ViewerTvEnabled =
+            false;
+
+        viewerTvSpawnPromptRequested =
+            false;
+
+        if (stopPlayback)
+        {
+            video.Stop();
+        }
+        else
+        {
+            screenController.Engine.DespawnScreen();
+        }
+    }
+
+    private void ResetViewerTvSpawnPrompt()
+    {
+        viewerTvSpawnPromptRequested =
+            false;
+
+        viewerTvSpawnPromptShownForCurrentRoom =
+            false;
+
+        ViewerTvEnabled =
+            false;
+    }
 
     // Updated every tick from Plugin.cs (cheap dictionary lookup there) - shown here instead of the
     // raw UserId so players never need to read each other an opaque GUID to join a stream.
@@ -337,6 +612,7 @@ internal sealed partial class MainWindow : Window, IDisposable
     // account (if any) for whichever character is currently being played, and the live character
     // name/world to sign in with if there isn't one yet.
     internal CharacterSession? CurrentSession { get; set; }
+    internal bool SessionValidationInProgress { get; set; }
     internal string? CurrentCharacterName { get; set; }
     internal string? CurrentWorldName { get; set; }
     internal bool CurrentIsLalafell { get; set; }
@@ -344,15 +620,21 @@ internal sealed partial class MainWindow : Window, IDisposable
     internal MainWindow(ScreenController screenController, VideoPlayer video, AetherStreamQueue queue,
         StreamClient stream, Action requestRename, AuthClient authClient, SignInFlow signInFlow,
         FriendsClient friendsClient, ActivityClient activityClient, DmClient dmClient, ReportClient reportClient,
-        TweeterClient tweeterClient, PluginHubClient pluginHubClient, VenuesClient venuesClient, LiveClient liveClient,
+        VenuesClient venuesClient, LiveClient liveClient,
         RoomsClient roomsClient, RadioClient radioClient,
-        TwitchClient twitchClient, Crypto.KeyVault keyVault, Whispers.WhisperMirror whisperMirror,
+        TwitchClient twitchClient, Crypto.KeyVault keyVault,
         Action<CharacterSession?> onSessionChanged)
         : base("AlphaChannel###AlphaChannelMain")
     {
         this.screenController = screenController;
         this.video = video;
         this.queue = queue;
+
+        queueManager =
+            new QueueManager(
+                Plugin.Cfg,
+                queue);
+
         this.stream = stream;
         this.requestRename = requestRename;
         this.authClient = authClient;
@@ -361,18 +643,13 @@ internal sealed partial class MainWindow : Window, IDisposable
         this.activityClient = activityClient;
         this.dmClient = dmClient;
         this.reportClient = reportClient;
-        this.tweeterClient = tweeterClient;
-        this.pluginHubClient = pluginHubClient;
         this.venuesClient = venuesClient;
         this.liveClient = liveClient;
         this.roomsClient = roomsClient;
         this.radioClient = radioClient;
         this.twitchClient = twitchClient;
         this.keyVault = keyVault;
-        this.whisperMirror = whisperMirror;
         this.onSessionChanged = onSessionChanged;
-
-        whisperMirror.OnWhisperMessage += ApplyIncomingWhisper;
 
         stream.OnFriendRequestReceived += _ => friendsDirty = true;
         stream.OnFriendAccepted += _ => friendsDirty = true;
@@ -382,21 +659,38 @@ internal sealed partial class MainWindow : Window, IDisposable
         stream.OnActivityNew += _ => { activityDirty = true; activityUnreadDirty = true; };
         stream.OnDmMessage += ApplyIncomingDm;
 
-        // Fixed size, no title bar/resize handles - reads as a real console/TV dashboard rather
-        // than a floating dev-tool window. Actual size is set every frame in PreDraw (below), since
-        // it toggles between WindowSize and MinimizedSize - SizeConstraints just has to be loose
-        // enough to allow both (NoResize already blocks the player from dragging it anywhere else).
-        Flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse
-                | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
+        // Borderless dashboard window with normal ImGui resize handles.
+        // The full approved layout is the maximum; PreDraw temporarily swaps
+        // constraints only while the custom minimized capsule is active.
+        //
+        // Alpha Channel persists its normal and minimized layouts itself.
+        // Prevent ImGui/Dalamud from saving the temporary 276x40 minimized
+        // capsule as the main window's size when the plugin unloads.
+        //
+        Flags =
+            ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoCollapse |
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse |
+            ImGuiWindowFlags.NoSavedSettings;
+
         SizeCondition = ImGuiCond.FirstUseEver;
         Size = WindowSize;
+
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = MinimizedSize,
-            MaximumSize = MaxWindowSize,
+            MinimumSize = MinimumWindowSize,
+            MaximumSize = MaximumWindowSize,
         };
 
         LoadWindowSizeFromConfig();
+        InitializeLocalLibraryRecovery();
+
+        //
+        // The welcome-animation size is applied temporarily by PreDraw() while
+        // showingFirstLaunch is true. It must not replace userWindowSize or be
+        // written into the user's saved configuration.
+        //
 
         stream.OnJoined += () =>
         {
@@ -410,27 +704,43 @@ internal sealed partial class MainWindow : Window, IDisposable
         stream.OnDeclined += reason =>
         {
             joinError = string.IsNullOrEmpty(reason) ? "Could not find that host." : reason;
-            if (proximityJoined)
+            if (viewerMode)
             {
                 proximityJoined = false;
                 joinedHostDisplayName = null;
                 viewerMode = false;
+                SetMinimized(false);
             }
         };
         stream.OnEnded += () =>
         {
-            joinedHostDisplayName = null;
-            viewerMode = false;
-            proximityJoined = false;
+            joinedHostDisplayName =
+                null;
+
+            viewerMode =
+                false;
+
+            proximityJoined =
+                false;
+
+            //
+            // StreamClient events arrive from the socket receive thread.
+            // Defer video/screen mutation until the framework thread.
+            //
+            roomEndedPlaybackResetPending =
+                true;
         };
 
         maximizedPosition = Plugin.Cfg.MaximizedPosition;
         minimizedPosition = Plugin.Cfg.MinimizedPosition;
 
-        if (!Plugin.Cfg.HasCompletedFirstLaunch)
-        {
-            _ = BeginFirstLaunchAsync();
-        }
+        //
+        // Only run the welcome presentation until the user has completed it
+        // for the first time.
+        //
+        showingFirstLaunch =
+     Plugin.ForceFirstLaunchExperienceForTesting ||
+     !Plugin.Cfg.HasCompletedFirstLaunch;
     }
 
     // /achannel and Dalamud's OpenMainUi both land here so a second activation always closes,
@@ -456,7 +766,8 @@ internal sealed partial class MainWindow : Window, IDisposable
     // Viewer-only: AlphaChannel required. Capsule UI + ScreenPainter; sync is still /rt URL/position
     // (ApplyRemoteState) — no Penumbra texture pipe, so Lightless alone cannot show the screen.
     // fromProximity: NearbyAutoWatch owns leave-on-range; manual /watch keeps the session until Leave.
-    internal void OpenViewerAndJoin(string hostDisplayName, bool fromProximity = false)
+    internal void OpenViewerAndJoin(
+        string hostLookup, bool fromProximity = false, string? visibleHostName = null)
     {
         proximityJoined = fromProximity;
         viewerMode = true;
@@ -465,7 +776,7 @@ internal sealed partial class MainWindow : Window, IDisposable
         SetMinimized(true);
         RequestPosition(minimizedPosition);
         IsOpen = true;
-        DoJoin(hostDisplayName);
+        DoJoin(hostLookup, visibleHostName: visibleHostName);
     }
 
     // Typing animation for loading screen
@@ -525,32 +836,150 @@ internal sealed partial class MainWindow : Window, IDisposable
         IsOpen = true;
     }
 
-    internal void LeaveStream()
+    private void RequestLeaveWatchParty()
     {
-        viewerMode = false;
-        proximityJoined = false;
-        joinedHostDisplayName = null;
-        _ = stream.LeaveAsync();
-        gameplayStreamOfferDismissed =
-    false;
+        //
+        // Viewers can leave immediately. Only hosts need confirmation
+        // because their action closes the room for everyone.
+        //
+        if (stream.Mode != StreamMode.Hosting)
+        {
+            LeaveStream();
+            partyChatItems.Clear();
+            return;
+        }
+
+        hostLeaveConfirmationRequested =
+            true;
     }
 
-    internal void ApplyPendingJoinQueueClear()
+    internal void LeaveStream()
+    {
+        viewerMode =
+            false;
+
+        proximityJoined =
+            false;
+
+        joinedHostDisplayName =
+            null;
+
+        StopGameWatchPartyBroadcast();
+        StopLocalVideoWatchPartyBroadcast();
+
+        ResetNormalWatchPartyPlayback();
+        ResetViewerTvSpawnPrompt();
+
+        _ = stream.LeaveAsync();
+
+        gameplayStreamOfferDismissed =
+            false;
+
+        browserStreamOfferDismissed =
+            false;
+    }
+
+    internal bool ApplyPendingJoinQueueClear()
     {
         if (!joinClearQueuePending)
+        {
+            return false;
+        }
+
+        joinClearQueuePending =
+            false;
+
+        ResetPlaybackForViewerJoin();
+        return true;
+    }
+
+    internal void ApplyPendingRoomEndedReset()
+    {
+        if (!roomEndedPlaybackResetPending)
         {
             return;
         }
 
-        joinClearQueuePending = false;
+        roomEndedPlaybackResetPending =
+            false;
+
+        ResetNormalWatchPartyPlayback();
+        ResetViewerTvSpawnPrompt();
+
+        joinedHostDisplayName =
+            null;
+
+        viewerMode =
+            false;
+
+        proximityJoined =
+            false;
+
+        gameplayStreamOfferDismissed =
+            false;
+
+        browserStreamOfferDismissed =
+            false;
+    }
+
+    private void ResetNormalWatchPartyPlayback()
+    {
+        //
+        // A viewer must explicitly choose whether to spawn a TV in the
+        // newly joined room.
+        //
+        ViewerTvEnabled =
+            false;
+
+        var engine =
+            screenController.Engine;
+
+        //
+        // Do not stop or despawn emulator or embedded-browser content.
+        //
+        if (engine.IsPlayingGame || engine.IsPlayingBrowser)
+        {
+            return;
+        }
+
+        video.Stop();
         queue.Clear();
     }
+
+    private void ResetPlaybackForViewerJoin()
+    {
+        //
+        // Do this only after the relay confirms the join. A declined join
+        // must leave the user's existing solo playback untouched.
+        //
+        ResetViewerTvSpawnPrompt();
+
+        StopGameWatchPartyBroadcast();
+        StopBrowserWatchPartyBroadcast();
+        StopLocalVideoWatchPartyBroadcast();
+
+        djBroadcastingToWatchParty =
+            false;
+
+        djAutoMuteNoticeVisible =
+            false;
+
+        djAutoMutedStreamUrl =
+            null;
+
+        //
+        // Queue.Clear ultimately calls VideoEngine.StopVideo(), which also
+        // tears down exclusive playback such as games, the browser, local
+        // video, and images before the viewer adopts the host's state.
+        //
+        queue.Clear();
+    }
+
     private void StopPlayback()
     {
         video.Stop();
         queue.Clear();
     }
-
 
     internal string? JoinedHostDisplayName => joinedHostDisplayName;
     internal bool ProximityJoined => proximityJoined;
@@ -560,35 +989,113 @@ internal sealed partial class MainWindow : Window, IDisposable
     internal void CloseUi()
     {
         PersistPositions();
-        windowMinimized = false;
-        IsOpen = false;
+
+        //
+        // Preserve windowMinimized while closed. OpenUi() calls
+        // SetMinimized(false), which then restores userWindowSize on the
+        // first expanded frame.
+        //
+        IsOpen =
+            false;
     }
 
     // Writes remembered placements when they changed — called on close and plugin unload.
+    // Writes remembered placements and any pending normal-window size.
+    // Called on close and plugin unload, including while minimized.
     internal void PersistPositions()
     {
-        if (Plugin.Cfg.MaximizedPosition == maximizedPosition &&
-            Plugin.Cfg.MinimizedPosition == minimizedPosition)
+        var positionsChanged =
+            Plugin.Cfg.MaximizedPosition !=
+                maximizedPosition ||
+            Plugin.Cfg.MinimizedPosition !=
+                minimizedPosition;
+
+        if (!positionsChanged &&
+            !windowSizeSavePending)
         {
             return;
         }
 
-        Plugin.Cfg.MaximizedPosition = maximizedPosition;
-        Plugin.Cfg.MinimizedPosition = minimizedPosition;
+        Plugin.Cfg.MaximizedPosition =
+            maximizedPosition;
+
+        Plugin.Cfg.MinimizedPosition =
+            minimizedPosition;
+
+        Plugin.Cfg.WindowSizePreset =
+            UiWindowSizePreset.Custom;
+
+        Plugin.Cfg.WindowWidth =
+            userWindowSize.X;
+
+        Plugin.Cfg.WindowHeight =
+            userWindowSize.Y;
+
         Plugin.Cfg.Save();
+
+        windowSizeSavePending =
+            false;
     }
 
     public override void OnClose() => PersistPositions();
 
-    private void SetMinimized(bool minimized)
+    private void SetMinimized(
+    bool minimized,
+    Vector2? normalWindowSize = null)
     {
-        if (windowMinimized == minimized)
+        if (windowMinimized ==
+            minimized)
         {
             return;
         }
 
-        windowMinimized = minimized;
-        RequestPosition(minimized ? minimizedPosition : maximizedPosition);
+        if (minimized &&
+            normalWindowSize is { } capturedSize)
+        {
+            //
+            // Capture the full window size before switching the same ImGui
+            // window to the small minimized capsule.
+            //
+            userWindowSize =
+                ClampWindowSize(
+                    capturedSize);
+
+            Plugin.Cfg.WindowSizePreset =
+                UiWindowSizePreset.Custom;
+
+            Plugin.Cfg.WindowWidth =
+                userWindowSize.X;
+
+            Plugin.Cfg.WindowHeight =
+                userWindowSize.Y;
+
+            //
+            // Save immediately. Once windowMinimized becomes true, the normal
+            // Draw() size-saving branch no longer runs. Without this save,
+            // unloading while minimized can restore an older, smaller size.
+            //
+            Plugin.Cfg.Save();
+
+            windowSizeSavePending =
+                false;
+        }
+
+        windowMinimized =
+            minimized;
+
+        if (!minimized)
+        {
+            //
+            // Force the remembered normal size for one frame when restoring.
+            //
+            userResized =
+                true;
+        }
+
+        RequestPosition(
+            minimized
+                ? minimizedPosition
+                : maximizedPosition);
     }
 
     private void RequestPosition(Vector2? target)
@@ -617,58 +1124,117 @@ internal sealed partial class MainWindow : Window, IDisposable
 
     // Called from Plugin.cs once per character that hasn't picked a name yet, or after an admin
     // reset - suggested is pre-filled (their real character name) so confirming needs no typing.
-    internal void RequestNamePrompt(string suggested, Action<string> onConfirmed)
+    internal void RequestNamePrompt(
+      string suggested,
+      Action<string> onConfirmed)
     {
         if (namePromptActive)
         {
             return;
         }
 
-        namePromptInput = suggested;
-        onNameConfirmed = onConfirmed;
-        namePromptActive = true;
-        namePromptPending = true;
-        IsOpen = true;
+        namePromptInput =
+            suggested;
+
+        onNameConfirmed =
+            onConfirmed;
+
+        namePromptActive =
+            true;
+
+        namePromptPending =
+            true;
+
+        //
+        // First launch must wait for this prompt to be submitted before
+        // beginning its splash animation.
+        //
+        launchNamePromptRequested =
+            true;
+
+        IsOpen =
+            true;
     }
 
     // First launch process
-    private async Task BeginFirstLaunchAsync()
+    private void BeginFirstLaunch()
     {
-        showingFirstLaunch = true;
-
-        while (!IsOpen)
-        {
-            await Task.Delay(50);
-        }
+        showingFirstLaunch =
+            true;
 
         firstLaunchStartedAt =
             ImGui.GetTime();
 
-        firstLaunchPhase = 0;
+        firstLaunchPhase =
+            0;
 
-        firstLaunchTextProgress = 0f;
+        firstLaunchTextProgress =
+            0f;
 
         firstLaunchLastMessageChange =
             ImGui.GetTime();
 
-        firstLaunchMessageIndex = 0;
+        firstLaunchMessageIndex =
+            0;
 
+        firstLaunchLoadingComplete =
+            false;
+
+        firstLaunchSetupSubmitted =
+            false;
+
+        firstLaunchSetupFadingOut =
+            false;
+
+        firstLaunchSetupSubmittedAt =
+            0d;
+
+        firstLaunchLoadingStartedAt =
+            0d;
+
+        firstLaunchFadingOut =
+            false;
+
+        firstLaunchFadeAlpha =
+            1f;
+
+        previousLoadingCardAreaMinimum =
+            null;
+
+        loadingCards.Clear();
+
+        lastBlankCardSpawnedLeft =
+            null;
+
+        consecutiveBlankCardsOnSameSide =
+            0;
+
+        lastLoadingCardSpawn =
+            ImGui.GetTime() -
+            1.2d;
+    }
+
+    private async Task CompleteFirstLaunchAsync()
+    {
         try
         {
-            // Keep the splash alive long enough for the full intro.
-            // Real loading checks will be connected later.
-
             await Task.Delay(
-                TimeSpan.FromSeconds(22));
+                    TimeSpan.FromSeconds(
+                        FirstLaunchLoadingDuration))
+                .ConfigureAwait(false);
         }
         finally
         {
-            firstLaunchLoadingComplete = true;
+            firstLaunchLoadingComplete =
+                true;
 
-            Plugin.Cfg.HasCompletedFirstLaunch = true;
+            Plugin.Cfg.HasCompletedFirstLaunch =
+                true;
+
             Plugin.Cfg.Save();
 
-            firstLaunchFadingOut = true;
+            firstLaunchFadingOut =
+                true;
         }
     }
 
@@ -688,93 +1254,893 @@ internal sealed partial class MainWindow : Window, IDisposable
         return progress * progress * (3f - 2f * progress);
     }
 
-    private void UpdateLoadingCards(Vector2 areaMin, Vector2 areaMax)
+    private void UpdateLoadingCards(
+    Vector2 areaMin,
+    Vector2 areaMax)
     {
-        var now = ImGui.GetTime();
+        var now =
+            ImGui.GetTime();
 
-        if (now - lastLoadingCardSpawn > 1.1)
+        //
+        // Keep existing particles attached to the splash when the window moves.
+        //
+        if (previousLoadingCardAreaMinimum is
+            { } previousAreaMin)
+        {
+            var windowMovement =
+                areaMin -
+                previousAreaMin;
+
+            if (MathF.Abs(
+                    windowMovement.X) >
+                0.01f ||
+                MathF.Abs(
+                    windowMovement.Y) >
+                0.01f)
+            {
+                foreach (var existingCard in
+                         loadingCards)
+                {
+                    existingCard.Position +=
+                        windowMovement;
+                }
+            }
+        }
+
+        previousLoadingCardAreaMinimum =
+            areaMin;
+
+        if (now -
+            lastLoadingCardSpawn >
+            1.1d)
         {
             var sideLeft =
-    Random.Shared.Next(0, 100) < 50;
+                Random.Shared.Next(
+                    0,
+                    100) <
+                50;
+
+            //
+            // After three consecutive cards on one side, force the next card
+            // onto the opposite side before returning to random selection.
+            //
+            if (lastBlankCardSpawnedLeft is
+                { } previousSide &&
+                consecutiveBlankCardsOnSameSide >=
+                3)
+            {
+                sideLeft =
+                    !previousSide;
+            }
+
+            if (lastBlankCardSpawnedLeft ==
+                sideLeft)
+            {
+                consecutiveBlankCardsOnSameSide++;
+            }
+            else
+            {
+                lastBlankCardSpawnedLeft =
+                    sideLeft;
+
+                consecutiveBlankCardsOnSameSide =
+                    1;
+            }
+
+            var width =
+                Random.Shared.Next(
+                    80,
+                    150);
+
+            var height =
+                Random.Shared.Next(
+                    50,
+                    90);
+
+            var horizontalInset =
+                Random.Shared.Next(
+                    20,
+                    180);
+
+            var spawnX =
+                sideLeft
+                    ? areaMin.X +
+                      horizontalInset
+                    : areaMax.X -
+                      width -
+                      horizontalInset;
 
             loadingCards.Add(
                 new LoadingCardParticle
                 {
                     Position =
-    new Vector2(
-sideLeft
-    ? areaMin.X + Random.Shared.Next(20, 180)
-    : areaMax.X - Random.Shared.Next(20, 180),
-        areaMax.Y + 120),
+                        new Vector2(
+                            spawnX,
+                            areaMax.Y +
+                            height +
+                            Ui(20f)),
 
                     Width =
-    Random.Shared.Next(80, 150),
+                        width,
 
                     Height =
-    Random.Shared.Next(50, 90),
+                        height,
 
                     Speed =
-                        Random.Shared.Next(35, 80),
+                        Random.Shared.Next(
+                            35,
+                            80),
 
                     Drift =
-                        Random.Shared.NextSingle() * 20f - 10f,
+                        Random.Shared.NextSingle() *
+                        12f -
+                        6f,
 
-                    Alpha = 0f,
+                    Alpha =
+                        0f,
 
-                    SpawnTime = now,
+                    SpawnTime =
+                        now,
 
                     ShimmerOffset =
-    Random.Shared.NextSingle(),
+                        Random.Shared.NextSingle(),
+
+                    IsLeftSide =
+                        sideLeft
                 });
 
-            lastLoadingCardSpawn = now;
+            lastLoadingCardSpawn =
+                now;
         }
 
+        var deltaTime =
+            ImGui.GetIO().DeltaTime;
 
-        foreach (var card in loadingCards)
+        foreach (var card in
+                 loadingCards)
         {
             card.Position.Y -=
                 card.Speed *
-                ImGui.GetIO().DeltaTime;
+                deltaTime;
 
             card.Position.X +=
                 MathF.Sin(
-                    (float)(now + card.SpawnTime) * 0.8f)
-                * 8f *
-                ImGui.GetIO().DeltaTime;
-
+                    (float)(
+                        now +
+                        card.SpawnTime) *
+                    0.65f) *
+                8f *
+                deltaTime;
 
             var age =
-                now - card.SpawnTime;
+                now -
+                card.SpawnTime;
 
+            var fadeIn =
+                (float)Math.Clamp(
+                    age /
+                    1.5d,
+                    0d,
+                    1d);
 
-            // fade in
-            if (age < 1.5)
-            {
-                card.Alpha =
-                    (float)(age / 1.5);
-            }
-            else
-            {
-                // fade out near top
-                var heightProgress =
-                    1f -
-                    ((card.Position.Y - areaMin.Y) /
-                    (areaMax.Y - areaMin.Y));
+            var topFade =
+                Math.Clamp(
+                    (
+                        card.Position.Y -
+                        areaMin.Y
+                    ) /
+                    110f,
+                    0f,
+                    1f);
 
-                card.Alpha =
-                    Math.Clamp(
-                        1f - heightProgress,
-                        0,
-                        0.35f);
-            }
+            card.Alpha =
+                fadeIn *
+                topFade;
         }
-
 
         loadingCards.RemoveAll(
             card =>
-                card.Position.Y <
-                areaMin.Y - 200);
+                card.Position.Y +
+                card.Height <
+                areaMin.Y -
+                30f);
+    }
+
+    private float GetFirstLaunchSetupAlpha(
+    double elapsed)
+    {
+        var fadeIn =
+            (float)Math.Clamp(
+                (
+                    elapsed -
+                    FirstLaunchWelcomeDuration
+                ) /
+                FirstLaunchSetupFadeDuration,
+                0d,
+                1d);
+
+        if (!firstLaunchSetupFadingOut)
+        {
+            return fadeIn;
+        }
+
+        var fadeOut =
+            (float)Math.Clamp(
+                (
+                    ImGui.GetTime() -
+                    firstLaunchSetupSubmittedAt
+                ) /
+                FirstLaunchSetupFadeDuration,
+                0d,
+                1d);
+
+        return fadeIn *
+               (1f - fadeOut);
+    }
+
+    private float GetFirstLaunchLoadingAlpha()
+    {
+        if (!firstLaunchSetupSubmitted)
+        {
+            return 0f;
+        }
+
+        return (float)Math.Clamp(
+            (
+                ImGui.GetTime() -
+                firstLaunchSetupSubmittedAt
+            ) /
+            FirstLaunchSetupFadeDuration,
+            0d,
+            1d);
+    }
+
+    private void SubmitFirstLaunchSetup()
+    {
+        if (firstLaunchSetupSubmitted)
+        {
+            return;
+        }
+
+        var selectedTopicCount =
+            GetSubscribedTopicCount();
+
+        if (string.IsNullOrWhiteSpace(
+                namePromptInput) ||
+            selectedTopicCount is < 3 or > 15)
+        {
+            return;
+        }
+
+        Plugin.Cfg.Save();
+
+        onNameConfirmed?.Invoke(
+            namePromptInput.Trim());
+
+        onNameConfirmed =
+            null;
+
+        firstLaunchSetupSubmitted =
+            true;
+
+        firstLaunchSetupFadingOut =
+            true;
+
+        firstLaunchSetupSubmittedAt =
+            ImGui.GetTime();
+
+        firstLaunchLoadingStartedAt =
+            ImGui.GetTime();
+
+        firstLaunchLastMessageChange =
+            ImGui.GetTime();
+
+        firstLaunchMessageIndex =
+            0;
+
+        //
+        // Start the shared cache preparation as soon as the form is submitted.
+        // Normal freshness and topic-signature rules still determine whether a
+        // YouTube request is actually required.
+        //
+        browseVideoRequested =
+            true;
+
+        topicVideoStartupRequested =
+            true;
+
+        homeYouTubeResults =
+            null;
+
+        homeYouTubeSelectedTopics.Clear();
+
+        isLoadingHomeYouTube =
+            true;
+
+        _ =
+            PrepareTopicVideosForLaunchAsync(
+                forceRefresh: false);
+
+        _ =
+            CompleteFirstLaunchAsync();
+    }
+
+    private void DrawFirstLaunchSetupForm(
+        Vector2 center,
+        double elapsed)
+    {
+        if (!namePromptActive ||
+            elapsed <
+            FirstLaunchWelcomeDuration)
+        {
+            return;
+        }
+
+        var alpha =
+            GetFirstLaunchSetupAlpha(
+                elapsed);
+
+        if (alpha <= 0f)
+        {
+            if (firstLaunchSetupSubmitted)
+            {
+                namePromptActive =
+                    false;
+
+                namePromptPending =
+                    false;
+            }
+
+            return;
+        }
+
+        const float formWidth =
+     FirstLaunchFormWidth;
+
+        const float padding =
+            18f;
+
+        var formLeft =
+            center.X -
+            formWidth * 0.5f;
+
+        var formTop =
+            center.Y -
+            22f;
+
+        using var formAlpha =
+            ImRaii.PushStyle(
+                ImGuiStyleVar.Alpha,
+                alpha *
+                firstLaunchFadeAlpha);
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                formLeft,
+                formTop));
+
+        ImGui.TextColored(
+            Vector4.One,
+            "Choose your username");
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                formLeft,
+                formTop + Ui(25f)));
+
+        ImGui.TextColored(
+            MutedText,
+            "Choose the username other Alpha Channel users will see.");
+
+        ImGui.SameLine(
+            0f,
+            7f);
+
+        using (ImRaii.PushFont(
+            UiBuilder.IconFont))
+        {
+            ImGui.TextDisabled(
+                FontAwesomeIcon.InfoCircle.ToIconString());
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(
+                "This is the name used to add you to friends lists and join your watch party.");
+        }
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                formLeft,
+                formTop + Ui(52f)));
+
+        ImGui.SetNextItemWidth(
+            formWidth);
+
+        using (ImRaii.PushColor(
+            ImGuiCol.FrameBg,
+            new Vector4(
+                0.025f,
+                0.03f,
+                0.055f,
+                0.96f)))
+        using (ImRaii.PushColor(
+            ImGuiCol.Border,
+            new Vector4(
+                Accent.X,
+                Accent.Y,
+                Accent.Z,
+                0.78f)))
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.FrameBorderSize,
+            1f))
+        using (ImRaii.PushStyle(
+            ImGuiStyleVar.FrameRounding,
+            5f))
+        {
+            ImGui.InputText(
+                "##firstLaunchUsernameInput",
+                ref namePromptInput,
+                32);
+        }
+
+        var dividerY =
+            formTop +
+            94f;
+
+        ImGui.GetWindowDrawList()
+            .AddLine(
+                new Vector2(
+                    formLeft,
+                    dividerY),
+                new Vector2(
+                    formLeft +
+                    formWidth,
+                    dividerY),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        Accent.X,
+                        Accent.Y,
+                        Accent.Z,
+                        0.32f *
+                        alpha)),
+                1f);
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                formLeft,
+                formTop + Ui(108f)));
+
+        ImGui.TextColored(
+            Vector4.One,
+            "Subscribe to your favourite topics");
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                formLeft,
+                formTop + Ui(133f)));
+
+        ImGui.TextColored(
+            MutedText,
+            "Choose at least 3 topics to receive relevant video recommendations.");
+
+        ImGui.SameLine(
+            0f,
+            7f);
+
+        using (ImRaii.PushFont(
+            UiBuilder.IconFont))
+        {
+            ImGui.TextDisabled(
+                FontAwesomeIcon.InfoCircle.ToIconString());
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(
+                "You can change these later in Settings.");
+        }
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                formLeft,
+                formTop + Ui(160f)));
+
+        ImGui.PushID(
+            "embeddedWelcomeTopicSelection");
+
+        DrawTrendingTopicTags(
+            columnHeight: 145f,
+            availableWidthOverride:
+                formWidth);
+
+        ImGui.PopID();
+
+       
+
+        var selectedTopicCount =
+       GetSubscribedTopicCount();
+
+        var topicCountValid =
+            selectedTopicCount is >= 3 and <= 15;
+
+        var informationRowY =
+            formTop +
+            313f;
+
+        //
+        // Selected-topic count on the left.
+        //
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                formLeft,
+                informationRowY));
+
+        ImGui.TextColored(
+            topicCountValid
+                ? Accent
+                : new Vector4(
+                    1f,
+                    0.55f,
+                    0.35f,
+                    1f),
+            $"{selectedTopicCount} topics selected (minimum 3)");
+
+        //
+        // Selection-limit warning on the right side of the same row.
+        //
+        if (topicSelectionLimitWarning)
+        {
+            const string limitWarning =
+                "You can select up to 15 topics.";
+
+            var limitWarningSize =
+                ImGui.CalcTextSize(
+                    limitWarning);
+
+            ImGui.SetCursorScreenPos(
+                new Vector2(
+                    formLeft +
+                    formWidth -
+                    limitWarningSize.X,
+                    informationRowY));
+
+            ImGui.TextColored(
+                new Vector4(
+                    1f,
+                    0.55f,
+                    0.35f,
+                    1f),
+                limitWarning);
+        }
+
+        var valid =
+            !string.IsNullOrWhiteSpace(
+                namePromptInput) &&
+            topicCountValid &&
+            !firstLaunchSetupSubmitted;
+
+        //
+        // Wide, centred Continue button.
+        //
+        var continueButtonWidth = Ui(240f);
+
+        var continueButtonHeight = Ui(36f);
+
+        ImGui.SetCursorScreenPos(
+            new Vector2(
+                formLeft +
+                (formWidth -
+                 continueButtonWidth) *
+                0.5f,
+                formTop +
+                Ui(341f)));
+
+        if (!valid)
+        {
+            ImGui.BeginDisabled();
+        }
+
+        if (ImGui.Button(
+                "Continue",
+                new Vector2(
+                    continueButtonWidth,
+                    continueButtonHeight)))
+        {
+            SubmitFirstLaunchSetup();
+        }
+
+        if (!valid)
+        {
+            ImGui.EndDisabled();
+        }
+    }
+
+    private void DrawFirstLaunchDragBlocker(
+    string id,
+    Vector2 minimum,
+    Vector2 maximum,
+    Vector2 windowPosition)
+    {
+        var size =
+            maximum -
+            minimum;
+
+        if (size.X <= 0f ||
+            size.Y <= 0f)
+        {
+            return;
+        }
+
+        ImGui.SetCursorScreenPos(
+            minimum);
+
+        ImGui.InvisibleButton(
+            id,
+            size);
+
+        var mouse =
+            ImGui.GetMousePos();
+
+        if (ImGui.IsItemClicked(
+                ImGuiMouseButton.Left))
+        {
+            firstLaunchWindowDragging =
+                true;
+
+            firstLaunchWindowDragOffset =
+                mouse -
+                windowPosition;
+        }
+
+        if (firstLaunchWindowDragging &&
+            ImGui.IsItemActive() &&
+            ImGui.IsMouseDown(
+                ImGuiMouseButton.Left))
+        {
+            var newPosition =
+                mouse -
+                firstLaunchWindowDragOffset;
+
+            //
+            // Move the underlying Alpha Channel window.
+            //
+            ImGui.SetWindowPos(
+                "AlphaChannel###AlphaChannelMain",
+                newPosition,
+                ImGuiCond.Always);
+
+            //
+            // Move the splash overlay with it.
+            //
+            ImGui.SetWindowPos(
+                newPosition,
+                ImGuiCond.Always);
+
+            maximizedPosition =
+                newPosition;
+        }
+
+        if (!ImGui.IsMouseDown(
+                ImGuiMouseButton.Left))
+        {
+            firstLaunchWindowDragging =
+                false;
+        }
+    }
+
+    private void DrawFirstLaunchInteractionShield(
+        Vector2 windowPosition,
+        Vector2 windowSize,
+        Vector2 center,
+        double elapsed)
+    {
+        var windowMinimum =
+            windowPosition;
+
+        var windowMaximum =
+            windowPosition +
+            windowSize;
+
+        var setupFormVisible =
+            namePromptActive &&
+            elapsed >=
+            FirstLaunchWelcomeDuration;
+
+        if (!setupFormVisible)
+        {
+            //
+            // During the loading portion, the entire splash is one draggable
+            // interaction shield.
+            //
+            DrawFirstLaunchDragBlocker(
+                "##firstLaunchFullShield",
+                windowMinimum,
+                windowMaximum,
+                windowPosition);
+
+            return;
+        }
+
+        const float formWidth =
+    FirstLaunchFormWidth;
+
+        const float formHeight =
+            FirstLaunchFormHeight;
+
+        var formMinimum =
+            new Vector2(
+                center.X -
+                formWidth * 0.5f,
+                center.Y -
+                Ui(22f));
+
+        var formMaximum =
+            formMinimum +
+            new Vector2(
+                formWidth,
+                formHeight);
+
+        //
+        // Keep the exclusion rectangle inside the splash window.
+        //
+        formMinimum =
+            Vector2.Max(
+                formMinimum,
+                windowMinimum);
+
+        formMaximum =
+            Vector2.Min(
+                formMaximum,
+                windowMaximum);
+
+        //
+        // Top shield.
+        //
+        DrawFirstLaunchDragBlocker(
+            "##firstLaunchTopShield",
+            windowMinimum,
+            new Vector2(
+                windowMaximum.X,
+                formMinimum.Y),
+            windowPosition);
+
+        //
+        // Bottom shield.
+        //
+        DrawFirstLaunchDragBlocker(
+            "##firstLaunchBottomShield",
+            new Vector2(
+                windowMinimum.X,
+                formMaximum.Y),
+            windowMaximum,
+            windowPosition);
+
+        //
+        // Left shield alongside the form.
+        //
+        DrawFirstLaunchDragBlocker(
+            "##firstLaunchLeftShield",
+            new Vector2(
+                windowMinimum.X,
+                formMinimum.Y),
+            new Vector2(
+                formMinimum.X,
+                formMaximum.Y),
+            windowPosition);
+
+        //
+        // Right shield alongside the form.
+        //
+        DrawFirstLaunchDragBlocker(
+            "##firstLaunchRightShield",
+            new Vector2(
+                formMaximum.X,
+                formMinimum.Y),
+            new Vector2(
+                windowMaximum.X,
+                formMaximum.Y),
+            windowPosition);
+    }
+
+    private void DrawFirstLaunchSpinnerFeatures(
+     ImDrawListPtr drawList,
+     Vector2 spinnerCenter,
+     float loadingAlpha)
+    {
+        if (loadingAlpha <= 0f)
+        {
+            return;
+        }
+
+        var featureAlpha =
+            Math.Clamp(
+                loadingAlpha *
+                firstLaunchFadeAlpha,
+                0f,
+                1f);
+
+        var positions =
+            new[]
+            {
+            spinnerCenter +
+            UiVec(-220f, -52f),
+
+            spinnerCenter +
+            UiVec(220f, -52f),
+
+            spinnerCenter +
+            UiVec(-220f, 76f),
+
+            spinnerCenter +
+            UiVec(220f, 76f)
+            };
+
+        for (var featureIndex = 0;
+             featureIndex <
+             SplashLoadingFeatures.Length;
+             featureIndex++)
+        {
+            var feature =
+                SplashLoadingFeatures[
+                    featureIndex];
+
+            var featureCenter =
+                positions[
+                    featureIndex];
+
+            var iconGlyph =
+                feature.Icon.ToIconString();
+
+            Vector2 iconSize;
+
+            SetUiFontScale(
+                1.65f);
+
+            using (ImRaii.PushFont(
+                UiBuilder.IconFont))
+            {
+                iconSize =
+                    ImGui.CalcTextSize(
+                        iconGlyph);
+
+                drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                    new Vector2(
+                        featureCenter.X -
+                        iconSize.X *
+                        0.5f,
+                        featureCenter.Y),
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            AccentHover.X,
+                            AccentHover.Y,
+                            AccentHover.Z,
+                            featureAlpha)),
+                    iconGlyph);
+            }
+
+            SetUiFontScale(
+                1f);
+
+            var titleSize =
+                ImGui.CalcTextSize(
+                    feature.Title);
+
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                new Vector2(
+                    featureCenter.X -
+                    titleSize.X *
+                    0.5f,
+                    featureCenter.Y +
+                    Ui(34f)),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        1f,
+                        1f,
+                        1f,
+                        featureAlpha)),
+                feature.Title);
+        }
     }
 
     // First time launch welcome splash screen
@@ -788,12 +2154,20 @@ sideLeft
 
             if (firstLaunchFadeAlpha <= 0f)
             {
-                firstLaunchFadeAlpha = 0f;
-                showingFirstLaunch = false;
+                firstLaunchFadeAlpha =
+                    0f;
+
+                showingFirstLaunch =
+                    false;
+
+                //
+                // Keep the window at its current splash dimensions. Setting
+                // userResized here would immediately replace them with the saved
+                // normal size and make the window visibly shrink as the username
+                // prompt appears.
+                //
             }
         }
-        var drawList =
-            ImGui.GetForegroundDrawList();
 
         var windowPos =
             ImGui.GetWindowPos();
@@ -837,16 +2211,20 @@ sideLeft
             ImGuiWindowFlags.NoNav |
             ImGuiWindowFlags.NoDocking;
 
-        if (ImGui.Begin(
-            "##firstLaunchInputBlockerWindow",
-            blockerFlags))
+        if (!ImGui.Begin(
+         "##firstLaunchInputBlockerWindow",
+         blockerFlags))
         {
-            ImGui.SetCursorPos(Vector2.Zero);
-
-            ImGui.InvisibleButton(
-                "##firstLaunchInputBlocker",
-                windowSize);
+            ImGui.End();
+            return;
         }
+
+       
+
+        var drawList =
+            ImGui.GetWindowDrawList();
+
+        // Full window themed overlay
 
 
         // Full window themed overlay
@@ -862,12 +2240,12 @@ sideLeft
                     firstLaunchFadeAlpha)));
 
         var cardAreaMin = new Vector2(
-            windowPos.X + 20,
-            windowPos.Y + 40);
+            windowPos.X + Ui(20),
+            windowPos.Y + Ui(40));
 
         var cardAreaMax = new Vector2(
-            windowPos.X + windowSize.X - 20,
-            windowPos.Y + windowSize.Y - 40);
+            windowPos.X + windowSize.X - Ui(20),
+            windowPos.Y + windowSize.Y - Ui(40));
 
         UpdateLoadingCards(cardAreaMin, cardAreaMax);
 
@@ -876,35 +2254,62 @@ sideLeft
             cardAreaMax,
             true);
 
-        foreach (var card in loadingCards)
+        foreach (var card in
+          loadingCards)
         {
-            var cardMin = card.Position;
-            var cardMax = card.Position +
-                          new Vector2(
-                              card.Width,
-                              card.Height);
+            var cardMin =
+                card.Position;
 
-            // Rising fade trail behind card
-            for (int i = 1; i <= 3; i++)
+            var cardMax =
+                card.Position +
+                new Vector2(
+                    card.Width,
+                    card.Height);
+
+            var effectiveAlpha =
+                Math.Clamp(
+                    card.Alpha *
+                    firstLaunchFadeAlpha,
+                    0f,
+                    1f);
+
+            //
+            // Rising fade trail.
+            //
+            for (var trailIndex = 1;
+                 trailIndex <= 3;
+                 trailIndex++)
             {
-                var trailOffset = i * 24f;
+                var trailOffset =
+                    trailIndex *
+                    24f;
 
                 drawList.AddRectFilled(
                     cardMin +
-                        new Vector2(0, trailOffset),
+                    new Vector2(
+                        0f,
+                        trailOffset),
                     cardMax +
-                        new Vector2(0, trailOffset + 20),
+                    new Vector2(
+                        0f,
+                        trailOffset +
+                        Ui(20f)),
                     ImGui.GetColorU32(
                         new Vector4(
                             Accent.X,
                             Accent.Y,
                             Accent.Z,
-                            card.Alpha *
-                            (0.04f / i))),
+                            effectiveAlpha *
+                            (
+                                0.04f /
+                                trailIndex
+                            ))),
                     8f);
             }
 
-            // Outer card
+            //
+            // Translucent blank placeholder.
+            //
             drawList.AddRectFilled(
                 cardMin,
                 cardMax,
@@ -913,90 +2318,108 @@ sideLeft
                         Accent.X,
                         Accent.Y,
                         Accent.Z,
-                        card.Alpha *
-                        firstLaunchFadeAlpha *
-                        0.25f)),
+                        effectiveAlpha *
+                        0.10f)),
                 8f);
 
-
-            // Thumbnail placeholder
             drawList.AddRectFilled(
-                cardMin + new Vector2(10, 10),
+                cardMin +
+                UiVec(10f, 10f),
                 new Vector2(
-                    cardMax.X - 10,
-                    cardMin.Y + card.Height * 0.55f),
+                    cardMax.X -
+                    Ui(10f),
+                    cardMin.Y +
+                    card.Height *
+                    0.55f),
                 ImGui.GetColorU32(
                     new Vector4(
-                        Accent.X * 0.65f,
-                        Accent.Y * 0.65f,
-                        Accent.Z * 0.65f,
-                        card.Alpha *
-                        firstLaunchFadeAlpha *
-                        0.45f)),
+                        Accent.X *
+                        0.65f,
+                        Accent.Y *
+                        0.65f,
+                        Accent.Z *
+                        0.65f,
+                        effectiveAlpha *
+                        0.20f)),
                 6f);
 
-            // Moving shimmer highlight
             var shimmer =
                 (float)(
-                    (Math.Sin(
-                        ImGui.GetTime() * 3 +
-                        card.ShimmerOffset * 10)
-                    * 0.5f)
-                    + 0.5f);
+                    (
+                        Math.Sin(
+                            ImGui.GetTime() *
+                            3d +
+                            card.ShimmerOffset *
+                            10f) *
+                        0.5d
+                    ) +
+                    0.5d);
 
             var shimmerX =
                 cardMin.X +
-                (card.Width * shimmer);
+                card.Width *
+                shimmer;
 
             drawList.AddRectFilled(
                 new Vector2(
-                    shimmerX - 18,
+                    shimmerX -
+                    Ui(18f),
                     cardMin.Y),
                 new Vector2(
-                    shimmerX + 18,
+                    shimmerX +
+                    Ui(18f),
                     cardMax.Y),
                 ImGui.GetColorU32(
                     new Vector4(
                         1f,
                         1f,
                         1f,
-                        card.Alpha *
-firstLaunchFadeAlpha *
-0.06f)),
+                        effectiveAlpha *
+                        0.06f)),
                 8f);
 
-
-            // Title skeleton line 1
             drawList.AddRectFilled(
-                cardMin + new Vector2(10, card.Height - 28),
+                cardMin +
                 new Vector2(
-                    cardMin.X + card.Width * 0.75f,
-                    card.Height + cardMin.Y - 20),
+                    Ui(10f),
+                    card.Height -
+                    Ui(28f)),
+                new Vector2(
+                    cardMin.X +
+                    card.Width *
+                    0.75f,
+                    cardMin.Y +
+                    card.Height -
+                    Ui(20f)),
                 ImGui.GetColorU32(
                     new Vector4(
                         0.7f,
                         0.7f,
                         0.8f,
-                        card.Alpha *
-                        firstLaunchFadeAlpha *
-                        0.55f)),
+                        effectiveAlpha *
+                        0.35f)),
                 4f);
 
-
-            // Title skeleton line 2
             drawList.AddRectFilled(
-                cardMin + new Vector2(10, card.Height - 14),
+                cardMin +
                 new Vector2(
-                    cardMin.X + card.Width * 0.5f,
-                    card.Height + cardMin.Y - 7),
+                    Ui(10f),
+                    card.Height -
+                    Ui(14f)),
+                new Vector2(
+                    cardMin.X +
+                    card.Width *
+                    0.5f,
+                    cardMin.Y +
+                    card.Height -
+                    Ui(7f)),
                 ImGui.GetColorU32(
                     new Vector4(
                         0.55f,
                         0.55f,
                         0.65f,
-                        card.Alpha *
-                        firstLaunchFadeAlpha *
-                        0.3f)),
+                        effectiveAlpha *
+                        0.20f)),
                 4f);
         }
 
@@ -1018,7 +2441,7 @@ firstLaunchFadeAlpha *
 
         if (alphaIconImage is not null)
         {
-            const float logoSize = 110f;
+            var logoSize = Ui(110f);
 
             drawList.AddImage(
                 alphaIconImage.GetWrapOrEmpty()
@@ -1034,31 +2457,31 @@ firstLaunchFadeAlpha *
         var brandText =
             "ALPHA CHANNEL";
 
-        ImGui.SetWindowFontScale(1.8f);
+        SetUiFontScale(1.8f);
 
         var brandSize =
             ImGui.CalcTextSize(brandText);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 center.X - brandSize.X / 2,
-                logoTop + 130),
+                logoTop + Ui(130)),
             ImGui.GetColorU32(
                 Vector4.One),
             brandText);
 
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(1f);
 
         var tagline =
-    "Your gateway to shared viewing in Eorzea.";
+    "Your gateway to shared media in Eorzea.";
 
         var taglineSize =
             ImGui.CalcTextSize(tagline);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 center.X - taglineSize.X / 2,
-                logoTop + 190),
+                logoTop + Ui(190)),
             ImGui.GetColorU32(
                 new Vector4(
                     0.65f,
@@ -1074,10 +2497,10 @@ tagline);
 
         drawList.AddLine(
             new Vector2(
-                center.X - 55,
+                center.X - Ui(55),
                 lineY),
             new Vector2(
-                center.X + 55,
+                center.X + Ui(55),
                 lineY),
             ImGui.GetColorU32(
                 new Vector4(
@@ -1095,28 +2518,41 @@ tagline);
             ImGui.GetTime() -
             firstLaunchStartedAt;
 
+        var loadingElapsed =
+            firstLaunchSetupSubmitted
+                ? ImGui.GetTime() -
+                  firstLaunchLoadingStartedAt
+                : 0d;
 
-        string introText = string.Empty;
+        string introText;
 
-        if (elapsed < 6)
+        if (!firstLaunchSetupSubmitted)
         {
-            firstLaunchPhase = 0;
+            firstLaunchPhase =
+                0;
 
+            //
+            // Once typing completes this remains visible while onboarding fades in
+            // and while the user chooses their topics.
+            //
             introText =
                 GetTypewriterText(
                     "Welcome to Alpha Channel",
-                    elapsed,
+                    Math.Min(
+                        elapsed,
+                        FirstLaunchWelcomeDuration),
                     1.5,
                     12);
         }
         else
         {
-            firstLaunchPhase = 1;
+            firstLaunchPhase =
+                1;
 
             introText =
                 GetTypewriterText(
                     "We're just getting things ready for you...",
-                    elapsed - 6,
+                    loadingElapsed,
                     0.5,
                     10);
         }
@@ -1125,178 +2561,376 @@ tagline);
             FirstLaunchMessages[
                 firstLaunchMessageIndex];
 
-        if (elapsed > 12 &&
+        if (firstLaunchSetupSubmitted &&
+            loadingElapsed > 6d &&
             ImGui.GetTime() -
-            firstLaunchLastMessageChange > 3)
+            firstLaunchLastMessageChange >
+            3d)
         {
             firstLaunchMessageIndex++;
 
-            if (firstLaunchMessageIndex >= FirstLaunchMessages.Length)
+            if (firstLaunchMessageIndex >=
+                FirstLaunchMessages.Length)
             {
-                firstLaunchMessageIndex = 0;
+                firstLaunchMessageIndex =
+                    0;
             }
 
             firstLaunchLastMessageChange =
                 ImGui.GetTime();
         }
-
         // ---------------------------------------------
         // Draw intro text
         // ---------------------------------------------
 
-        if (!string.IsNullOrEmpty(introText))
+        if (!string.IsNullOrEmpty(
+                introText))
         {
-            ImGui.SetWindowFontScale(1.35f);
+            SetUiFontScale(
+                1.35f);
 
             var introSize =
-                ImGui.CalcTextSize(introText);
+                ImGui.CalcTextSize(
+                    introText);
 
-            drawList.AddText(
+            var introY =
+                center.Y -
+                70f;
+
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
-                    center.X - introSize.X / 2,
-                    center.Y - 70),
-ImGui.GetColorU32(
-    new Vector4(
-        1f,
-        1f,
-        1f,
-        firstLaunchFadeAlpha)),
-introText);
+                    center.X -
+                    introSize.X * 0.5f,
+                    introY),
+                ImGui.GetColorU32(
+                    new Vector4(
+                        1f,
+                        1f,
+                        1f,
+                        firstLaunchFadeAlpha)),
+                introText);
 
-            ImGui.SetWindowFontScale(1f);
+            SetUiFontScale(
+                1f);
         }
-
 
         // ---------------------------------------------
         // Draw loading status
         // ---------------------------------------------
 
-        if (elapsed >= 12)
+        if (firstLaunchSetupSubmitted &&
+            loadingElapsed >= 6d)
         {
             var statusSize =
-                ImGui.CalcTextSize(statusText);
+                ImGui.CalcTextSize(
+                    statusText);
 
-            drawList.AddText(
-                new Vector2(
-                    center.X - statusSize.X / 2,
-                    center.Y + 305),
-                ImGui.GetColorU32(
+            var statusAlpha =
+                Math.Clamp(
+                    (float)(
+                        (
+                            loadingElapsed -
+                            6d
+                        ) /
+                        0.75d
+                    ),
+                    0f,
+                    1f);
+
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+     new Vector2(
+         center.X -
+         statusSize.X *
+         0.5f,
+         center.Y +
+         Ui(250f)),
+                 ImGui.GetColorU32(
                     new Vector4(
                         MutedText.X,
                         MutedText.Y,
                         MutedText.Z,
-                        firstLaunchFadeAlpha)),
+                        firstLaunchFadeAlpha *
+                        statusAlpha)),
                 statusText);
         }
 
         // ---------------------------------------------
+        // Embedded onboarding form
+        // ---------------------------------------------
+
+        DrawFirstLaunchSetupForm(
+            center,
+            elapsed);
+
+        // ---------------------------------------------
         // TV-style spinner
         // ---------------------------------------------
-        var spinnerCenter =
-            new Vector2(
-                center.X,
-                center.Y + 190);
 
-        var radius = 90f;
-        var thickness = 8f;
+        var loadingAlpha =
+            GetFirstLaunchLoadingAlpha();
 
-        var time = (float)ImGui.GetTime();
-
-        var startAngle = time * 3f;
-
-        // segmented arc like the TV shader
-        const int segments = 80;
-
-        for (int i = 0; i < segments; i++)
+        if (loadingAlpha > 0f)
         {
-            float progress = i / (float)segments;
+            var spinnerCenter =
+                new Vector2(
+                    center.X,
+                    center.Y + Ui(135f));
 
-            float angle =
-                startAngle +
-                progress * MathF.PI * 2f;
+            DrawFirstLaunchSpinnerFeatures(
+                drawList,
+                spinnerCenter,
+                loadingAlpha);
 
-            // fading tail
-            float alpha =
-                MathF.Pow(progress, 2.4f)
-                *
-                firstLaunchFadeAlpha;
+            const float radius =
+                90f;
 
-            var point =
+            const float thickness =
+                8f;
+
+            var time =
+                (float)ImGui.GetTime();
+
+            var startAngle =
+                time * 3f;
+
+            //
+            // Segmented arc with a fading tail.
+            //
+            const int segments =
+                80;
+
+            for (var index = 0;
+                 index < segments;
+                 index++)
+            {
+                var progress =
+                    index /
+                    (float)segments;
+
+                var angle =
+                    startAngle +
+                    progress *
+                    MathF.PI *
+                    2f;
+
+                var alpha =
+                    MathF.Pow(
+                        progress,
+                        2.4f) *
+                    firstLaunchFadeAlpha *
+                    loadingAlpha;
+
+                var point =
+                    spinnerCenter +
+                    new Vector2(
+                        MathF.Cos(
+                            angle),
+                        MathF.Sin(
+                            angle)) *
+                    radius;
+
+                drawList.AddCircleFilled(
+                    point,
+                    thickness,
+                    ImGui.GetColorU32(
+                        new Vector4(
+                            Accent.X,
+                            Accent.Y,
+                            Accent.Z,
+                            alpha)));
+            }
+
+            //
+            // Bright moving head.
+            //
+            var headAngle =
+                startAngle;
+
+            var head =
                 spinnerCenter +
                 new Vector2(
-                    MathF.Cos(angle),
-                    MathF.Sin(angle))
-                * radius;
+                    MathF.Cos(
+                        headAngle),
+                    MathF.Sin(
+                        headAngle)) *
+                radius;
 
             drawList.AddCircleFilled(
-                point,
-                thickness,
+                head,
+                14f,
                 ImGui.GetColorU32(
                     new Vector4(
                         Accent.X,
                         Accent.Y,
                         Accent.Z,
-                        alpha)));
+                        firstLaunchFadeAlpha *
+                        loadingAlpha)));
         }
 
+        //
+        // Block the complete splash surface while leaving only the embedded
+        // form available for interaction. Every blocked area also acts as a
+        // window-dragging surface.
+        //
+        DrawFirstLaunchInteractionShield(
+            windowPos,
+            windowSize,
+            center,
+            elapsed);
 
-        // bright moving head
-        var headAngle = startAngle;
-
-        var head =
-            spinnerCenter +
-            new Vector2(
-                MathF.Cos(headAngle),
-                MathF.Sin(headAngle))
-            * radius;
-
-        drawList.AddCircleFilled(
-            head,
-            14f,
-            ImGui.GetColorU32(
-                new Vector4(
-                    Accent.X,
-                    Accent.Y,
-                    Accent.Z,
-                    firstLaunchFadeAlpha)));
+        //
+        // Close ##firstLaunchInputBlockerWindow, which was opened at the
+        // beginning of this method.
+        //
+        ImGui.End();
     }
 
 
-    // Window.Size is only read once Begin() runs, which happens before Draw() - setting it from
-    // inside Draw() would lag a frame behind a minimize/restore click, so it's set here instead
-    // (Dalamud calls PreDraw before Begin every frame). Flags also flip here so the minimized
-    // capsule can draw its own chrome (NoBackground) without NoMove blocking drag.
+    // PreDraw runs before the main window's Begin().
+    // Keep Size populated only while a programmatic size must be applied.
+    // Setting Size to null is what stops Dalamud from submitting
+    // SetNextWindowSize for the normal user-resizable window.
+    // PreDraw runs before the main window's Begin().
+    //
+    // MinimizedSize and FirstLaunchWindowSize are temporary presentation
+    // sizes. userWindowSize is the user's remembered normal size and is
+    // the only one that should be persisted.
     public override void PreDraw()
     {
         if (windowMinimized)
         {
-            SizeCondition = ImGuiCond.Always;
-            Size = viewerMode
-                ? MinimizedViewerSize
-                : MinimizedSize;
+            Flags |=
+                ImGuiWindowFlags.NoResize |
+                ImGuiWindowFlags.NoBackground;
+
+            //
+            // Mini Mode uses its own fixed status-bar dimensions.
+            //
+            SizeConstraints =
+                new WindowSizeConstraints
+                {
+                    MinimumSize = MinimizedSize,
+                    MaximumSize = MinimizedSize,
+                };
+
+            SizeCondition =
+                ImGuiCond.Always;
+
+            Size =
+                MinimizedSize;
+
             return;
         }
 
-        userWindowSize = ClampWindowSize(userWindowSize);
-        var viewportMax = ViewportMaxSize();
-        SizeConstraints = new WindowSizeConstraints
+        if (showingFirstLaunch)
         {
-            MinimumSize = MinimizedSize,
-            MaximumSize = new Vector2(
-                MathF.Max(MinimizedSize.X, viewportMax.X),
-                MathF.Max(MinimizedSize.Y, viewportMax.Y)),
-        };
-        SizeCondition = ImGuiCond.Always;
-        Size = userWindowSize;
+            Flags &=
+                ~ImGuiWindowFlags.NoBackground;
+
+            //
+            // The splash uses fixed dimensions. Remove the resize grips entirely
+            // so attempting to drag an edge cannot disturb or dismiss onboarding.
+            //
+            Flags |=
+                ImGuiWindowFlags.NoResize;
+
+            var splashSize =
+                ClampWindowSize(
+                    FirstLaunchWindowSize);
+
+            SizeConstraints =
+                new WindowSizeConstraints
+                {
+                    MinimumSize = splashSize,
+                    MaximumSize = splashSize,
+                };
+
+            SizeCondition =
+                ImGuiCond.Always;
+
+            Size =
+                splashSize;
+
+            //
+            // LoadWindowSizeFromConfig() sets userResized so the saved size is
+            // normally applied on the first frame. The splash has already supplied
+            // the desired startup dimensions, so consume that pending request here.
+            // Otherwise it fires immediately after the splash and shrinks the window.
+            //
+            userResized =
+                false;
+
+            return;
+        }
+
+        //
+        // The splash has finished, so restore ordinary window resizing.
+        //
+        Flags &=
+            ~(ImGuiWindowFlags.NoResize |
+              ImGuiWindowFlags.NoBackground);
+
+        //
+        // Normal expanded-window constraints.
+        //
+        SizeConstraints =
+            new WindowSizeConstraints
+            {
+                MinimumSize = MinimumWindowSize,
+                MaximumSize = MaximumWindowSize,
+            };
+
+        if (userResized)
+        {
+            userWindowSize =
+                ClampWindowSize(
+                    userWindowSize);
+
+            SizeCondition =
+                ImGuiCond.Always;
+
+            Size =
+                userWindowSize;
+
+            userResized =
+                false;
+
+            return;
+        }
+
+        //
+        // Allow normal user resizing when no programmatic size needs to
+        // be applied.
+        //
+        Size =
+            null;
+
+        SizeCondition =
+            ImGuiCond.None;
     }
 
-    private void OpenPlayerSearch(int tab, string value)
+    private void OpenPlayerSearch(
+        int tab,
+        string value)
     {
-        currentPage = HomePage.Player;
-        activePlayerDrawer = PlayerDrawer.PlayVideo;
+        currentPage =
+            HomePage.Player;
 
-        playerSourceTab = tab;
-        pendingPlayerSearch = value;
+        activePlayerDrawer =
+            PlayerDrawer.PlayVideo;
+
+        playerSourceTab =
+            tab;
+
+        pendingPlayerSearch =
+            value;
+
+        //
+        // Searches opened from elsewhere in the plugin should go directly
+        // to their requested source instead of showing the landing page.
+        //
+        showingAddMediaSources =
+            false;
     }
 
     private void EnsureAlphaIconLoaded()
@@ -1356,28 +2990,6 @@ introText);
         }
     }
 
-    private static void DrawRoleBadge(
-    AlphaRole role)
-    {
-        if (role != AlphaRole.Developer)
-        {
-            return;
-        }
-
-
-        using (ImRaii.PushColor(
-            ImGuiCol.Text,
-            Accent))
-        {
-            ImGui.TextUnformatted(
-                "[Developer]");
-        }
-
-        ImGui.SameLine(
-            0f,
-            6f);
-    }
-
     private void HandleHomeDragScroll()
     {
         // Mouse wheel scrolling is handled natively by ImGui.
@@ -1419,37 +3031,56 @@ introText);
 
     public override void Draw()
     {
-        Colors = ThemeCatalog.Get(Plugin.Cfg.UiTheme, Plugin.Cfg.UiBackground);
+        Colors =
+            ThemeCatalog.Get(
+                Plugin.Cfg.UiTheme,
+                Plugin.Cfg.UiBackground);
+
+        //
+        // The splash may return before DrawSidebar(), so its branding image
+        // must be loaded independently of the sidebar.
+        //
+        EnsureAlphaIconLoaded();
+
         EnsureCustomBackgroundLoaded();
         EnsureReactPreviewLoaded();
         EnsureWatchPartyHeaderLoaded();
-
         customBackgroundActive = Plugin.Cfg.UiBackground == UiBackground.Custom && customBackground is not null;
         EnsureSubscriptionVideosLoaded();
 
         RefreshLayoutScale(ImGui.GetWindowSize());
+        using var fontScale = new GlobalFontScaleScope(layoutScale);
         using var theme = new ThemeScope(layoutScale);
         CaptureCurrentPosition();
         if (!windowMinimized)
         {
-            var currentSize = ImGui.GetWindowSize();
+            var currentSize = ClampWindowSize(ImGui.GetWindowSize());
             var sizeDelta = currentSize - userWindowSize;
-            var sizeChanged = MathF.Abs(sizeDelta.X) > 1f || MathF.Abs(sizeDelta.Y) > 1f;
+            var sizeChanged =
+                MathF.Abs(sizeDelta.X) > 1f ||
+                MathF.Abs(sizeDelta.Y) > 1f;
+
             var userDraggingResize =
-                ImGui.IsMouseDragging(ImGuiMouseButton.Left, 1f) &&
+                ImGui.IsMouseDragging(
+                    ImGuiMouseButton.Left,
+                    1f) &&
                 !ImGui.IsAnyItemActive();
 
             if (userDraggingResize && sizeChanged)
             {
-                userResized = true;
-                userWindowSize = ClampWindowSize(currentSize);
-                Plugin.Cfg.WindowSizePreset = UiWindowSizePreset.Custom;
+                // Record the size without setting userResized. Setting that
+                // flag here would make PreDraw force the size on the following
+                // frame and fight ImGui while the drag is still in progress.
+                userWindowSize = currentSize;
+                Plugin.Cfg.WindowSizePreset =
+                    UiWindowSizePreset.Custom;
                 Plugin.Cfg.WindowWidth = userWindowSize.X;
                 Plugin.Cfg.WindowHeight = userWindowSize.Y;
                 windowSizeSavePending = true;
             }
 
-            if (windowSizeSavePending && !ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+            if (windowSizeSavePending &&
+                !ImGui.IsMouseDragging(ImGuiMouseButton.Left))
             {
                 Plugin.Cfg.Save();
                 windowSizeSavePending = false;
@@ -1469,14 +3100,37 @@ introText);
 
         DrawCustomBackgroundLayer();
 
+        //
+        // While onboarding or the splash is visible, do not draw the
+        // underlying page at all. Several media cards use direct mouse
+        // rectangle checks, so drawing them before an overlay would allow
+        // their actions to run even when visually covered.
+        //
+        if (showingFirstLaunch)
+        {
+            if (!firstLaunchStarted)
+            {
+                firstLaunchStarted =
+                    true;
+
+                BeginFirstLaunch();
+            }
+
+            DrawFirstLaunchOverlay();
+
+            return;
+        }
+
         DrawSignInModal();
-        DrawProfilePopup();
-        DrawProfilePopup();
+
         // DrawGlowBorder();
 
-        var avail = ImGui.GetContentRegionAvail();
+        var avail =
+            ImGui.GetContentRegionAvail();
 
-        var playbackActive = queue.Current is not null;
+        var playbackActive =
+    queue.Current is not null ||
+    video.IsPlayingLocalVideo;
 
         if (playbackActive && !playbackWasActive)
         {
@@ -1547,14 +3201,15 @@ introText);
 
             // Sidebar right border - subtle theme accent divider
             var sidebarEdge = ImGui.GetItemRectMax().X;
-            var dividerList = ImGui.GetForegroundDrawList();
+            var dividerList =
+    ImGui.GetWindowDrawList();
 
             var windowPos = ImGui.GetWindowPos();
             var windowSize = ImGui.GetWindowSize();
 
             dividerList.AddLine(
-                new Vector2(sidebarEdge - 1f, windowPos.Y + 6f),
-                new Vector2(sidebarEdge - 1f, windowPos.Y + windowSize.Y - 6f),
+                new Vector2(sidebarEdge - 1f, windowPos.Y + Ui(6f)),
+                new Vector2(sidebarEdge - 1f, windowPos.Y + windowSize.Y - Ui(6f)),
                 ImGui.GetColorU32(new Vector4(
                     Accent.X,
                     Accent.Y,
@@ -1574,6 +3229,7 @@ introText);
             {
                 if (content)
                 {
+                    SetUiFontScale(1f);
 
                     // ---------------------------------------------------------
                     // Page entrance transition
@@ -1666,21 +3322,14 @@ introText);
 
             if (showingPlaybackBar)
             {
-                var playbackWindowPos =
-                    ImGui.GetWindowPos();
-
-                var playbackWindowSize =
-                    ImGui.GetWindowSize();
-
-                ImGui.SetCursorScreenPos(
-                    playbackWindowPos +
-                    new Vector2(
-                        SidebarWidth,
-                        playbackWindowSize.Y -
-                        BottomBarHeight));
-
+                //
+                // sidebarEdge comes directly from the sidebar child's item rectangle,
+                // so it includes the main window's padding and is the authoritative
+                // boundary between the sidebar and page content.
+                //
                 DrawBottomBar(
-                    playbackActive);
+                    playbackActive,
+                    sidebarEdge);
             }
 
             // Overlay last — its own ImGui window so clicks aren't eaten by the content/rail children.
@@ -1688,25 +3337,59 @@ introText);
 
             DrawPlaybackErrorToast();
 
+            //
+            // Friend profiles and the DJ connection guide must be drawn after
+            // the sidebar, content, scrollbar and divider.
+            //
+
+            DrawProfilePopup();
+            DrawPatreonPopup();
+            DrawDjConnectionGuideOverlay();
+            DrawLiveStreamGuideOverlay();
+            DrawDjStationEditorOverlay();
+            DrawPendingWatchPartyCreationOverlay();
+            DrawGamePageDialogs();
+            DrawInternetArchiveEpisodeDialog();
+            DrawYouTubeSubscriptionsOverlay();
+            DrawYouTubeTopicsOverlay();
+
+            //
+            // Queue creation/editing uses the same global overlay style
+            // as username, controller, and Watch Party password prompts.
+            //
+            DrawCreateQueuePopup();
+            DrawDeleteQueuePopup();
+            DrawClearQueuePopup();
+
             // Watch-party viewer media decisions must be drawn globally.
             // A request can originate from Home, Add Media, Browse Videos, etc.
             DrawViewerMediaActionPopup();
 
-            if (!showingFirstLaunch)
-            {
-                DrawNamePrompt();
-            }
+            //
+            // The viewer TV decision must be global because the shared
+            // state can arrive while any Watch Party sub-tab is selected.
+            //
+            DrawViewerTvSpawnPrompt();
+            DrawHostLeaveConfirmationPopup();
+            //
+            // Draw password prompts globally so they appear above the
+            // content panel and block interaction underneath them.
+            //
+            DrawCreateLockedRoomPasswordPopup();
 
-            if (showingFirstLaunch)
-            {
-                if (!firstLaunchStarted)
-                {
-                    firstLaunchStarted = true;
-                    _ = BeginFirstLaunchAsync();
-                }
+            DrawPartyDirectoryPasswordPopup();
 
-                DrawFirstLaunchOverlay();
-            }
+            //
+            // The splash returns from Draw() before reaching this point.
+            // Normal interface startup continues here after it has finished.
+            //
+            EnsureTopicVideoStartup();
+
+            //
+            // Keep the standalone popup for later manual username changes
+            // and administrator-triggered resets.
+            //
+            DrawNamePrompt();
         }
     }
 
@@ -1721,10 +3404,10 @@ introText);
     // Chrome is outline-only (no solid fill) so it doesn't read as a double-stacked pill.
     private void DrawWindowControlsStrip()
     {
-        const float buttonSize = 26f;
+        var buttonSize = Ui(26f);
         const float gap = 8f;
         const float pad = 2f;
-        const float glowClearance = 5f;
+        var glowClearance = Ui(5f);
 
         var mainPos = ImGui.GetWindowPos();
         var mainSize = ImGui.GetWindowSize();
@@ -1732,7 +3415,7 @@ introText);
         var stripH = pad * 2 + buttonSize;
 
         var stripPos = new Vector2(
-            mainPos.X + mainSize.X - stripW - 10f,
+            mainPos.X + mainSize.X - stripW - Ui(10f),
             mainPos.Y - stripH - glowClearance);
 
         ImGui.SetNextWindowPos(stripPos, ImGuiCond.Always);
@@ -1759,9 +3442,17 @@ introText);
                 return;
             }
 
-            if (DrawWindowControlButton("##ctlMin", FontAwesomeIcon.WindowMinimize, buttonSize))
+            if (DrawWindowControlButton(
+                     "##ctlMin",
+                     FontAwesomeIcon.WindowMinimize,
+                     buttonSize))
             {
-                SetMinimized(true);
+                // We are currently drawing the small controls-strip window.
+                // Pass the captured main-window size explicitly so that strip
+                // size is never mistaken for the normal Alpha Channel size.
+                SetMinimized(
+                    true,
+                    mainSize);
             }
 
             ImGui.SameLine(0, gap);
@@ -1803,15 +3494,15 @@ introText);
             var glyphColor = hovered
                 ? AccentHover
                 : new Vector4(Accent.X, Accent.Y, Accent.Z, 0.70f);
-            drawList.AddText(origin + new Vector2(size, size) / 2f - textSize / 2f,
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), origin + new Vector2(size, size) / 2f - textSize / 2f,
                 ImGui.GetColorU32(glyphColor), glyph);
         }
 
         return clicked;
     }
 
-    // Collapsed capsule - brand mark + expand control. Drag the bar to reposition; expand restores
-    // via the chevron or a double-click (single-click-anywhere restore was blocking window moves).
+    // Compact Mini Mode status bar. It remains draggable and keeps the old
+    // capsule's persisted position while exposing useful playback/party shortcuts.
     private void DrawMinimizedBar()
     {
         var origin = ImGui.GetWindowPos();
@@ -1829,39 +3520,100 @@ introText);
 
         DrawGlowBorder(rounding);
 
-        // Accent orb instead of the chunky TV tile.
-        var orbCenter = origin + new Vector2(18f, size.Y * 0.5f);
-        drawList.AddCircleFilled(
-            orbCenter,
-            8f,
-            ImGui.GetColorU32(new Vector4(Accent.X, Accent.Y, Accent.Z, 0.22f)));
-        drawList.AddCircleFilled(orbCenter, 4.5f, ImGui.GetColorU32(Accent));
+        var chipSize = Ui(26f);
+        var chipGap = Ui(4f);
+        // Snap the controls to the capsule's visual centre. Half-pixel positions
+        // make these small circular buttons look uneven after rasterisation.
+        var controlsY = MathF.Round(origin.Y + (size.Y - chipSize) * 0.5f);
+        var closeOrigin = new Vector2(origin.X + size.X - Ui(8f) - chipSize, controlsY);
+        var restoreOrigin = closeOrigin - new Vector2(chipSize + chipGap, 0f);
+        var chatOrigin = restoreOrigin - new Vector2(chipSize + chipGap, 0f);
+        var playerOrigin = chatOrigin - new Vector2(chipSize + chipGap, 0f);
 
-        var label = viewerMode && joinedHostDisplayName is { Length: > 0 } host
-            ? $"Watching {host}"
-            : "AlphaChannel";
-        if (label.Length > 28)
+        var inParty = stream.Mode is StreamMode.Hosting or StreamMode.Viewing;
+        var canControlPlayback = stream.Mode != StreamMode.Viewing &&
+                                 video.State is VideoPlaybackState.Playing or VideoPlaybackState.Paused;
+        var (position, duration, paused) = video.GetProgress();
+        _ = position;
+        _ = duration;
+
+        var transportOrigin = playerOrigin - new Vector2(chipSize + chipGap, 0f);
+        var rightContentEdge = canControlPlayback ? transportOrigin.X : playerOrigin.X;
+
+        // Brand mark.
+        using (ImRaii.PushFont(UiBuilder.IconFont))
         {
-            label = label[..25] + "…";
+            var logo = FontAwesomeIcon.PlayCircle.ToIconString();
+            var logoSize = ImGui.CalcTextSize(logo);
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                origin + new Vector2(Ui(14f), (size.Y - logoSize.Y) * 0.5f),
+                ImGui.GetColorU32(Accent),
+                logo);
         }
 
-        var labelSize = ImGui.CalcTextSize(label);
-        drawList.AddText(
-            origin + new Vector2(32f, (size.Y - labelSize.Y) * 0.5f),
-            ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.92f)),
-            label);
+        var title = GetMiniModeTitle();
+        var titleStart = origin.X + 38f;
+        var statusReserve = inParty ? 126f : 16f;
+        var titleWidth = MathF.Max(80f, rightContentEdge - titleStart - statusReserve);
+        title = TruncateToWidth(title, titleWidth);
+        var titleSize = ImGui.CalcTextSize(title);
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+            new Vector2(titleStart, origin.Y + (size.Y - titleSize.Y) * 0.5f),
+            ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.94f)),
+            title);
 
-        const float chipSize = 24f;
-        const float chipGap = 4f;
-        var closeOrigin = origin + new Vector2(size.X - 8f - chipSize, (size.Y - chipSize) * 0.5f);
-        var restoreOrigin = closeOrigin - new Vector2(chipSize + chipGap, 0f);
+        if (inParty)
+        {
+            var viewerText = stream.Roster.Length == 1
+                ? "1 watching"
+                : $"{stream.Roster.Length} watching";
+            var viewerSize = ImGui.CalcTextSize(viewerText);
+            var viewerX = rightContentEdge - viewerSize.X - 18f;
+            drawList.AddCircleFilled(
+                new Vector2(viewerX - Ui(8f), origin.Y + size.Y * 0.5f),
+                3.5f,
+                ImGui.GetColorU32(Good));
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
+                new Vector2(viewerX, origin.Y + (size.Y - viewerSize.Y) * 0.5f),
+                ImGui.GetColorU32(MutedText),
+                viewerText);
+        }
+
+        if (canControlPlayback &&
+            DrawMinimizedRoundButton(
+                "##miniTransport",
+                transportOrigin,
+                chipSize,
+                paused ? FontAwesomeIcon.Play : FontAwesomeIcon.Pause,
+                Accent,
+                paused ? "Play" : "Pause"))
+        {
+            video.Pause(!paused);
+        }
+
+        var playerClicked = DrawMinimizedRoundButton(
+            "##miniPlayer",
+            playerOrigin,
+            chipSize,
+            FontAwesomeIcon.Tv,
+            Accent,
+            "Video Player");
+        var chatClicked = DrawMinimizedRoundButton(
+            "##miniChat",
+            chatOrigin,
+            chipSize,
+            FontAwesomeIcon.Comments,
+            Accent,
+            "Chat");
         var restoreClicked = DrawMinimizedRoundButton(
-            "##windowRestore", restoreOrigin, chipSize, FontAwesomeIcon.ChevronUp, Accent);
+            "##windowRestore", restoreOrigin, chipSize, FontAwesomeIcon.Expand, Accent,
+            "Return to full size window");
         var closeClicked = DrawMinimizedRoundButton(
-            "##windowCloseMini", closeOrigin, chipSize, FontAwesomeIcon.Times, Danger);
+            "##windowCloseMini", closeOrigin, chipSize, FontAwesomeIcon.Times, Danger,
+            "Close");
 
-        // Drag region covers everything except the expand/close chips so NoTitleBar still moves.
-        var dragWidth = MathF.Max(size.X - (chipSize * 2f) - chipGap - 12f, 0f);
+        // Drag region covers the title/status area but never any action chip.
+        var dragWidth = MathF.Max(rightContentEdge - origin.X - 8f, 0f);
         ImGui.SetCursorScreenPos(origin);
         ImGui.InvisibleButton("##minimizedDrag", new Vector2(dragWidth, size.Y));
         if (ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
@@ -1873,14 +3625,94 @@ introText);
         {
             CloseUi();
         }
-        else if (restoreClicked || (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)))
+        else if (playerClicked)
+        {
+            OnMiniPlayerRequested?.Invoke();
+        }
+        else if (chatClicked)
+        {
+            OnMiniChatRequested?.Invoke();
+        }
+        else if (restoreClicked ||
+                 (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)))
         {
             SetMinimized(false);
         }
     }
 
+    internal string GetMiniModeTitle()
+    {
+        var title = queue.Current?.Title;
+
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = stream.CurrentRoomState?.MediaTitle;
+        }
+
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = screenController.Engine.GetMediaTitle();
+        }
+
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            return title;
+        }
+
+        if (stream.Mode == StreamMode.Viewing &&
+            joinedHostDisplayName is { Length: > 0 } host)
+        {
+            return $"Watching {host}";
+        }
+
+        return inPartyLabel();
+
+        string inPartyLabel() =>
+            stream.Mode == StreamMode.Hosting
+                ? "Your Watch Party"
+                : "Alpha Channel Mini";
+    }
+
+    internal string GetMiniPartyTitle()
+    {
+        if (stream.Mode == StreamMode.Viewing &&
+            joinedHostDisplayName is { Length: > 0 } host)
+        {
+            return $"{host}'s Watch Party";
+        }
+
+        return stream.Mode == StreamMode.Hosting
+            ? "Your Watch Party"
+            : "Watch Party Chat";
+    }
+
+    internal void OpenFullWatchPartyChat()
+    {
+        currentPage = HomePage.WatchAlong;
+        partyPanelTab = PartyPanelTab.Chat;
+        OpenUi();
+    }
+
+    private static string TruncateToWidth(string text, float width)
+    {
+        if (ImGui.CalcTextSize(text).X <= width)
+        {
+            return text;
+        }
+
+        const string ellipsis = "…";
+        while (text.Length > 1 &&
+               ImGui.CalcTextSize(text + ellipsis).X > width)
+        {
+            text = text[..^1];
+        }
+
+        return text + ellipsis;
+    }
+
     private bool DrawMinimizedRoundButton(
-        string id, Vector2 origin, float size, FontAwesomeIcon icon, Vector4 hoverColor)
+        string id, Vector2 origin, float size, FontAwesomeIcon icon, Vector4 hoverColor,
+        string tooltip)
     {
         ImGui.SetCursorScreenPos(origin);
         ImGui.PushID(id);
@@ -1888,19 +3720,37 @@ introText);
         var hovered = ImGui.IsItemHovered();
         var drawList = ImGui.GetWindowDrawList();
 
-        var fill = hovered
-            ? new Vector4(hoverColor.X, hoverColor.Y, hoverColor.Z, 0.28f)
-            : new Vector4(1f, 1f, 1f, 0.06f);
-        drawList.AddCircleFilled(origin + new Vector2(size, size) * 0.5f, size * 0.5f, ImGui.GetColorU32(fill));
+        if (hovered)
+        {
+            ImGui.SetTooltip(tooltip);
+        }
 
         using (ImRaii.PushFont(UiBuilder.IconFont))
         {
             var text = icon.ToIconString();
-            var textSize = ImGui.CalcTextSize(text);
+            // Font Awesome glyphs have different internal bearings, and drawing
+            // them at the full UI font size makes the wider symbols appear off
+            // centre. Keep a consistent visual footprint inside every chip and
+            // compensate for the icon font's high baseline.
+            const float glyphScale = 0.82f;
+            var glyphSize = ImGui.CalcTextSize(text) * glyphScale;
+            var opticalOffset = icon switch
+            {
+                FontAwesomeIcon.Tv => UiVec(2f, 0.5f),
+                FontAwesomeIcon.Comments => UiVec(2f, 0.5f),
+                FontAwesomeIcon.Expand => UiVec(2.5f, 1f),
+                FontAwesomeIcon.Times => UiVec(1.5f, 0.5f),
+                FontAwesomeIcon.Play => new Vector2(0.5f, 1f),
+                FontAwesomeIcon.Pause => new Vector2(0f, 1f),
+                _ => new Vector2(0f, 1f),
+            };
             drawList.AddText(
                 UiBuilder.IconFont,
-                ImGui.GetFontSize() * 0.78f,
-                origin + new Vector2(size, size) * 0.5f - textSize * 0.39f,
+                ImGui.GetFontSize() * glyphScale,
+                origin +
+                new Vector2(size, size) * 0.5f -
+                glyphSize * 0.5f +
+                opticalOffset,
                 ImGui.GetColorU32(hovered ? hoverColor : new Vector4(1f, 1f, 1f, 0.78f)),
                 text);
         }
@@ -1913,7 +3763,7 @@ introText);
     {
         // Still parked from launch cut — bounce home if somehow selected.
         if (currentPage is HomePage.Activity
-            or HomePage.Venues or HomePage.GoLive)
+            or HomePage.GoLive)
         {
             currentPage = HomePage.Home;
         }
@@ -1931,21 +3781,41 @@ introText);
                 break;
             case HomePage.VideoGrid:
                 PageTitle(
-                    "Browse Videos",
-                    "Discover the latest videos from your topics.");
+                    "Browse YouTube",
+                    "Discover the latest videos from your topics and subscriptions");
                 DrawVideoGrid();
                 break;
             case HomePage.PlaySnes:
                 PageTitle(
                     "Play Games",
-                    "Play classic games locally on your in-game screen.");
-                DrawPlaySnesPage();
+                    "Play classic games on your in-game screen and broadcast to friends.");
+                DrawCompactGamesPage();
+                break;
+            // Alpha Channel embedded-browser integration.
+            case HomePage.Browser:
+                PageTitle("Browser", "Browse the web on your in-game screen and share it with friends.");
+                DrawBrowserPage();
+                break;
+            case HomePage.InternetArchive:
+                PageTitle("Internet Archive", "Discover and play video from the Internet Archive.");
+                DrawInternetArchivePage();
+                break;
+            case HomePage.UnifiedSearch:
+                PageTitle("Search Videos", "Search YouTube, Dailymotion and the Internet Archive.");
+                DrawUnifiedSearchPage();
                 break;
             case HomePage.WatchAlong:
                 PageTitle(
                     "Watch Party",
                     "Host or join a room and watch together.");
                 DrawWatchPartyPage();
+                break;
+            case HomePage.PartyDirectory:
+                PageTitleBack(
+                    "Public Watch Parties",
+                    "Discover rooms, venues, and people watching together.",
+                    HomePage.WatchAlong);
+                DrawPartyDirectoryPage();
                 break;
             case HomePage.Screen:
                 PageTitle("Screen", "Place the picture in the world.");
@@ -1955,25 +3825,12 @@ introText);
                 PageTitle("Friends", "People you can invite and join.");
                 DrawFriends();
                 break;
-            case HomePage.Apps:
-                PageTitle("Apps", "Extra tools that live alongside the channel.");
-                DrawApps();
-                break;
             case HomePage.Messages:
-                PageTitleBack("Alpha Chat", "Private messages between friends.", HomePage.Apps);
+                PageTitleBack("Alpha Chat", "Private messages between friends.", HomePage.Friends);
                 DrawMessages();
                 break;
-            case HomePage.PluginHub:
-                PageTitleBack("Plugin Hub", "What plugins friends have enabled.", HomePage.Apps);
-                myPluginsDirty = true;
-                DrawPluginHub();
-                break;
-            case HomePage.Tweeter:
-                PageTitleBack("Tweeter", "Short posts from people you follow.", HomePage.Apps);
-                DrawTweeter();
-                break;
             case HomePage.Settings:
-                PageTitle("Settings", "Account, look, and whispers.");
+                PageTitle("Settings", "Account, appearance, and plugin preferences.");
                 DrawSettings();
                 break;
         }
@@ -2027,8 +3884,8 @@ introText);
         if (rounding < max.Y * 0.45f)
         {
             drawList.AddRect(
-                min + new Vector2(2f, 2f),
-                max - new Vector2(2f, 2f),
+                min + UiVec(2f, 2f),
+                max - UiVec(2f, 2f),
                 ImGui.GetColorU32(
                     new Vector4(
                         1f,
@@ -2043,6 +3900,11 @@ introText);
 
     private void DrawSidebar()
     {
+        // The sidebar is the first area converted to the experimental UHD
+        // scale. Setting its window scale here also lets ordinary ImGui text
+        // and the nested navigation child inherit the larger font metrics.
+        SetUiFontScale(1f);
+
         //
         // =========================================================
         // FIXED SIDEBAR BRANDING
@@ -2053,7 +3915,12 @@ introText);
         //
 
         var brandOrigin =
-            ImGui.GetCursorScreenPos();
+          ImGui.GetCursorScreenPos();
+
+        // Local X position where the sidebar's usable content begins.
+        // This includes the child window's left padding.
+        var sidebarContentStartX =
+            ImGui.GetCursorPosX();
 
         var sidebarWidth =
             ImGui.GetContentRegionAvail().X;
@@ -2105,20 +3972,23 @@ introText);
             "ALPHA CHANNEL";
 
         var brandScale = 1.25f;
-        ImGui.SetWindowFontScale(brandScale);
+        SetUiFontScale(brandScale);
         var textWidth = ImGui.CalcTextSize(brandText).X;
         if (textWidth > sidebarWidth && textWidth > 1f)
         {
             brandScale *= sidebarWidth / textWidth;
-            ImGui.SetWindowFontScale(brandScale);
+            SetUiFontScale(brandScale);
             textWidth = ImGui.CalcTextSize(brandText).X;
         }
 
         ImGui.SetCursorPosX(
-            MathF.Max(0f, (sidebarWidth - textWidth) * 0.5f));
+        sidebarContentStartX +
+        MathF.Max(
+            0f,
+            (sidebarWidth - textWidth) * 0.5f));
 
         ImGui.TextUnformatted(brandText);
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(1f);
 
 
         //
@@ -2129,7 +3999,7 @@ introText);
         // so it must not use that smaller child's height.
         //
 
-        var hideHeadingsBelowHeight = Ui(690f);
+        var hideHeadingsBelowHeight = Ui(790f);
 
         var compactSidebar =
             ImGui.GetWindowHeight() <=
@@ -2223,13 +4093,24 @@ introText);
                 DrawNavItem(
                     HomePage.VideoGrid,
                     FontAwesomeIcon.ThLarge,
-                    "Browse Videos");
+                    "Browse YouTube");
 
 
                 DrawNavItem(
                     HomePage.PlaySnes,
                     FontAwesomeIcon.Gamepad,
                     "Play Games");
+
+                // Alpha Channel embedded-browser integration.
+                DrawNavItem(
+                    HomePage.Browser,
+                    FontAwesomeIcon.Globe,
+                    "Browser");
+
+                DrawNavItem(
+                    HomePage.InternetArchive,
+                    FontAwesomeIcon.Film,
+                    "Internet Archive");
 
 
                 DrawNavGroup(
@@ -2251,9 +4132,9 @@ introText);
 
 
                 DrawNavItem(
-                    HomePage.Venues,
-                    FontAwesomeIcon.MapMarker,
-                    "Venues");
+                     HomePage.PartyDirectory,
+                     FontAwesomeIcon.Search,
+                     "Party Directory");
 
 
                 DrawNavGroup(
@@ -2301,16 +4182,14 @@ introText);
         //
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                2f));
+            UiVec(0f, 2f));
 
 
         var supportRowWidth =
             ImGui.GetContentRegionAvail().X;
 
 
-        const float supportGap = 5f;
+        var supportGap = Ui(5f);
 
 
         var supportButtonWidth =
@@ -2321,10 +4200,10 @@ introText);
         DrawCompactSupportLink(
             "♥ Patreon",
             supportButtonWidth,
-            28f,
+            Ui(28f),
             PatreonOrange,
             PatreonOrangeHover,
-            "https://www.patreon.com/alphachannel");
+            null);
 
 
         ImGui.SameLine(
@@ -2335,7 +4214,7 @@ introText);
         DrawCompactSupportLink(
             "● Discord",
             supportButtonWidth,
-            28f,
+            Ui(28f),
             new Vector4(
                 0.42f,
                 0.52f,
@@ -2353,12 +4232,10 @@ introText);
         //
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                3f));
+            UiVec(0f, 3f));
     }
 
-    private static void DrawNavGroup(
+    private void DrawNavGroup(
      string label,
      bool compactSidebar)
     {
@@ -2370,7 +4247,7 @@ introText);
         // The caller measures the OUTER sidebar height before
         // entering the scrollable navigation child.
         //
-        // This preserves the existing 650px sidebar threshold even
+        // This preserves the existing outer-sidebar threshold even
         // though these headings now live inside another child.
         //
 
@@ -2379,7 +4256,7 @@ introText);
             ImGui.Dummy(
                 new Vector2(
                     0f,
-                    6f));
+                    Ui(6f)));
 
             return;
         }
@@ -2388,10 +4265,10 @@ introText);
         ImGui.Dummy(
             new Vector2(
                 0f,
-                4f));
+                Ui(4f)));
 
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             0.85f);
 
 
@@ -2400,17 +4277,16 @@ introText);
             label);
 
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
 
         ImGui.Dummy(
             new Vector2(
                 0f,
-                1f));
+                Ui(1f)));
     }
 
-    // forceActive keeps Apps highlighted while you're inside an app (Chat / Hub / Tweeter).
     private void DrawNavItem(HomePage page, FontAwesomeIcon icon, string label, int badgeCount = 0,
         bool forceActive = false)
     {
@@ -2436,15 +4312,16 @@ introText);
         var textColor = active ? Vector4.One : MutedText;
         drawList.AddText(UiBuilder.IconFont, ImGui.GetFontSize(), rowStart + UiVec(12, 9),
             ImGui.GetColorU32(textColor), icon.ToIconString());using (ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, Vector2.Zero))
-        drawList.AddText(rowStart + UiVec(38, 9), ImGui.GetColorU32(textColor), label);
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), rowStart + UiVec(38, 9),
+            ImGui.GetColorU32(textColor), label);
 
         if (badgeCount > 0)
         {
             var badgeText = badgeCount > 9 ? "9+" : badgeCount.ToString();
-            var badgeCenter = rowStart + new Vector2(rowSize.X - 14, rowSize.Y / 2);
-            drawList.AddCircleFilled(badgeCenter, 8f, ImGui.GetColorU32(active ? Vector4.One : Danger));
+            var badgeCenter = rowStart + new Vector2(rowSize.X - Ui(14f), rowSize.Y / 2);
+            drawList.AddCircleFilled(badgeCenter, Ui(8f), ImGui.GetColorU32(active ? Vector4.One : Danger));
             var textSize = ImGui.CalcTextSize(badgeText);
-            drawList.AddText(badgeCenter - textSize / 2,
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), badgeCenter - textSize / 2,
                 ImGui.GetColorU32(active ? Accent : Vector4.One), badgeText);
         }
 
@@ -2472,14 +4349,14 @@ introText);
         if (maxScroll <= 0f)
             return;
 
-        var scrollbarX = windowPos.X + windowSize.X - 7f;
-        var scrollbarTop = windowPos.Y + 8f;
-        var scrollbarBottomClearance = BottomBarHeight + 12f;
-        var scrollbarHeight = windowSize.Y - scrollbarBottomClearance - 16f;
+        var scrollbarX = windowPos.X + windowSize.X - Ui(7f);
+        var scrollbarTop = windowPos.Y + Ui(8f);
+        var scrollbarBottomClearance = BottomBarHeight + Ui(12f);
+        var scrollbarHeight = windowSize.Y - scrollbarBottomClearance - Ui(16f);
 
         var thumbHeight =
             MathF.Max(
-                40f,
+                Ui(40f),
                 scrollbarHeight * (windowSize.Y / (windowSize.Y + maxScroll)));
 
         var scrollPercent = scrollY / maxScroll;
@@ -2492,7 +4369,7 @@ introText);
 
         drawList.AddRectFilled(
             new Vector2(scrollbarX, scrollbarTop),
-            new Vector2(scrollbarX + 4f, scrollbarTop + scrollbarHeight),
+            new Vector2(scrollbarX + Ui(4f), scrollbarTop + scrollbarHeight),
             ImGui.GetColorU32(new Vector4(
     Accent.X,
     Accent.Y,
@@ -2502,7 +4379,7 @@ introText);
 
         drawList.AddRect(
     new Vector2(scrollbarX - 1f, thumbY - 1f),
-    new Vector2(scrollbarX + 7f, thumbY + thumbHeight + 1f),
+    new Vector2(scrollbarX + Ui(7f), thumbY + thumbHeight + 1f),
     ImGui.GetColorU32(
         new Vector4(
             Accent.X,
@@ -2515,7 +4392,7 @@ introText);
 
         drawList.AddRectFilled(
             new Vector2(scrollbarX, thumbY),
-            new Vector2(scrollbarX + 6f, thumbY + thumbHeight),
+            new Vector2(scrollbarX + Ui(6f), thumbY + thumbHeight),
             ImGui.GetColorU32(
     new Vector4(
         Accent.X,
@@ -2528,10 +4405,22 @@ introText);
     private void DrawWatchingStat()
     {
         var onlineFriends = friends.Count(f => f.Online);
+        var realtimeColor = stream.ConnectionState switch
+        {
+            RealtimeConnectionState.Connected => Good,
+            RealtimeConnectionState.Connecting or
+            RealtimeConnectionState.Reconnecting => ConnectionPendingOrange,
+            _ => Danger,
+        };
         using (ImRaii.PushFont(UiBuilder.IconFont))
         {
-            ImGui.TextColored(onlineFriends > 0 || stream.IsConnected ? Good : MutedText,
+            ImGui.TextColored(realtimeColor,
                 FontAwesomeIcon.Circle.ToIconString());
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip($"Alpha Channel: {stream.ConnectionStatusText}");
         }
 
         ImGui.SameLine();
@@ -2554,7 +4443,7 @@ introText);
             var labelWidth = ImGui.CalcTextSize(label).X;
             var right = ImGui.GetWindowContentRegionMax().X;
             ImGui.SameLine();
-            ImGui.SetCursorPosX(MathF.Max(ImGui.GetCursorPosX() + 8f, right - labelWidth));
+            ImGui.SetCursorPosX(MathF.Max(ImGui.GetCursorPosX() + Ui(8f), right - labelWidth));
             ImGui.TextColored(MutedText, label);
         }
     }
@@ -2563,6 +4452,7 @@ introText);
 
     private static readonly Vector4 PatreonOrange = new(1f, 0.55f, 0.15f, 1f);
     private static readonly Vector4 PatreonOrangeHover = new(1f, 0.68f, 0.30f, 1f);
+    private static readonly Vector4 ConnectionPendingOrange = new(1f, 0.55f, 0.15f, 1f);
     private static readonly string[] DonateLabels =
     [
         "Hey, like what you see?\nConsider supporting us",
@@ -2580,7 +4470,7 @@ introText);
         var width = ImGui.GetContentRegionAvail().X - 24f;
         var origin = ImGui.GetCursorScreenPos();
         var size = new Vector2(width, height);
-        var buttonOrigin = origin + new Vector2(12f, 0);
+        var buttonOrigin = origin + UiVec(12f, 0);
 
         ImGui.SetCursorScreenPos(buttonOrigin);
 
@@ -2612,7 +4502,7 @@ introText);
             (width - textSize.X) * 0.5f,
             (height - textSize.Y) * 0.5f);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
       textPos,
       ImGui.GetColorU32(hovered ? hoverColor : color),
       label);
@@ -2627,13 +4517,13 @@ introText);
     // width so several support links can share one row.
     //
 
-    private static void DrawCompactSupportLink(
+    private void DrawCompactSupportLink(
         string label,
         float width,
         float height,
         Vector4 color,
         Vector4 hoverColor,
-        string url)
+        string? url)
     {
         var buttonOrigin =
             ImGui.GetCursorScreenPos();
@@ -2652,19 +4542,20 @@ introText);
                 $"##support_{label}",
                 size))
         {
-            try
+            if (url is null)
             {
-                Process.Start(
-                    new ProcessStartInfo(
-                        url)
-                    {
-                        UseShellExecute = true
-                    });
+                patreonPopupOpen = true;
             }
-            catch (Exception exception)
+            else
             {
-                AepLog.Warning(
-                    $"[Support] Failed to open browser: {exception.Message}");
+                try
+                {
+                    Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+                }
+                catch (Exception exception)
+                {
+                    AepLog.Warning($"[Support] Failed to open browser: {exception.Message}");
+                }
             }
         }
 
@@ -2684,9 +4575,9 @@ introText);
                 hovered
                     ? hoverColor
                     : color),
-            8f,
+            Ui(8f),
             ImDrawFlags.None,
-            1f);
+            Ui(1f));
 
 
         var textSize =
@@ -2702,6 +4593,8 @@ introText);
 
 
         drawList.AddText(
+            ImGui.GetFont(),
+            ImGui.GetFontSize(),
             textPos,
             ImGui.GetColorU32(
                 hovered
@@ -2718,7 +4611,7 @@ introText);
         var width = ImGui.GetContentRegionAvail().X - 24f;
         var origin = ImGui.GetCursorScreenPos();
         var size = new Vector2(width, height);
-        var buttonOrigin = origin + new Vector2(12f, 0);
+        var buttonOrigin = origin + UiVec(12f, 0);
 
         ImGui.SetCursorScreenPos(buttonOrigin);
 
@@ -2792,9 +4685,7 @@ introText);
             {
                 if (ImGui.Button(
                         $"{FontAwesomeIcon.ArrowLeft.ToIconString()}##backPage",
-                        new Vector2(
-                            34f,
-                            30f)))
+                        UiVec(34f, 30f)))
                 {
                     currentPage =
                         backPage;
@@ -2820,13 +4711,13 @@ introText);
         ImGui.BeginGroup();
 
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1.35f);
 
         ImGui.TextUnformatted(
             text);
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
 
@@ -2884,11 +4775,9 @@ introText);
             // Same dimensions as Home.
             //
 
-            const float avatarSize =
-                38f;
+            var avatarSize = Ui(38f);
 
-            const float profileWidth =
-                185f;
+            var profileWidth = Ui(185f);
 
 
             //
@@ -2954,8 +4843,20 @@ introText);
 
 
             ImGui.TextColored(
-                Good,
+                stream.ConnectionState switch
+                {
+                    RealtimeConnectionState.Connected => Good,
+                    RealtimeConnectionState.Connecting or
+                    RealtimeConnectionState.Reconnecting => ConnectionPendingOrange,
+                    _ => Danger,
+                },
                 "●");
+
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip(
+                    $"Alpha Channel: {stream.ConnectionStatusText}");
+            }
 
 
             ImGui.SameLine(
@@ -2976,10 +4877,10 @@ introText);
             ImGui.SetCursorPos(
                 new Vector2(
                     textX,
-                    profileY + 17f));
+                    profileY + Ui(17f)));
 
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 0.84f);
 
 
@@ -2997,10 +4898,10 @@ introText);
             ImGui.SetCursorPos(
                 new Vector2(
                     textX,
-                    profileY + 35f));
+                    profileY + Ui(35f)));
 
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1.02f);
 
 
@@ -3009,7 +4910,7 @@ introText);
                 watchersText);
 
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
         }
 
@@ -3026,13 +4927,11 @@ introText);
         ImGui.SetCursorPos(
             new Vector2(
                 headerStartX,
-                headerY + 54f));
+                headerY + Ui(54f)));
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 8f));
 
 
         var origin =
@@ -3055,7 +4954,7 @@ introText);
         ImGui.Dummy(
             new Vector2(
                 width,
-                18f));
+                Ui(18f)));
     }
 
     // Consistent accent-colored sub-headers within a page — same weight on every Channel.
@@ -3070,7 +4969,7 @@ introText);
     private static void DrawCard(string id, Action draw)
     {
         using (ImRaii.PushColor(ImGuiCol.ChildBg, CardBg))
-        using (ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, new Vector2(16, 14)))
+        using (ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, UiVec(16, 14)))
         using (var card = ImRaii.Child(id, new Vector2(-1, 1), false,
                    PaddedChild | ImGuiWindowFlags.AlwaysAutoResize))
         {
@@ -3088,8 +4987,8 @@ introText);
     {
         var origin = ImGui.GetCursorScreenPos();
         using (ImRaii.PushColor(ImGuiCol.ChildBg, CardBgHover))
-        using (ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, new Vector2(20, 18)))
-        using (ImRaii.PushStyle(ImGuiStyleVar.ChildRounding, 14f))
+        using (ImRaii.PushStyle(ImGuiStyleVar.WindowPadding, UiVec(20, 18)))
+        using (ImRaii.PushStyle(ImGuiStyleVar.ChildRounding, Ui(14f)))
         using (var stage = ImRaii.Child(id, new Vector2(-1, 1), false,
                    PaddedChild | ImGuiWindowFlags.AlwaysAutoResize))
         {
@@ -3100,7 +4999,7 @@ introText);
         }
 
         var end = ImGui.GetItemRectMax();
-        ImGui.GetWindowDrawList().AddRectFilled(origin, new Vector2(origin.X + 3f, end.Y),
+        ImGui.GetWindowDrawList().AddRectFilled(origin, new Vector2(origin.X + Ui(3f), end.Y),
             ImGui.GetColorU32(Accent), 2f);
         ImGui.Spacing();
         ImGui.Spacing();
@@ -3116,35 +5015,35 @@ introText);
         var textHeight = ImGui.CalcTextSize(text, false, wrapWidth).Y;
         var height = MathF.Max(textHeight + 12f, 28f);
 
-        drawList.AddLine(origin + new Vector2(7, 0), origin + new Vector2(7, height),
+        drawList.AddLine(origin + UiVec(7, 0), origin + new Vector2(Ui(7), height),
             ImGui.GetColorU32(BorderSubtle), 1.5f);
-        drawList.AddCircleFilled(origin + new Vector2(7, 12), unread ? 4.5f : 3.5f,
+        drawList.AddCircleFilled(origin + UiVec(7, 12), unread ? 4.5f : 3.5f,
             ImGui.GetColorU32(unread ? Accent : MutedText));
 
-        ImGui.SetCursorScreenPos(origin + new Vector2(22, 4));
+        ImGui.SetCursorScreenPos(origin + UiVec(22, 4));
         ImGui.PushTextWrapPos(origin.X + 22f + wrapWidth);
         ImGui.TextWrapped(text);
         ImGui.PopTextWrapPos();
 
         var afterY = ImGui.GetCursorScreenPos().Y;
-        ImGui.SetCursorScreenPos(new Vector2(origin.X, MathF.Max(afterY, origin.Y + height) + 2f));
+        ImGui.SetCursorScreenPos(new Vector2(origin.X, MathF.Max(afterY, origin.Y + height) + Ui(2f)));
         ImGui.PopID();
     }
 
     private static void DrawPlainEmpty(string message, string? buttonLabel = null, Action? onClick = null)
     {
-        ImGui.Dummy(new Vector2(0, 8));
+        ImGui.Dummy(UiVec(0, 8));
         ImGui.TextColored(MutedText, message);
         if (buttonLabel is not null && onClick is not null)
         {
             ImGui.Spacing();
-            if (ImGui.Button(buttonLabel, new Vector2(160, 30)))
+            if (ImGui.Button(buttonLabel, UiVec(160, 30)))
             {
                 onClick();
             }
         }
 
-        ImGui.Dummy(new Vector2(0, 8));
+        ImGui.Dummy(UiVec(0, 8));
     }
 
     private static void DrawEmptyCard(string id, string message, string? buttonLabel = null, Action? onClick = null)
@@ -3172,8 +5071,8 @@ introText);
             return;
         }
 
-        const float promptWidth = 360f;
-        const float promptHeight = 205f;
+        var promptWidth = Ui(620f);
+        var promptHeight = Ui(455f);
 
         //
         // Cover only the Alpha Channel window.
@@ -3280,25 +5179,60 @@ introText);
             promptPos +
             new Vector2(
                 padding,
-                17f));
+                Ui(17f)));
 
-        ImGui.SetWindowFontScale(1.15f);
+        SetUiFontScale(
+            1.3f);
 
         ImGui.TextColored(
-            Vector4.One,
-            "Choose your username");
+            AccentHover,
+            "Welcome to Alpha Channel!");
 
-        ImGui.SetWindowFontScale(1f);
+        SetUiFontScale(
+            1f);
 
         ImGui.SetCursorScreenPos(
             promptPos +
             new Vector2(
                 padding,
-                52f));
+                Ui(53f)));
+
+        SetUiFontScale(
+            1.15f);
+
+        ImGui.TextColored(
+            Vector4.One,
+            "Choose your username");
+
+        SetUiFontScale(
+            1f);
+
+        ImGui.SetCursorScreenPos(
+            promptPos +
+            new Vector2(
+                padding,
+                Ui(79f)));
 
         ImGui.TextColored(
             MutedText,
             "Choose the username other Alpha Channel users will see.");
+
+        ImGui.SameLine(
+            0f,
+            7f);
+
+        using (ImRaii.PushFont(
+            UiBuilder.IconFont))
+        {
+            ImGui.TextDisabled(
+                FontAwesomeIcon.InfoCircle.ToIconString());
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(
+                "This is the name used to add you to friends lists and join your watch party.");
+        }
 
         //
         // Username input.
@@ -3307,7 +5241,7 @@ introText);
             promptPos +
             new Vector2(
                 padding,
-                91f));
+                Ui(111f)));
 
         ImGui.SetNextItemWidth(
             promptWidth -
@@ -3340,9 +5274,113 @@ introText);
                 32);
         }
 
+        //
+        // Topic subscriptions.
+        //
+        //
+        // Divider between username and topic selection.
+        //
+        var dividerY =
+            promptPos.Y +
+            158f;
+
+        drawList.AddLine(
+            new Vector2(
+                promptPos.X +
+                padding,
+                dividerY),
+            new Vector2(
+                promptMax.X -
+                padding,
+                dividerY),
+            ImGui.GetColorU32(
+                new Vector4(
+                    Accent.X,
+                    Accent.Y,
+                    Accent.Z,
+                    0.28f)),
+            1f);
+
+        ImGui.SetCursorScreenPos(
+            promptPos +
+            new Vector2(
+                padding,
+                Ui(172f)));
+
+        ImGui.TextColored(
+            Vector4.One,
+            "Subscribe to your favourite topics");
+
+        ImGui.SetCursorScreenPos(
+            promptPos +
+            new Vector2(
+                padding,
+                Ui(198f)));
+
+        ImGui.TextColored(
+            MutedText,
+            "Choose at least 3 topics to receive relevant video recommendations.");
+
+        ImGui.SameLine(
+            0f,
+            7f);
+
+        using (ImRaii.PushFont(
+            UiBuilder.IconFont))
+        {
+            ImGui.TextDisabled(
+                FontAwesomeIcon.InfoCircle.ToIconString());
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(
+                "You can change these later in Settings.");
+        }
+
+        ImGui.SetCursorScreenPos(
+            promptPos +
+            new Vector2(
+                padding,
+                Ui(230f)));
+
+        ImGui.PushID(
+            "welcomeTopicSelection");
+
+        DrawTrendingTopicTags(
+    columnHeight: 145f,
+    availableWidthOverride:
+        promptWidth -
+        (padding * 2f));
+
+        ImGui.PopID();
+
+        var selectedTopicCount =
+            GetSubscribedTopicCount();
+
+        ImGui.SetCursorScreenPos(
+            promptPos +
+            new Vector2(
+                padding,
+                Ui(384f)));
+
+        var topicCountValid =
+            selectedTopicCount is >= 3 and <= 15;
+
+        ImGui.TextColored(
+            topicCountValid
+                ? Accent
+                : new Vector4(
+                    1f,
+                    0.55f,
+                    0.35f,
+                    1f),
+             $"{selectedTopicCount} topics selected (minimum 3)");
+
         var valid =
             !string.IsNullOrWhiteSpace(
-                namePromptInput);
+                namePromptInput) &&
+            topicCountValid;
 
         //
         // Confirm button.
@@ -3351,7 +5389,7 @@ introText);
             promptPos +
             new Vector2(
                 padding,
-                145f));
+                Ui(414f)));
 
         if (!valid)
         {
@@ -3359,22 +5397,66 @@ introText);
         }
 
         if (ImGui.Button(
-                "Confirm",
-                new Vector2(
-                    100f,
-                    32f)))
+          "Confirm",
+          UiVec(120f, 32f)))
         {
+            Plugin.Cfg.Save();
+
             onNameConfirmed?.Invoke(
                 namePromptInput.Trim());
 
-            onNameConfirmed = null;
-            namePromptActive = false;
-            namePromptPending = false;
+            onNameConfirmed =
+                null;
+
+            namePromptActive =
+                false;
+
+            namePromptPending =
+                false;
+
+            //
+            // First-launch topics have now been submitted. Start the same
+            // shared Topics-cache pipeline used by Browse Videos while the
+            // splash animation runs independently.
+            //
+            browseVideoRequested =
+                true;
+
+            topicVideoStartupRequested =
+                true;
+
+            homeYouTubeResults =
+                null;
+
+            homeYouTubeSelectedTopics.Clear();
+
+            isLoadingHomeYouTube =
+                true;
+
+            _ =
+                PrepareTopicVideosForLaunchAsync(
+                    forceRefresh: false);
         }
 
         if (!valid)
         {
             ImGui.EndDisabled();
+        }
+
+        if (topicSelectionLimitWarning)
+        {
+            ImGui.SameLine(
+                0f,
+                10f);
+
+            ImGui.TextColored(
+                new Vector4(
+                    1f,
+                    0.55f,
+                    0.35f,
+                    1f),
+                "You may only choose up to 15 topics, " +
+                "please remove one to add another");
         }
 
         ImGui.End();
@@ -3387,20 +5469,18 @@ introText);
         var realCount =
             stream.Roster.Length;
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1.08f);
 
         ImGui.TextColored(
             Vector4.One,
             label);
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 8f));
 
         if (realCount == 0)
         {
@@ -3416,9 +5496,7 @@ introText);
             maxShown: 12);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                10f));
+            UiVec(0f, 10f));
 
         for (var index = 0;
              index < realCount;
@@ -3445,9 +5523,7 @@ introText);
             ImGui.PopID();
 
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    6f));
+                UiVec(0f, 6f));
         }
     }
 
@@ -3487,15 +5563,15 @@ introText);
             ImGui.GetWindowDrawList()
                 .AddCircleFilled(
                     origin +
-                    new Vector2(18f, 26f),
+                    UiVec(18f, 26f),
                     4f,
                     ImGui.GetColorU32(Good));
 
             // Name.
             ImGui.GetWindowDrawList()
-                .AddText(
+                .AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                     origin +
-                    new Vector2(32f, 18f),
+                    UiVec(32f, 18f),
                     ImGui.GetColorU32(
                         Vector4.One),
                     displayName);
@@ -3505,14 +5581,14 @@ introText);
                 return;
             }
 
-            const float rightPadding = 12f;
+            var rightPadding = Ui(12f);
             const float gap = 8f;
 
             var kickSize =
-                new Vector2(112f, 30f);
+                UiVec(112f, 30f);
 
             var hostSize =
-                new Vector2(104f, 30f);
+                UiVec(104f, 30f);
 
             // -----------------------------------------------------
             // Kick from room — UI only for now
@@ -3524,7 +5600,7 @@ introText);
                     rowWidth -
                     rightPadding -
                     kickSize.X,
-                    origin.Y + 11f);
+                    origin.Y + Ui(11f));
 
             ImGui.SetCursorScreenPos(
                 kickPos);
@@ -3616,10 +5692,38 @@ introText);
 
     public void Dispose()
     {
+        StopBrowserWatchPartyBroadcast();
+        Interlocked.Increment(ref unifiedSearchGeneration);
+        unifiedSearchCts?.Cancel();
+        unifiedSearchCts?.Dispose();
+        unifiedSearchCts = null;
+        DisposeInternetArchive();
         PersistPositions();
+
+        signInCts?.Cancel();
+        signInCts?.Dispose();
+        signInCts = null;
+
+        browseVideosCts?.Cancel();
+        browseVideosCts?.Dispose();
+        browseVideosCts = null;
+
+        subscriptionVideosCts?.Cancel();
+        subscriptionVideosCts?.Dispose();
+        subscriptionVideosCts = null;
+
+        Interlocked.Increment(
+            ref subscriptionVideoLoadGeneration);
+
+        Interlocked.Increment(
+            ref topicSettingsRefreshGeneration);
+
+        imagePreviews.Dispose();
         thumbnails.Dispose();
+
         homeHero?.Dispose();
         homeHero = null;
+
         customBackground?.Dispose();
         customBackground = null;
     }
@@ -3653,17 +5757,32 @@ introText);
             ImGui.PushStyleVar(ImGuiStyleVar.GrabRounding, 12f * scale);
             ImGui.PushStyleVar(ImGuiStyleVar.ChildRounding, 0f);
             ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0f);
-            // Padding stays in design units. Dalamud already scales widgets with GlobalUiScale;
-            // multiplying again made every unscaled Child clip its contents.
-            ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(12f, 10f));
-            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(12f, 8f));
-            ImGui.PushStyleVar(ImGuiStyleVar.ItemInnerSpacing, new Vector2(8f, 6f));
+            ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(12f, 10f) * scale);
+            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(12f, 8f) * scale);
+            ImGui.PushStyleVar(ImGuiStyleVar.ItemInnerSpacing, new Vector2(8f, 6f) * scale);
         }
 
         public void Dispose()
         {
             ImGui.PopStyleVar(StyleCount);
             ImGui.PopStyleColor(ColorCount);
+        }
+    }
+
+    private readonly struct GlobalFontScaleScope : IDisposable
+    {
+        private readonly float previousScale;
+
+        public GlobalFontScaleScope(float scale)
+        {
+            var io = ImGui.GetIO();
+            previousScale = io.FontGlobalScale;
+            io.FontGlobalScale = previousScale * scale;
+        }
+
+        public void Dispose()
+        {
+            ImGui.GetIO().FontGlobalScale = previousScale;
         }
     }
 }

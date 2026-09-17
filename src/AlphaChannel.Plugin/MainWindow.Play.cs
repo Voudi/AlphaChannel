@@ -1,4 +1,4 @@
-﻿using Dalamud.Bindings.ImGui;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Keys;
 using Dalamud.Interface;
 using Dalamud.Interface.ImGuiFileDialog;
@@ -19,12 +19,88 @@ internal sealed partial class MainWindow
     private enum GameSystem
     {
         Snes,
-        GameBoy
+        GameBoy,
+        Nes,
+        GameBoyAdvance,
+        MasterSystem,
+        GameGear
     }
 
 
     private GameSystem selectedGameSystem =
-        GameSystem.Snes;
+          GameSystem.Snes;
+
+    //
+    // "Armed" is intentionally separate from the encoder's IsBroadcasting
+    // state. The host sees the broadcast as enabled while the encoder itself
+    // runs only when at least one viewer is present.
+    //
+    private bool gameBroadcastArmed;
+    private bool gameBroadcastForSnes;
+    private GameSystem gameBroadcastSystem = GameSystem.Snes;
+    private bool gameBroadcastStartFailed;
+    private string? gameBroadcastPublishUrl;
+    private string? gameBroadcastHlsUrl;
+    private DateTime gameBroadcastViewerReadyUtc = DateTime.MaxValue;
+    private string? gamePatreonAccessMessage;
+
+    // MediaMTX does not expose the HLS playlist until FFmpeg has supplied the
+    // first keyframe and segment. Keep viewers on the waiting screen during
+    // that short startup window instead of handing mpv a URL that still 404s.
+    private static readonly TimeSpan GameBroadcastViewerWarmup =
+        TimeSpan.FromSeconds(4);
+
+    internal bool IsGameBroadcastArmed => gameBroadcastArmed;
+
+    internal string? ActiveGameBroadcastHlsUrl =>
+        gameBroadcastArmed &&
+        DateTime.UtcNow >= gameBroadcastViewerReadyUtc
+            ? gameBroadcastHlsUrl
+            : null;
+
+    internal string? ActiveGameBroadcastTitle
+    {
+        get
+        {
+            if (!gameBroadcastArmed)
+            {
+                return null;
+            }
+
+            var romPath = gameBroadcastSystem switch
+            {
+                GameSystem.Snes => snesSelectedRomPath,
+                GameSystem.Nes => nesSelectedRomPath,
+                GameSystem.GameBoyAdvance => gameBoyAdvanceSelectedRomPath,
+                GameSystem.MasterSystem => masterSystemSelectedRomPath,
+                GameSystem.GameGear => gameGearSelectedRomPath,
+                _ => gameBoySelectedRomPath
+            };
+
+            var gameName =
+                string.IsNullOrWhiteSpace(
+                    romPath)
+                    ? string.Empty
+                    : LibraryGameName(
+                        romPath);
+
+            if (!string.IsNullOrWhiteSpace(
+                    gameName))
+            {
+                return $"Playing: {gameName}";
+            }
+
+            return gameBroadcastSystem switch
+            {
+                GameSystem.Snes => "SNES Gameplay",
+                GameSystem.Nes => "NES Gameplay",
+                GameSystem.GameBoyAdvance => "Game Boy Advance Gameplay",
+                GameSystem.MasterSystem => "Master System / SG-1000 Gameplay",
+                GameSystem.GameGear => "Game Gear Gameplay",
+                _ => "Game Boy Gameplay"
+            };
+        }
+    }
 
 
     private string snesSelectedRomPath =
@@ -43,6 +119,22 @@ internal sealed partial class MainWindow
 
     private readonly FileDialogManager gameBoyFileDialog =
         new();
+
+    private string nesSelectedRomPath = string.Empty;
+    private string? nesLaunchError;
+    private readonly FileDialogManager nesFileDialog = new();
+
+    private string gameBoyAdvanceSelectedRomPath = string.Empty;
+    private string? gameBoyAdvanceLaunchError;
+    private readonly FileDialogManager gameBoyAdvanceFileDialog = new();
+
+    private string masterSystemSelectedRomPath = string.Empty;
+    private string? masterSystemLaunchError;
+    private readonly FileDialogManager masterSystemFileDialog = new();
+
+    private string gameGearSelectedRomPath = string.Empty;
+    private string? gameGearLaunchError;
+    private readonly FileDialogManager gameGearFileDialog = new();
 
 
     private bool snesControlsPopupRequested;
@@ -98,9 +190,7 @@ internal sealed partial class MainWindow
         DrawGamesInfoBanner();
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
 
         //
@@ -112,9 +202,7 @@ internal sealed partial class MainWindow
         DrawGameSystemSelector();
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
 
         //
@@ -125,8 +213,7 @@ internal sealed partial class MainWindow
         // =========================================================
         //
 
-        const float topGap =
-            14f;
+        var topGap = Ui(14f);
 
         var playWidth =
             MathF.Max(
@@ -141,8 +228,7 @@ internal sealed partial class MainWindow
                 playWidth -
                 topGap);
 
-        const float topHeight =
-            430f;
+        var topHeight = Ui(430f);
 
 
         DrawSnesPanel(
@@ -176,9 +262,7 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
 
         //
@@ -191,9 +275,7 @@ internal sealed partial class MainWindow
             isPlaying);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
 
         //
@@ -208,9 +290,7 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
 
         //
@@ -225,9 +305,7 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
 
         //
@@ -249,13 +327,11 @@ internal sealed partial class MainWindow
             new Vector2(
                 0f,
                 BottomBarHeight +
-                25f));
+                Ui(25f)));
 
 
         ImGui.SetNextWindowSize(
-            new Vector2(
-                940f,
-                600f),
+            UiVec(940f, 600f),
             ImGuiCond.Appearing);
 
         ImGui.SetNextWindowPos(
@@ -348,7 +424,7 @@ internal sealed partial class MainWindow
         var iconCenter =
             min +
             new Vector2(
-                31f,
+                Ui(31f),
                 height /
                 2f);
 
@@ -376,7 +452,7 @@ internal sealed partial class MainWindow
                 ImGui.CalcTextSize(
                     icon);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 iconCenter -
                 iconSize /
                 2f,
@@ -394,20 +470,20 @@ internal sealed partial class MainWindow
             min.X +
             58f;
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 textX,
                 min.Y +
-                19f),
+                Ui(19f)),
             ImGui.GetColorU32(
                 Accent),
             "LOCAL PLAY ONLY");
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 textX,
                 min.Y +
-                46f),
+                Ui(46f)),
             ImGui.GetColorU32(
                 MutedText),
             "Games run locally on your computer and do not currently support Watch Party syncing.");
@@ -428,18 +504,14 @@ internal sealed partial class MainWindow
 
                 DrawSnesPanel(
             "##gameSystemSelector",
-            new Vector2(
-                -1f,
-                142f),
+            UiVec(-1f, 142f),
                     () =>
             {
                 ImGui.TextUnformatted(
                     "Choose a System");
 
                 ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        4f));
+                    UiVec(0f, 4f));
 
                 ImGui.TextColored(
                     MutedText,
@@ -448,9 +520,7 @@ internal sealed partial class MainWindow
                         : "Select the console you want to play.");
 
                 ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        12f));
+                    UiVec(0f, 12f));
 
 
                 var available =
@@ -477,7 +547,7 @@ internal sealed partial class MainWindow
                             GameSystem.Snes,
                             new Vector2(
                                 buttonWidth,
-                                38f)))
+                                Ui(38f))))
                     {
                         selectedGameSystem =
                             GameSystem.Snes;
@@ -501,7 +571,7 @@ internal sealed partial class MainWindow
                             GameSystem.GameBoy,
                             new Vector2(
                                 buttonWidth,
-                                38f)))
+                                Ui(38f))))
                     {
                         selectedGameSystem =
                             GameSystem.GameBoy;
@@ -553,9 +623,7 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                18f));
+            UiVec(0f, 18f));
 
 
         //
@@ -567,9 +635,7 @@ internal sealed partial class MainWindow
             "ROM File");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                5f));
+            UiVec(0f, 5f));
 
 
         var displayPath =
@@ -578,8 +644,7 @@ internal sealed partial class MainWindow
                 ? "No ROM selected"
                 : selectedPath;
 
-        const float buttonWidth =
-            112f;
+        var buttonWidth = Ui(112f);
 
         var rowWidth =
             ImGui.GetContentRegionAvail().X;
@@ -622,7 +687,7 @@ internal sealed partial class MainWindow
                     "Browse...",
                     new Vector2(
                         buttonWidth,
-                        34f)))
+                        Ui(34f))))
             {
                 if (isSnes)
                 {
@@ -708,9 +773,7 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                7f));
+            UiVec(0f, 7f));
 
 
         ImGui.TextColored(
@@ -721,9 +784,7 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
 
         //
@@ -733,10 +794,12 @@ internal sealed partial class MainWindow
         if (isPlaying)
         {
             if (DrawSnesPrimaryAction(
-                    FontAwesomeIcon.Stop,
-                    "Exit Game & Despawn TV",
-                    true))
+          FontAwesomeIcon.Stop,
+          "Exit Game & Despawn TV",
+          true))
             {
+                StopGameWatchPartyBroadcast();
+
                 screenController.Engine
                     .StopVideo();
 
@@ -774,14 +837,21 @@ internal sealed partial class MainWindow
                         false))
                 {
                     snesLaunchError =
-                        null;
+    null;
 
                     gameBoyLaunchError =
                         null;
 
+                    //
+                    // Ensure a previous game's armed HLS session cannot carry over
+                    // into this newly selected game.
+                    //
+
+                    StopGameWatchPartyBroadcast();
+
 
                     var started =
-                        isSnes
+                                            isSnes
                             ? screenController.Engine
                                 .PlaySnes(
                                     snesSelectedRomPath)
@@ -813,9 +883,7 @@ internal sealed partial class MainWindow
             if (localVideoActive)
             {
                 ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        5f));
+                    UiVec(0f, 5f));
 
                 ImGui.TextColored(
                     MutedText,
@@ -824,9 +892,7 @@ internal sealed partial class MainWindow
             else if (viewingWatchParty)
             {
                 ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        5f));
+                    UiVec(0f, 5f));
 
                 ImGui.TextColored(
                     Gold,
@@ -845,9 +911,7 @@ internal sealed partial class MainWindow
                 launchError))
         {
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    8f));
+                UiVec(0f, 8f));
 
             ImGui.TextColored(
                 Danger,
@@ -856,16 +920,12 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                7f));
+            UiVec(0f, 7f));
 
         ImGui.Separator();
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                6f));
+            UiVec(0f, 6f));
 
 
         //
@@ -876,9 +936,7 @@ internal sealed partial class MainWindow
             "Your ROM library");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                4f));
+            UiVec(0f, 4f));
 
 
         if (isSnes)
@@ -886,18 +944,14 @@ internal sealed partial class MainWindow
             if (DrawSnesSecondaryButton(
                     FontAwesomeIcon.ExternalLinkAlt,
                     "SNES ROM Information",
-                    new Vector2(
-                        238f,
-                        35f)))
+                    UiVec(238f, 35f)))
             {
                 snesRomSourcesPopupRequested =
                     true;
             }
 
             ImGui.Dummy(
-                new Vector2(
-                    0f,
-                    7f));
+                UiVec(0f, 7f));
         }
 
 
@@ -942,9 +996,7 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                12f));
+            UiVec(0f, 12f));
 
 
         //
@@ -968,9 +1020,7 @@ internal sealed partial class MainWindow
 
         drawList.AddCircleFilled(
             start +
-            new Vector2(
-                6f,
-                8f),
+            UiVec(6f, 8f),
             5f,
             ImGui.GetColorU32(
                 statusColor),
@@ -987,9 +1037,7 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                5f));
+            UiVec(0f, 5f));
 
 
         ImGui.TextColored(
@@ -1000,9 +1048,7 @@ internal sealed partial class MainWindow
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                12f));
+            UiVec(0f, 12f));
 
 
         DrawSnesStatusLine(
@@ -1069,6 +1115,11 @@ internal sealed partial class MainWindow
                 : "Game Boy";
 
         var isBroadcasting =
+            gameBroadcastArmed &&
+            gameBroadcastForSnes ==
+            isSnes;
+
+        var isUploading =
             isSnes
                 ? engine.IsSnesBroadcasting
                 : engine.IsGameBoyBroadcasting;
@@ -1076,23 +1127,21 @@ internal sealed partial class MainWindow
 
         DrawSnesPanel(
             "##gameBroadcastPanel",
-            new Vector2(
-                -1f,
-                180f),
+            UiVec(-1f, 180f),
             () =>
             {
                 DrawSnesSectionHeader(
-                    FontAwesomeIcon.BroadcastTower,
-                    "Game Broadcast",
-                    isBroadcasting
-                        ? $"Your {systemName} gameplay is being sent to the Alpha Channel live relay."
-                        : $"Broadcast your {systemName} gameplay through the Alpha Channel live relay.");
+                   FontAwesomeIcon.BroadcastTower,
+                   "Game Broadcast",
+                   isBroadcasting
+                       ? isUploading
+                           ? $"Your {systemName} gameplay is being sent to the Alpha Channel live relay."
+                           : $"Your {systemName} broadcast is ready and waiting for a viewer."
+                       : "Broadcast your gameplay live for others to watch!");
 
 
                 ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        16f));
+                    UiVec(0f, 16f));
 
 
                 //
@@ -1118,34 +1167,27 @@ internal sealed partial class MainWindow
                         8f);
 
                     ImGui.TextColored(
-                        Good,
-                        "LIVE");
+                                       Good,
+                                       isUploading
+                                           ? "LIVE"
+                                           : "BROADCASTING");
 
 
                     ImGui.Dummy(
-                        new Vector2(
-                            0f,
-                            12f));
+                        UiVec(0f, 12f));
 
 
                     if (DrawSnesSecondaryButton(
-                            FontAwesomeIcon.Stop,
-                            "Stop Broadcast",
-                            new Vector2(
-                                170f,
-                                36f)))
+                      FontAwesomeIcon.Stop,
+                      "Stop Broadcast",
+                      UiVec(170f, 36f)))
                     {
-                        if (isSnes)
-                        {
-                            engine.StopSnesBroadcast();
-                        }
-                        else
-                        {
-                            engine.StopGameBoyBroadcast();
-                        }
+                        StopGameWatchPartyBroadcast();
                     }
 
 
+                    // Testing only: retain the viewer URL control for diagnostics.
+                    /*
                     if (CurrentSession is { } liveSession)
                     {
                         ImGui.SameLine(
@@ -1156,15 +1198,14 @@ internal sealed partial class MainWindow
                         if (DrawSnesSecondaryButton(
                                 FontAwesomeIcon.Copy,
                                 "Copy Viewer URL",
-                                new Vector2(
-                                    180f,
-                                    36f)))
+                                UiVec(180f, 36f)))
                         {
                             ImGui.SetClipboardText(
                                 BuildMyHlsUrl(
                                     liveSession));
                         }
                     }
+                    */
 
 
                     return;
@@ -1173,97 +1214,111 @@ internal sealed partial class MainWindow
 
                 //
                 // =====================================================
-                // Game must already be running
+                // Broadcast availability
                 // =====================================================
                 //
-
-                if (!isPlaying)
-                {
-                    ImGui.TextColored(
-                        MutedText,
-                        $"Start a {systemName} game before broadcasting.");
-
-                    return;
-                }
-
-
-                //
-                // =====================================================
-                // User must be signed in
-                // =====================================================
-                //
-
-                if (CurrentSession is not { } session)
-                {
-                    ImGui.TextColored(
-                        MutedText,
-                        "Sign in to Alpha Channel before broadcasting.");
-
-                    return;
-                }
-
-
-                //
-                // =====================================================
-                // Existing Alpha Channel stream key
-                // =====================================================
-                //
-
-                var streamKey =
-                    Plugin.Cfg.StreamKeys
-                        .GetValueOrDefault(
-                            session.AccountId);
-
-
-                if (string.IsNullOrWhiteSpace(
-                        streamKey))
-                {
-                    ImGui.TextColored(
-                        Gold,
-                        "No stream key is available on this installation.");
-
-                    ImGui.Dummy(
-                        new Vector2(
-                            0f,
-                            5f));
-
-                    ImGui.TextColored(
-                        MutedText,
-                        "Generate one from Player > Go Live first.");
-
-                    return;
-                }
-
-
-                //
-                // =====================================================
-                // Start Watch Party + broadcast
-                // =====================================================
-                //
-
-                if (DrawSnesPrimaryAction(
-            FontAwesomeIcon.BroadcastTower,
-            "Start Watch Party and Broadcast",
-            false))
-                {
-                    StartGameWatchPartyBroadcast();
-                }
-
-
-                ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        7f));
-
 
                 ImGui.TextColored(
                     MutedText,
-                    $"Broadcasts your {systemName} video and game audio to Alpha Channel.");
+                    "To begin broadcasting you'll need to be hosting a Watch Party and the game running.");
+
+                ImGui.Dummy(
+                    UiVec(0f, 10f));
+
+                var hostingWatchParty =
+                    stream.Mode ==
+                    StreamMode.Hosting;
+
+                var signedIn =
+                    CurrentSession is not null;
+
+                var streamKey =
+                    CurrentSession is { } session
+                        ? Plugin.Cfg.StreamKeys
+                            .GetValueOrDefault(
+                                session.AccountId)
+                        : null;
+
+                var hasStreamKey =
+                    !string.IsNullOrWhiteSpace(
+                        streamKey);
+
+                var canBeginBroadcast =
+          hostingWatchParty &&
+          isPlaying &&
+          signedIn &&
+          hasStreamKey;
+
+                if (signedIn &&
+                    !hasStreamKey)
+                {
+                    ImGui.TextColored(
+                        Gold,
+                        "Generate a secret stream key in Settings > Account before live streaming is available.");
+
+                    ImGui.Dummy(
+                        UiVec(0f, 8f));
+                }
+
+                using (ImRaii.Disabled(
+                           !canBeginBroadcast))
+                {
+                    if (DrawSnesPrimaryAction(
+                            FontAwesomeIcon.BroadcastTower,
+                            "Start Broadcast",
+                            !canBeginBroadcast))
+                    {
+                        StartGameWatchPartyBroadcast();
+                    }
+                }
+
+                if (!hostingWatchParty &&
+                    ImGui.IsItemHovered(
+                        ImGuiHoveredFlags.AllowWhenDisabled))
+                {
+                    ImGui.SetTooltip(
+                        "Create or join as host of a Watch Party before broadcasting.");
+                }
+                else if (!isPlaying &&
+                         ImGui.IsItemHovered(
+                             ImGuiHoveredFlags.AllowWhenDisabled))
+                {
+                    ImGui.SetTooltip(
+                        $"Start a {systemName} game before broadcasting.");
+                }
+                else if (!hasStreamKey &&
+            ImGui.IsItemHovered(
+                ImGuiHoveredFlags.AllowWhenDisabled))
+                {
+                    ImGui.SetTooltip(
+                        "Generate a secret stream key in Settings > Account first.");
+                }
+
             });
     }
 
     private bool StartGameWatchPartyBroadcast()
     {
+        if (!HasConfirmedPatreonAccess())
+        {
+            gamePatreonAccessMessage =
+                "A Patreon membership is required to broadcast gameplay.";
+
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] A Patreon membership is required to broadcast gameplay.");
+
+            return false;
+        }
+
+        if (stream.Mode !=
+                   StreamMode.Hosting)
+        {
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] Host a Watch Party before broadcasting gameplay.");
+
+            return false;
+        }
+
         var engine =
             screenController.Engine;
 
@@ -1273,21 +1328,27 @@ internal sealed partial class MainWindow
         var isGameBoy =
             engine.IsPlayingGameBoy;
 
+        var isNes =
+            engine.IsPlayingNes;
 
-        //
-        // A game must already be running.
-        //
+        var isGameBoyAdvance =
+            engine.IsPlayingGameBoyAdvance;
+
+        var isMasterSystem =
+            engine.IsPlayingMasterSystem;
+
+        var isGameGear =
+            engine.IsPlayingGameGear;
 
         if (!isSnes &&
-            !isGameBoy)
+            !isGameBoy &&
+            !isNes &&
+            !isGameBoyAdvance &&
+            !isMasterSystem &&
+            !isGameGear)
         {
             return false;
         }
-
-
-        //
-        // A signed-in Alpha Channel account is required.
-        //
 
         if (CurrentSession is not { } session)
         {
@@ -1297,62 +1358,45 @@ internal sealed partial class MainWindow
             return false;
         }
 
-
-        //
-        // Reuse the existing Alpha Channel RTMP stream key.
-        //
-
         var streamKey =
-            Plugin.Cfg.StreamKeys
-                .GetValueOrDefault(
-                    session.AccountId);
-
+     Plugin.Cfg.StreamKeys
+         .GetValueOrDefault(
+             session.AccountId);
 
         if (string.IsNullOrWhiteSpace(
                 streamKey))
         {
             Plugin.ChatGui.Print(
-                "[AlphaChannel] No stream key is available. Generate one from Player > Go Live first.");
+                "[AlphaChannel] No stream key is available. Generate one from Settings > Account first.");
 
             return false;
         }
 
-
         //
-        // Never expose this URL to Watch Party viewers.
-        // It contains the private publishing secret.
+        // Stop any previous encoder instance before arming a new source.
         //
+        StopGameBroadcastEncoder();
 
-        var publishUrl =
+        gameBroadcastForSnes =
+            isSnes;
+
+        gameBroadcastSystem = isSnes ? GameSystem.Snes : isNes ? GameSystem.Nes : isGameBoyAdvance ? GameSystem.GameBoyAdvance : isMasterSystem ? GameSystem.MasterSystem : isGameGear ? GameSystem.GameGear : GameSystem.GameBoy;
+
+        gameBroadcastPublishUrl =
             $"{BuildRtmpServer()}/{streamKey}";
 
+        gameBroadcastHlsUrl =
+            $"{BuildMyHlsUrl(session)}" +
+            $"?broadcast={Guid.NewGuid():N}";
 
-        var started =
-            isSnes
-                ? engine.StartSnesBroadcast(
-                    publishUrl)
-                : engine.StartGameBoyBroadcast(
-                    publishUrl);
+        gameBroadcastStartFailed =
+            false;
 
+        gameBroadcastViewerReadyUtc =
+            DateTime.MaxValue;
 
-        if (!started)
-        {
-            if (isSnes)
-            {
-                snesLaunchError =
-                    engine.LastError ??
-                    "SNES broadcast failed to start.";
-            }
-            else
-            {
-                gameBoyLaunchError =
-                    engine.LastError ??
-                    "Game Boy broadcast failed to start.";
-            }
-
-            return false;
-        }
-
+        gameBroadcastArmed =
+            true;
 
         if (isSnes)
         {
@@ -1361,29 +1405,201 @@ internal sealed partial class MainWindow
         }
         else
         {
-            gameBoyLaunchError =
-                null;
+            if (isNes) nesLaunchError = null;
+            else if (isGameBoyAdvance) gameBoyAdvanceLaunchError = null;
+            else if (isMasterSystem) masterSystemLaunchError = null;
+            else if (isGameGear) gameGearLaunchError = null;
+            else gameBoyLaunchError = null;
         }
 
-
         //
-        // Share only the PUBLIC HLS viewer URL.
+        // Publish the game status immediately, but do not advertise the HLS
+        // URL until FFmpeg has started and MediaMTX has had time to create its
+        // first playlist segment.
         //
-        // The host keeps rendering the emulator locally.
-        // Watch Party viewers receive this URL and play it
-        // through the existing remote-media path.
-        //
-
-        var hlsUrl =
-            BuildMyHlsUrl(
-                session);
-
         _ = PublishGameplayWatchPartyAsync(
-            hlsUrl);
+            null);
+
+        Plugin.ChatGui.Print(
+            "[AlphaChannel] Gameplay broadcast enabled. Uploading will begin when a viewer joins.");
 
         return true;
     }
 
+    internal void UpdateGameBroadcastDemand()
+    {
+        UpdateBrowserBroadcastDemand();
+        if (!gameBroadcastArmed)
+        {
+            return;
+        }
+
+        var engine =
+            screenController.Engine;
+
+        var sourceStillRunning = gameBroadcastSystem switch
+        {
+            GameSystem.Snes => engine.IsPlayingSnes,
+            GameSystem.Nes => engine.IsPlayingNes,
+            GameSystem.GameBoyAdvance => engine.IsPlayingGameBoyAdvance,
+            GameSystem.MasterSystem => engine.IsPlayingMasterSystem,
+            GameSystem.GameGear => engine.IsPlayingGameGear,
+            _ => engine.IsPlayingGameBoy
+        };
+
+        //
+        // Disarm if the room ended, hosting transferred away, or the
+        // associated emulator stopped.
+        //
+        if (stream.Mode != StreamMode.Hosting ||
+     !sourceStillRunning ||
+     string.IsNullOrWhiteSpace(
+         gameBroadcastPublishUrl))
+        {
+            StopGameWatchPartyBroadcast();
+            return;
+        }
+
+        //
+        // StreamClient.Roster contains viewers, not the local host.
+        //
+        var hasViewer =
+            stream.Roster.Length > 0;
+
+        var encoderRunning = gameBroadcastSystem switch
+        {
+            GameSystem.Snes => engine.IsSnesBroadcasting,
+            GameSystem.Nes => engine.IsNesBroadcasting,
+            GameSystem.GameBoyAdvance => engine.IsGameBoyAdvanceBroadcasting,
+            GameSystem.MasterSystem => engine.IsMasterSystemBroadcasting,
+            GameSystem.GameGear => engine.IsGameGearBroadcasting,
+            _ => engine.IsGameBoyBroadcasting
+        };
+
+        if (!hasViewer)
+        {
+            if (encoderRunning)
+            {
+                StopGameBroadcastEncoder();
+            }
+
+            gameBroadcastViewerReadyUtc =
+                DateTime.MaxValue;
+
+            //
+            // Permit one new start attempt when another viewer arrives.
+            //
+            gameBroadcastStartFailed =
+                false;
+
+            return;
+        }
+
+        if (encoderRunning ||
+            gameBroadcastStartFailed)
+        {
+            return;
+        }
+
+        var started = gameBroadcastSystem switch
+        {
+            GameSystem.Snes => engine.StartSnesBroadcast(gameBroadcastPublishUrl),
+            GameSystem.Nes => engine.StartNesBroadcast(gameBroadcastPublishUrl),
+            GameSystem.GameBoyAdvance => engine.StartGameBoyAdvanceBroadcast(gameBroadcastPublishUrl),
+            GameSystem.MasterSystem => engine.StartMasterSystemBroadcast(gameBroadcastPublishUrl),
+            GameSystem.GameGear => engine.StartGameGearBroadcast(gameBroadcastPublishUrl),
+            _ => engine.StartGameBoyBroadcast(gameBroadcastPublishUrl)
+        };
+
+        if (started)
+        {
+            gameBroadcastViewerReadyUtc =
+                DateTime.UtcNow +
+                GameBroadcastViewerWarmup;
+
+            if (gameBroadcastSystem == GameSystem.Snes) snesLaunchError = null;
+            else if (gameBroadcastSystem == GameSystem.Nes) nesLaunchError = null;
+            else if (gameBroadcastSystem == GameSystem.GameBoyAdvance) gameBoyAdvanceLaunchError = null;
+            else if (gameBroadcastSystem == GameSystem.MasterSystem) masterSystemLaunchError = null;
+            else if (gameBroadcastSystem == GameSystem.GameGear) gameGearLaunchError = null;
+            else gameBoyLaunchError = null;
+
+            Plugin.ChatGui.Print(
+                "[AlphaChannel] A viewer joined. Gameplay upload started.");
+
+            return;
+        }
+
+        gameBroadcastStartFailed =
+            true;
+
+        var error =
+            engine.LastError ??
+            "Gameplay broadcast failed to start.";
+
+        if (gameBroadcastSystem == GameSystem.Snes) snesLaunchError = error;
+        else if (gameBroadcastSystem == GameSystem.Nes) nesLaunchError = error;
+        else if (gameBroadcastSystem == GameSystem.GameBoyAdvance) gameBoyAdvanceLaunchError = error;
+        else if (gameBroadcastSystem == GameSystem.MasterSystem) masterSystemLaunchError = error;
+        else if (gameBroadcastSystem == GameSystem.GameGear) gameGearLaunchError = error;
+        else gameBoyLaunchError = error;
+    }
+
+    private void StopGameBroadcastEncoder()
+    {
+        var engine =
+            screenController.Engine;
+
+        if (engine.IsSnesBroadcasting)
+        {
+            engine.StopSnesBroadcast();
+        }
+
+        if (engine.IsGameBoyBroadcasting)
+        {
+            engine.StopGameBoyBroadcast();
+        }
+
+        if (engine.IsNesBroadcasting)
+        {
+            engine.StopNesBroadcast();
+        }
+
+        if (engine.IsGameBoyAdvanceBroadcasting)
+        {
+            engine.StopGameBoyAdvanceBroadcast();
+        }
+
+        if (engine.IsMasterSystemBroadcasting)
+        {
+            engine.StopMasterSystemBroadcast();
+        }
+
+        if (engine.IsGameGearBroadcasting)
+        {
+            engine.StopGameGearBroadcast();
+        }
+    }
+
+    private void StopGameWatchPartyBroadcast()
+    {
+        StopGameBroadcastEncoder();
+
+        gameBroadcastArmed =
+            false;
+
+        gameBroadcastStartFailed =
+            false;
+
+        gameBroadcastPublishUrl =
+            null;
+
+        gameBroadcastHlsUrl =
+            null;
+
+        gameBroadcastViewerReadyUtc =
+            DateTime.MaxValue;
+    }
     private string GetSelectedGameName()
     {
         var path =
@@ -1401,7 +1617,7 @@ internal sealed partial class MainWindow
                 : "Game Boy Game";
         }
 
-        return Path.GetFileNameWithoutExtension(
+        return LibraryGameName(
             path);
     }
 
@@ -1441,12 +1657,12 @@ internal sealed partial class MainWindow
     private static void DrawSnesStatusSeparator()
     {
         ImGui.Dummy(
-            new Vector2(0, 6));
+            UiVec(0, 6));
 
         ImGui.Separator();
 
         ImGui.Dummy(
-            new Vector2(0, 6));
+            UiVec(0, 6));
     }
 
 
@@ -1473,9 +1689,7 @@ internal sealed partial class MainWindow
 
                 DrawSnesPanel(
             "##gamesControlsAudio",
-            new Vector2(
-                -1f,
-                515f),
+            UiVec(-1f, 515f),
                                             () =>
             {
                 DrawSnesSectionHeader(
@@ -1484,9 +1698,7 @@ internal sealed partial class MainWindow
                     $"Choose where input goes and adjust your {systemName} session.");
 
                 ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        18f));
+                    UiVec(0f, 18f));
 
 
                 var available =
@@ -1511,16 +1723,14 @@ internal sealed partial class MainWindow
                     "##gamesInputCard",
                     new Vector2(
                         half,
-                        390f),
+                        Ui(390f)),
                                                                                     () =>
                     {
                         ImGui.TextUnformatted(
                             "Input Control");
 
                         ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                4f));
+                            UiVec(0f, 4f));
 
                         ImGui.TextColored(
                             MutedText,
@@ -1532,9 +1742,7 @@ internal sealed partial class MainWindow
 
 
                         ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                14f));
+                            UiVec(0f, 14f));
 
 
                         var controlWidth =
@@ -1559,7 +1767,7 @@ internal sealed partial class MainWindow
                                     isPlaying,
                                     new Vector2(
                                         controlWidth,
-                                        36f)))
+                                        Ui(36f))))
                             {
                                 if (isSnes)
                                 {
@@ -1592,7 +1800,7 @@ internal sealed partial class MainWindow
                                 !isPlaying,
                                 new Vector2(
                                     controlWidth,
-                                    36f)))
+                                    Ui(36f))))
                         {
                             if (isSnes)
                             {
@@ -1610,9 +1818,7 @@ internal sealed partial class MainWindow
 
 
                         ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                11f));
+                            UiVec(0f, 11f));
 
 
                         ImGui.TextColored(
@@ -1627,9 +1833,7 @@ internal sealed partial class MainWindow
 
 
                         ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                13f));
+                            UiVec(0f, 13f));
 
 
                         //
@@ -1681,16 +1885,14 @@ internal sealed partial class MainWindow
 
 
                         ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                5f));
+                            UiVec(0f, 5f));
 
 
                         ImGui.PushTextWrapPos(
                             ImGui.GetCursorPosX() +
                             ImGui.GetContentRegionAvail().X);
 
-                        ImGui.SetWindowFontScale(
+                        SetUiFontScale(
                             0.76f);
 
                         ImGui.TextColored(
@@ -1698,7 +1900,7 @@ internal sealed partial class MainWindow
                             "Warning: When enabled, all keyboard input is blocked from FFXIV while game controls are active. " +
                             "When disabled, only keys assigned to the game are blocked.");
 
-                        ImGui.SetWindowFontScale(
+                        SetUiFontScale(
                             1f);
 
                         ImGui.PopTextWrapPos();
@@ -1707,9 +1909,7 @@ internal sealed partial class MainWindow
                         if (blockAllFfxivInput)
                         {
                             ImGui.Dummy(
-                                new Vector2(
-                                    0f,
-                                    7f));
+                                UiVec(0f, 7f));
 
                             ImGui.PushTextWrapPos(
                                 ImGui.GetCursorPosX() +
@@ -1739,34 +1939,28 @@ internal sealed partial class MainWindow
                     "##gamesAudioCard",
                     new Vector2(
                         half,
-                        390f),
+                        Ui(390f)),
                                                                                                   () =>
                     {
                         ImGui.TextUnformatted(
                             "Audio");
 
                         ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                7f));
+                            UiVec(0f, 7f));
 
 
                         ImGui.TextUnformatted(
                             "Adjust volume and FFXIV audio");
 
                         ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                3f));
+                            UiVec(0f, 3f));
 
                         ImGui.TextColored(
                             MutedText,
                             "FFXIV audio will return to previous levels when unmuted.");
 
                         ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                12f));
+                            UiVec(0f, 12f));
 
 
                         //
@@ -1776,11 +1970,9 @@ internal sealed partial class MainWindow
                         var audioRowWidth =
                             ImGui.GetContentRegionAvail().X;
 
-                        const float muteButtonWidth =
-                            135f;
+                        var muteButtonWidth = Ui(135f);
 
-                        const float rowGap =
-                            18f;
+                        var rowGap = Ui(18f);
 
                         var volume =
                             Plugin.Cfg.Volume;
@@ -1821,7 +2013,7 @@ internal sealed partial class MainWindow
                                     : "Mute FFXIV",
                                 new Vector2(
                                     muteButtonWidth,
-                                    32f)))
+                                    Ui(32f))))
                         {
                             SetFfxivSoundMuted(
                                 !ffxivMuted);
@@ -1916,9 +2108,7 @@ internal sealed partial class MainWindow
                         //
 
                         ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                12f));
+                            UiVec(0f, 12f));
 
 
                         var tvMuted =
@@ -1934,7 +2124,7 @@ internal sealed partial class MainWindow
                                     : "Mute TV",
                                 new Vector2(
                                     muteButtonWidth,
-                                    32f)))
+                                    Ui(32f))))
                         {
                             tvMuted =
                                 !tvMuted;
@@ -1952,16 +2142,12 @@ internal sealed partial class MainWindow
 
 
                         ImGui.Dummy(
-       new Vector2(
-           0f,
-           12f));
+       UiVec(0f, 12f));
 
                         ImGui.Separator();
 
                         ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                8f));
+                            UiVec(0f, 8f));
 
 
                         //
@@ -1974,9 +2160,7 @@ internal sealed partial class MainWindow
                             "Display");
 
                         ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                10f));
+                            UiVec(0f, 10f));
 
 
                         var crtEnabled =
@@ -2070,8 +2254,8 @@ internal sealed partial class MainWindow
 new Vector2(
     -1f,
     isSnes
-        ? 525f
-        : 440f),
+        ? Ui(525f)
+        : Ui(440f)),
             () =>
             {
                 //
@@ -2086,9 +2270,7 @@ new Vector2(
                     $"{systemName} Controls");
 
                 ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        3f));
+                    UiVec(0f, 3f));
 
                 ImGui.TextColored(
                     MutedText,
@@ -2103,8 +2285,7 @@ new Vector2(
                 // Configure button
                 //
 
-                const float buttonWidth =
-                    165f;
+                var buttonWidth = Ui(165f);
 
                 var right =
                     ImGui.GetWindowContentRegionMax().X;
@@ -2117,14 +2298,14 @@ new Vector2(
                         right -
                         buttonWidth,
                         originalY -
-                        43f));
+                        Ui(43f)));
 
                 if (DrawSnesSecondaryButton(
                         FontAwesomeIcon.Cog,
                         "Configure Keyboard",
                         new Vector2(
                             buttonWidth,
-                            32f)))
+                            Ui(32f))))
                 {
                     snesControlsPopupRequested =
                         true;
@@ -2135,9 +2316,7 @@ new Vector2(
                     originalY);
 
                 ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        12f));
+                    UiVec(0f, 12f));
 
 
                 //
@@ -2149,9 +2328,7 @@ new Vector2(
                 using (
                     ImRaii.PushStyle(
                         ImGuiStyleVar.WindowPadding,
-                        new Vector2(
-                            12f,
-                            10f)))
+                        UiVec(12f, 10f)))
                 using (
                     ImRaii.PushStyle(
                         ImGuiStyleVar.ChildRounding,
@@ -2204,27 +2381,23 @@ new Vector2(
                             "Keyboard & Controller Supported");
 
                         ImGui.Dummy(
-                            new Vector2(
-                                0f,
-                                3f));
+                            UiVec(0f, 3f));
 
-                        ImGui.SetWindowFontScale(
+                        SetUiFontScale(
                             0.76f);
 
                         ImGui.TextColored(
                             MutedText,
                             "Use the keyboard bindings below, or play with a connected game controller.");
 
-                        ImGui.SetWindowFontScale(
+                        SetUiFontScale(
                             1f);
                     }
                 }
 
 
                 ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        10f));
+                    UiVec(0f, 10f));
 
 
                 //
@@ -2238,9 +2411,7 @@ new Vector2(
                     using (
                         ImRaii.PushStyle(
                             ImGuiStyleVar.WindowPadding,
-                            new Vector2(
-                                10f,
-                                8f)))
+                            UiVec(10f, 8f)))
                     using (
                         ImRaii.PushStyle(
                             ImGuiStyleVar.ChildRounding,
@@ -2292,7 +2463,7 @@ new Vector2(
                                 Gold,
                                 "Duplicate keybindings detected");
 
-                            ImGui.SetWindowFontScale(
+                            SetUiFontScale(
                                 0.72f);
 
                             ImGui.TextColored(
@@ -2301,15 +2472,13 @@ new Vector2(
                                     ? "Two or more SNES controls are using the same keyboard key."
                                     : "Two or more Game Boy controls are using the same keyboard key.");
 
-                            ImGui.SetWindowFontScale(
+                            SetUiFontScale(
                                 1f);
                         }
                     }
 
                     ImGui.Dummy(
-                        new Vector2(
-                            0f,
-                            8f));
+                        UiVec(0f, 8f));
                 }
 
 
@@ -2573,11 +2742,9 @@ new Vector2(
         // Action label
         //
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
     origin +
-    new Vector2(
-        11,
-        8),
+    UiVec(11, 8),
             ImGui.GetColorU32(
                 Vector4.One),
             action);
@@ -2599,13 +2766,13 @@ new Vector2(
             new Vector2(
                 max.X -
                 badgeWidth -
-                7f,
-                min.Y + 5f);
+                Ui(7f),
+                min.Y + Ui(5f));
 
         var badgeMax =
             new Vector2(
-                max.X - 7f,
-                max.Y - 5f);
+                max.X - Ui(7f),
+                max.Y - Ui(5f));
 
 
         drawList.AddRectFilled(
@@ -2630,13 +2797,13 @@ new Vector2(
                     0.52f)),
             6f);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 badgeMin.X +
                 (badgeWidth -
                  keyTextWidth) /
                 2f,
-                badgeMin.Y + 4f),
+                badgeMin.Y + Ui(4f)),
                     ImGui.GetColorU32(
                 Accent),
             key);
@@ -2648,9 +2815,7 @@ new Vector2(
                 height));
 
         ImGui.Dummy(
-            new Vector2(
-                0,
-                4));
+            UiVec(0, 4));
     }
 
 
@@ -2721,7 +2886,7 @@ new Vector2(
         var iconCenter =
             pos +
             new Vector2(
-                31,
+                Ui(31),
                 height / 2f);
 
         drawList.AddCircleFilled(
@@ -2747,7 +2912,7 @@ new Vector2(
                 ImGui.CalcTextSize(
                     icon);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 iconCenter -
                 iconSize / 2f,
                 ImGui.GetColorU32(
@@ -2763,10 +2928,10 @@ new Vector2(
         var x =
             pos.X + 61f;
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 x,
-                pos.Y + 18f),
+                pos.Y + Ui(18f)),
             ImGui.GetColorU32(
                 Accent),
             "Save Data");
@@ -2777,18 +2942,18 @@ new Vector2(
          ? "SNES"
          : "Game Boy";
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 x,
-                pos.Y + 43f),
+                pos.Y + Ui(43f)),
             ImGui.GetColorU32(
                 MutedText),
             $"Game saves are stored alongside your {saveSystemName} game files.");
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 x,
-                pos.Y + 64f),
+                pos.Y + Ui(64f)),
             ImGui.GetColorU32(
                 MutedText),
             "If you move a ROM later, remember that its save data may need to move with it.");
@@ -2810,9 +2975,7 @@ new Vector2(
         }
 
         ImGui.SetNextWindowSize(
-            new Vector2(
-                680f,
-                470f),
+            UiVec(680f, 470f),
             ImGuiCond.Appearing);
 
         var popupOpen =
@@ -2846,19 +3009,17 @@ new Vector2(
             0f,
             8f);
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1.15f);
 
         ImGui.TextUnformatted(
             "Finding SNES Games Online");
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 8f));
 
 
         //
@@ -2866,59 +3027,32 @@ new Vector2(
         //
 
         ImGui.TextWrapped(
-            "SNES ROM files can be found on a number of third-party websites. " +
-            "The sites below are provided as examples only and are not affiliated " +
-            "with or endorsed by Alpha Channel.");
+            "It is possible to obtain SNES ROMs from many websites, which can be found using your preferred search engine.");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                10f));
+            UiVec(0f, 10f));
 
         ImGui.TextColored(
-            MutedText,
-            "Suggested third-party sources:");
+            Accent,
+            "SNES file type");
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                8f));
+            UiVec(0f, 8f));
 
 
-        //
-        // Source buttons
-        //
+        ImGui.TextWrapped(
+            "An SNES ROM should normally use the .sfc or .smc file extension. " +
+            "Checking the extension can help you identify whether a downloaded file is likely to be for the correct console.");
 
-        DrawSnesRomSourceButton(
-            "RomsGames",
-            "romsgames.net",
-            "https://www.romsgames.net/roms/super-nintendo/");
+        ImGui.Dummy(UiVec(0f, 8f));
 
-        ImGui.Dummy(
-            new Vector2(
-                0f,
-                7f));
-
-        DrawSnesRomSourceButton(
-            "RomsFun",
-            "romsfun.com",
-            "https://romsfun.com/roms/super-nintendo/");
-
-        ImGui.Dummy(
-            new Vector2(
-                0f,
-                7f));
-
-        DrawSnesRomSourceButton(
-            "Emu-Land",
-            "emu-land.net",
-            "https://www.emu-land.net/en/consoles/snes/roms");
+        ImGui.TextWrapped(
+            "ROM downloads may be supplied inside a .zip file. If so, extract the ZIP file first, " +
+            "then import the ROM file contained inside it.");
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                14f));
+            UiVec(0f, 14f));
 
 
         //
@@ -2928,9 +3062,7 @@ new Vector2(
         using (
             ImRaii.PushStyle(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(
-                    12f,
-                    10f)))
+                UiVec(12f, 10f)))
         using (
             ImRaii.PushStyle(
                 ImGuiStyleVar.ChildRounding,
@@ -2983,30 +3115,26 @@ new Vector2(
                     "Third-party download notice");
 
                 ImGui.Dummy(
-                    new Vector2(
-                        0f,
-                        4f));
+                    UiVec(0f, 4f));
 
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     0.76f);
 
                 ImGui.TextWrapped(
-                    "Other sources are also available. Alpha Channel does not host " +
+                    "Alpha Channel does not host " +
                     "these files and is not responsible for the content, safety, or " +
                     "legality of downloads from third-party websites. Only download " +
                     "ROMs you are legally permitted to use and exercise normal internet " +
                     "safety when downloading files from unfamiliar sources.");
 
-                ImGui.SetWindowFontScale(
+                SetUiFontScale(
                     1f);
             }
         }
 
 
         ImGui.Dummy(
-            new Vector2(
-                0f,
-                12f));
+            UiVec(0f, 12f));
 
 
         //
@@ -3042,7 +3170,7 @@ new Vector2(
                     "Close",
                     new Vector2(
                         closeWidth,
-                        36f)))
+                        Ui(36f))))
             {
                 ImGui.CloseCurrentPopup();
             }
@@ -3117,11 +3245,9 @@ new Vector2(
             ImRaii.PushFont(
                 UiBuilder.IconFont))
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 origin +
-                new Vector2(
-                    12f,
-                    15f),
+                UiVec(12f, 15f),
                 ImGui.GetColorU32(
                     Accent),
                 FontAwesomeIcon.ExternalLinkAlt
@@ -3133,20 +3259,16 @@ new Vector2(
         // Site name + domain
         //
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             origin +
-            new Vector2(
-                39f,
-                7f),
+            UiVec(39f, 7f),
             ImGui.GetColorU32(
                 Vector4.One),
             name);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             origin +
-            new Vector2(
-                39f,
-                25f),
+            UiVec(39f, 25f),
             ImGui.GetColorU32(
                 MutedText),
             domain);
@@ -3168,12 +3290,12 @@ new Vector2(
                 ImGui.CalcTextSize(
                     chevron);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
                     origin.X +
                     width -
                     chevronSize.X -
-                    14f,
+                    Ui(14f),
                     origin.Y +
                     (height -
                      chevronSize.Y) /
@@ -3239,8 +3361,7 @@ new Vector2(
         // =============================================================
         //
 
-        const float popupWidth =
-            620f;
+        var popupWidth = Ui(620f);
 
         var popupHeight =
             isSnes
@@ -3387,17 +3508,17 @@ new Vector2(
             popupPos +
             new Vector2(
                 padding,
-                17f));
+                Ui(17f)));
 
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1.15f);
 
         ImGui.TextColored(
             Vector4.One,
             title);
 
-        ImGui.SetWindowFontScale(
+        SetUiFontScale(
             1f);
 
 
@@ -3405,7 +3526,7 @@ new Vector2(
             popupPos +
             new Vector2(
                 padding,
-                52f));
+                Ui(52f)));
 
 
         ImGui.TextColored(
@@ -3419,16 +3540,16 @@ new Vector2(
                 popupPos +
                 new Vector2(
                     padding,
-                    77f));
+                    Ui(77f)));
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 0.82f);
 
             ImGui.TextColored(
                 MutedText,
                 "Game Boy currently shares these bindings with the matching SNES controls.");
 
-            ImGui.SetWindowFontScale(
+            SetUiFontScale(
                 1f);
         }
 
@@ -3662,8 +3783,7 @@ new Vector2(
         // =============================================================
         //
 
-        const float buttonGap =
-            10f;
+        var buttonGap = Ui(10f);
 
         var buttonWidth =
             (contentWidth -
@@ -3676,7 +3796,7 @@ new Vector2(
                 popupPos.X +
                 padding,
                 popupMax.Y -
-                50f));
+                Ui(50f)));
 
 
         if (DrawSnesSecondaryButton(
@@ -3684,7 +3804,7 @@ new Vector2(
                 "Restore Defaults",
                 new Vector2(
                     buttonWidth,
-                    36f)))
+                    Ui(36f))))
         {
             ResetSnesKeyboardControls();
 
@@ -3716,7 +3836,7 @@ new Vector2(
                     "Done",
                     new Vector2(
                         buttonWidth,
-                        36f)))
+                        Ui(36f))))
             {
                 Plugin.Cfg.Save();
 
@@ -3952,7 +4072,7 @@ new Vector2(
                 ImGui.CalcTextSize(
                     glyph);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 origin +
                 new Vector2(
                     disc / 2f -
@@ -3968,7 +4088,7 @@ new Vector2(
         ImGui.SetCursorScreenPos(
             origin +
             new Vector2(
-                disc + 10f,
+                disc + Ui(10f),
                 0));
 
         ImGui.TextUnformatted(
@@ -3977,8 +4097,8 @@ new Vector2(
         ImGui.SetCursorScreenPos(
             origin +
             new Vector2(
-                disc + 10f,
-                21f));
+                disc + Ui(10f),
+                Ui(21f)));
 
         ImGui.TextColored(
             MutedText,
@@ -4003,9 +4123,7 @@ new Vector2(
         using (
             ImRaii.PushStyle(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(
-                    16,
-                    16)))
+                UiVec(16, 16)))
         using (
             ImRaii.PushStyle(
                 ImGuiStyleVar.ChildRounding,
@@ -4047,9 +4165,7 @@ new Vector2(
         using (
             ImRaii.PushStyle(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(
-                    14,
-                    13)))
+                UiVec(14, 13)))
         using (
             ImRaii.PushStyle(
                 ImGuiStyleVar.ChildRounding,
@@ -4161,8 +4277,7 @@ new Vector2(
             ImGui.CalcTextSize(
                 label);
 
-        const float iconGap =
-            10f;
+        var iconGap = Ui(10f);
 
         var totalWidth =
             glyphSize.X +
@@ -4180,7 +4295,7 @@ new Vector2(
             ImRaii.PushFont(
                 UiBuilder.IconFont))
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
                     x,
                     origin.Y +
@@ -4193,7 +4308,7 @@ new Vector2(
         }
 
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 x +
                 glyphSize.X +
@@ -4294,7 +4409,7 @@ new Vector2(
             ImRaii.PushFont(
                 UiBuilder.IconFont))
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
                     x,
                     min.Y +
@@ -4307,7 +4422,7 @@ new Vector2(
         }
 
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 x +
                 glyphSize.X +

@@ -7,9 +7,8 @@ using Dalamud.Interface.Utility.Raii;
 
 namespace AlphaChannel.Plugin;
 
-// Alpha Chat (E2E DMs + group chats). Decrypts on render via DmCipher/KeyVault - the plaintext
-// cache is keyed by message id so re-renders every ImGui frame don't re-run the ECDH+AES-GCM math
-// each time, same "decrypt once, cache the result" idiom Aetherphone's own MessageCipher uses.
+// Alpha Chat (E2E DMs + group chats). Decrypts on render via DmCipher/KeyVault.
+// Plaintext is cached by message ID to avoid repeating decryption every ImGui frame.
 //
 // Group E2E is sender-side pairwise fan-out (see DmMessage's server-side doc comment) - sending to
 // a conversation means encrypting the same plaintext once per other member with that member's own
@@ -44,31 +43,9 @@ internal sealed partial class MainWindow
 
     private const string DecryptFailedMarker = "\u0001decrypt_failed";
 
-    // Two tabs: Alpha Chat (AlphaChannel accounts, E2E) and Whispers (native /tell mirror, no
-    // account needed at all - see WhisperMirror's own doc comment on why that's a separate system).
     private void DrawMessages()
     {
-        if (!ImGui.BeginTabBar("##messagesTabs"))
-        {
-            return;
-        }
-
-        if (ImGui.BeginTabItem("Alpha Chat"))
-        {
-            ImGui.Spacing();
-            DrawAlphaChatTab();
-            ImGui.EndTabItem();
-        }
-
-        var whisperLabel = unreadWhisperKeys.Count > 0 ? $"Whispers ({unreadWhisperKeys.Count})###whispersTab" : "Whispers###whispersTab";
-        if (ImGui.BeginTabItem(whisperLabel))
-        {
-            ImGui.Spacing();
-            DrawWhispers();
-            ImGui.EndTabItem();
-        }
-
-        ImGui.EndTabBar();
+        DrawAlphaChatTab();
     }
 
     private void DrawAlphaChatTab()
@@ -177,30 +154,30 @@ internal sealed partial class MainWindow
                 ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.05f)), 10f);
         }
 
-        var titlePos = origin + new Vector2(14, 10);
-        drawList.AddText(titlePos, ImGui.GetColorU32(Vector4.One), title);
+        var titlePos = origin + UiVec(14, 10);
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), titlePos, ImGui.GetColorU32(Vector4.One), title);
         if (conversation.IsGroup)
         {
             var titleWidth = ImGui.CalcTextSize(title).X;
-            drawList.AddText(titlePos + new Vector2(titleWidth + 8, 0), ImGui.GetColorU32(MutedText),
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), titlePos + new Vector2(titleWidth + Ui(8), 0), ImGui.GetColorU32(MutedText),
                 $"· {conversation.Members.Length + 1}");
         }
 
         var subtitle = conversation.LastMessageAtUnix is { } at
             ? FormatRelativeTime(at)
             : "No messages yet";
-        drawList.AddText(origin + new Vector2(14, 28), ImGui.GetColorU32(MutedText), subtitle);
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), origin + UiVec(14, 28), ImGui.GetColorU32(MutedText), subtitle);
 
         if (conversation.UnreadCount > 0)
         {
             var badge = conversation.UnreadCount > 9 ? "9+" : conversation.UnreadCount.ToString();
             var badgeSize = ImGui.CalcTextSize(badge);
-            var badgeCenter = origin + new Vector2(width - 28f, height / 2f);
+            var badgeCenter = origin + new Vector2(width - Ui(28f), height / 2f);
             drawList.AddCircleFilled(badgeCenter, 10f, ImGui.GetColorU32(Accent));
-            drawList.AddText(badgeCenter - badgeSize / 2f, ImGui.GetColorU32(Vector4.One), badge);
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), badgeCenter - badgeSize / 2f, ImGui.GetColorU32(Vector4.One), badge);
         }
 
-        ImGui.Dummy(new Vector2(0, 6));
+        ImGui.Dummy(UiVec(0, 6));
         ImGui.PopID();
     }
 
@@ -208,7 +185,7 @@ internal sealed partial class MainWindow
     {
         ImGui.Spacing();
         SectionHeader("New group");
-        ImGui.SetNextItemWidth(240f);
+        ImGui.SetNextItemWidth(Ui(240f));
         ImGui.InputTextWithHint("##newGroupName", "Group name", ref newGroupNameInput, 48);
 
         ImGui.TextColored(MutedText, "Pick friends to add:");
@@ -288,8 +265,8 @@ internal sealed partial class MainWindow
         return then.ToLocalTime().ToString("MMM d");
     }
 
-    // Called from MainWindow.Social.cs's/Tweeter's "Message" button too, not just from within this
-    // page - starts (or resumes) a 1:1 with a friend and switches straight to the thread view.
+    // Called from Friends and profile "Message" buttons as well as this page. Starts or resumes a
+    // 1:1 conversation and switches directly to its thread view.
     private void StartOrOpenConversation(CharacterSession session, string otherAccountId, string otherDisplayName)
     {
         currentPage = HomePage.Messages;
@@ -358,7 +335,7 @@ internal sealed partial class MainWindow
                 {
                     using (ImRaii.Disabled(messagesLoadingOlder || messagesLoading))
                     {
-                        if (ImGui.Button("Load older", new Vector2(-1, 28)))
+                        if (ImGui.Button("Load older", UiVec(-1, 28)))
                         {
                             RefreshMessages(session, reset: false);
                         }
@@ -396,15 +373,15 @@ internal sealed partial class MainWindow
             messageComposerFocus = false;
         }
 
-        ImGui.SetNextItemWidth(-80f);
+        ImGui.SetNextItemWidth(-Ui(80f));
         var sent = ImGui.InputTextWithHint("##composer", "Message…", ref messageComposerInput, 2000,
             ImGuiInputTextFlags.EnterReturnsTrue);
         ImGui.SameLine();
-        if ((ImGui.Button("Send", new Vector2(72, 0)) || sent) && messageComposerInput.Trim().Length > 0)
+        if ((ImGui.Button("Send", UiVec(72, 0)) || sent) && messageComposerInput.Trim().Length > 0)
         {
             SendMessage(session, conversationId, messageComposerInput.Trim());
             messageComposerInput = string.Empty;
-            // Keep typing until the user clicks away — same Linkpearl composer behavior.
+            // Restore composer focus after sending so the user can continue typing.
             messageComposerFocus = true;
         }
     }
@@ -481,7 +458,7 @@ internal sealed partial class MainWindow
             }
         }
 
-        ImGui.SetCursorPos(new Vector2(start.X, start.Y + bubbleHeight + 6f));
+        ImGui.SetCursorPos(new Vector2(start.X, start.Y + bubbleHeight + Ui(6f)));
         ImGui.PopID();
     }
 

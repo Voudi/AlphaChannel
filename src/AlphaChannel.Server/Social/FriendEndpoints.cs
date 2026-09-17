@@ -59,10 +59,18 @@ internal static class FriendEndpoints
             var result = await friends.SendRequestByCharacterAsync(context.GetAccount().Id, request.CharacterName, request.World, ct);
             return result switch
             {
-                SendFriendRequestResult.Sent => Results.Created(),
-                SendFriendRequestResult.NotFound => Results.NotFound(),
-                _ => Results.Conflict(),
+                SendFriendRequestResult.Sent => Results.Created(string.Empty, new FriendRequestOutcomeDto("sent")),
+                SendFriendRequestResult.NotFound => Results.NotFound(new FriendRequestOutcomeDto("not_found")),
+                SendFriendRequestResult.AlreadyFriends => Results.Conflict(new FriendRequestOutcomeDto("already_friends")),
+                _ => Results.Conflict(new FriendRequestOutcomeDto("already_pending")),
             };
+        });
+
+        group.MapGet("/streams/by-character", async (string characterName, string world, HttpContext context, FriendService friends, CancellationToken ct) =>
+        {
+            var stream = await friends.FindJoinableStreamByCharacterAsync(
+                context.GetAccount().Id, characterName, world, ct);
+            return stream is null ? Results.NotFound() : Results.Ok(stream);
         });
 
         group.MapPost("/friends/invite/redeem", async (RedeemInviteCodeRequest request, HttpContext context, FriendService friends, CancellationToken ct) =>

@@ -67,6 +67,16 @@ internal sealed partial class MainWindow
 
     private ProfileAvatarMode profileAvatarMode = ProfileAvatarMode.Icon;
 
+    internal void NotifySessionRefreshed(
+        string? previousAvatarUrl,
+        string? refreshedAvatarUrl)
+    {
+        thumbnails.Invalidate(ResolveAvatarUrl(previousAvatarUrl));
+        thumbnails.Invalidate(ResolveAvatarUrl(refreshedAvatarUrl));
+        lastDisplayNameSyncedFor = null;
+        lastProfileSyncedFor = null;
+    }
+
     private void DrawAccountSettings()
     {
         if (CurrentSession is { } session)
@@ -105,14 +115,16 @@ internal sealed partial class MainWindow
                     // -------------------------------------------------
 
                     ImGui.SetCursorPos(
-                        new Vector2(16f, 14f));
+                        UiVec(16f, 14f));
 
                     ImGui.TextColored(
                         Good,
-                        "SIGNED IN");
+                        SessionValidationInProgress
+                            ? "RESTORING SESSION..."
+                            : "SIGNED IN");
 
                     ImGui.SetCursorPos(
-                        new Vector2(16f, 39f));
+                        UiVec(16f, 39f));
 
                     ImGui.TextColored(
                         Vector4.One,
@@ -123,18 +135,18 @@ internal sealed partial class MainWindow
                     // -------------------------------------------------
 
                     ImGui.SetCursorPos(
-                        new Vector2(16f, 70f));
+                        UiVec(16f, 70f));
 
-                    ImGui.SetWindowFontScale(0.80f);
+                    SetUiFontScale(0.80f);
 
                     ImGui.TextColored(
                         MutedText,
                         "Username");
 
-                    ImGui.SetWindowFontScale(1f);
+                    SetUiFontScale(1f);
 
                     ImGui.SetCursorPos(
-                        new Vector2(16f, 91f));
+                        UiVec(16f, 91f));
 
                     ImGui.SetNextItemWidth(
                         ImGui.GetWindowWidth() - 126f);
@@ -149,7 +161,7 @@ internal sealed partial class MainWindow
                         8f)
                         .Push(
                             ImGuiStyleVar.FramePadding,
-                            new Vector2(12f, 8f)))
+                            UiVec(12f, 8f)))
                     using (ImRaii.PushColor(
                         ImGuiCol.FrameBg,
                         new Vector4(0.055f, 0.07f, 0.115f, 1f))
@@ -186,7 +198,7 @@ internal sealed partial class MainWindow
                     {
                         if (ImGui.Button(
                             "Save",
-                            new Vector2(86f, 34f)))
+                            UiVec(86f, 34f)))
                         {
                             var token =
                                 session.Token;
@@ -227,36 +239,36 @@ internal sealed partial class MainWindow
                     }
 
                     ImGui.SetCursorPos(
-                        new Vector2(16f, 130f));
+                        UiVec(16f, 130f));
 
-                    ImGui.SetWindowFontScale(0.76f);
+                    SetUiFontScale(0.76f);
 
                     ImGui.TextColored(
                         MutedText,
                         $"{DisplayNameRules.MinLength}-{DisplayNameRules.MaxLength} characters  •  letters, numbers, spaces, _ or -");
 
-                    ImGui.SetWindowFontScale(1f);
+                    SetUiFontScale(1f);
 
                     // -------------------------------------------------
                     // Invite code
                     // -------------------------------------------------
 
                     ImGui.SetCursorPos(
-                        new Vector2(16f, 158f));
+                        UiVec(16f, 158f));
 
-                    ImGui.SetWindowFontScale(0.80f);
+                    SetUiFontScale(0.80f);
 
                     ImGui.TextColored(
                         MutedText,
                         "Invite code");
 
-                    ImGui.SetWindowFontScale(1f);
+                    SetUiFontScale(1f);
 
                     var inviteCodeDisplay =
                         session.InviteCode;
 
                     ImGui.SetCursorPos(
-                        new Vector2(16f, 179f));
+                        UiVec(16f, 179f));
 
                     ImGui.SetNextItemWidth(130f);
 
@@ -265,7 +277,7 @@ internal sealed partial class MainWindow
                         8f)
                         .Push(
                             ImGuiStyleVar.FramePadding,
-                            new Vector2(12f, 8f)))
+                            UiVec(12f, 8f)))
                     using (ImRaii.PushColor(
                         ImGuiCol.FrameBg,
                         new Vector4(0.055f, 0.07f, 0.115f, 1f)))
@@ -294,7 +306,7 @@ internal sealed partial class MainWindow
                     {
                         if (ImGui.Button(
                             "Copy",
-                            new Vector2(76f, 34f)))
+                            UiVec(76f, 34f)))
                         {
                             ImGui.SetClipboardText(
                                 session.InviteCode);
@@ -322,7 +334,7 @@ internal sealed partial class MainWindow
                             inviteCodeRefreshing
                                 ? "..."
                                 : "Refresh",
-                            new Vector2(82f, 34f)))
+                            UiVec(82f, 34f)))
                         {
                             inviteCodeRefreshing =
                                 true;
@@ -375,7 +387,7 @@ internal sealed partial class MainWindow
             if (session.DisplayName == session.Handle)
             {
                 ImGui.Dummy(
-                    new Vector2(0f, 7f));
+                    UiVec(0f, 7f));
 
                 ImGui.TextColored(
                     Danger,
@@ -385,7 +397,7 @@ internal sealed partial class MainWindow
             if (displayNameError is { Length: > 0 } nameError)
             {
                 ImGui.Dummy(
-                    new Vector2(0f, 6f));
+                    UiVec(0f, 6f));
 
                 ImGui.TextColored(
                     Danger,
@@ -393,18 +405,18 @@ internal sealed partial class MainWindow
             }
 
             ImGui.Dummy(
-                new Vector2(0f, 8f));
+                UiVec(0f, 8f));
 
-            ImGui.SetWindowFontScale(0.78f);
+            SetUiFontScale(0.78f);
 
             ImGui.TextColored(
                 MutedText,
                 "Invite codes rotate automatically after they're redeemed.");
 
-            ImGui.SetWindowFontScale(1f);
+            SetUiFontScale(1f);
 
             ImGui.Dummy(
-                new Vector2(0f, 10f));
+                UiVec(0f, 10f));
 
             // ---------------------------------------------------------
             // Account actions
@@ -425,7 +437,7 @@ internal sealed partial class MainWindow
             {
                 if (ImGui.Button(
                     "Show linked characters",
-                    new Vector2(160f, 34f)))
+                    UiVec(160f, 34f)))
                 {
                     var token =
                         session.Token;
@@ -456,7 +468,7 @@ internal sealed partial class MainWindow
             {
                 if (ImGui.Button(
                     "Sign out",
-                    new Vector2(94f, 34f)))
+                    UiVec(94f, 34f)))
                 {
                     _ = authClient.RevokeAsync(
                         session.Token);
@@ -473,7 +485,7 @@ internal sealed partial class MainWindow
             if (myLinkedCharacters is { } characters)
             {
                 ImGui.Dummy(
-                    new Vector2(0f, 10f));
+                    UiVec(0f, 10f));
 
                 foreach (var character in characters)
                 {
@@ -486,7 +498,20 @@ internal sealed partial class MainWindow
                 }
             }
 
-            
+            ImGui.Dummy(
+                UiVec(0f, 18f));
+
+            SettingsHairline();
+
+            ImGui.Dummy(
+                UiVec(0f, 14f));
+
+            SettingsSection(
+                "Live streaming",
+                "Manage the secret key used for OBS, gameplay, and local-video broadcasts.");
+
+            DrawStreamKeyAccountSettings(
+                session);
         }
         else
         {
@@ -499,7 +524,7 @@ internal sealed partial class MainWindow
                 "Sign in to use Friends, Messages, Activity, and Watch-along.");
 
             ImGui.Dummy(
-                new Vector2(0f, 10f));
+                UiVec(0f, 10f));
 
             var canSignIn =
                 !string.IsNullOrEmpty(CurrentCharacterName) &&
@@ -525,7 +550,7 @@ internal sealed partial class MainWindow
             {
                 if (ImGui.Button(
                     "Sign in with XIVAuth",
-                    new Vector2(160f, 36f)))
+                    UiVec(160f, 36f)))
                 {
                     StartSignIn(
                         linkUsing: null);
@@ -547,7 +572,7 @@ internal sealed partial class MainWindow
                 {
                     if (ImGui.Button(
                         $"Link to @{existing.Handle}",
-                        new Vector2(150f, 36f)))
+                        UiVec(150f, 36f)))
                     {
                         StartSignIn(
                             existing);
@@ -560,20 +585,283 @@ internal sealed partial class MainWindow
             signInStatusMessage is { Length: > 0 } failure)
         {
             ImGui.Dummy(
-                new Vector2(0f, 8f));
+                UiVec(0f, 8f));
 
             ImGui.TextColored(
                 Danger,
                 failure);
         }
+    }
 
-        ImGui.Dummy(new Vector2(0f, 18f));
-        SettingsHairline();
-        ImGui.Dummy(new Vector2(0f, 14f));
-        SettingsSection(
-            "YouTube",
-            "Sign in so age-restricted videos can play.");
-        DrawYouTubeLoginSettings();
+    private void DrawStreamKeyAccountSettings(
+    CharacterSession session)
+    {
+        var cachedKey =
+            Plugin.Cfg.StreamKeys
+                .GetValueOrDefault(
+                    session.AccountId);
+
+        SetUiFontScale(
+            0.82f);
+
+        ImGui.TextColored(
+            cachedKey is null
+                ? Gold
+                : Good,
+            cachedKey is null
+                ? "No secret stream key is saved on this installation."
+                : "A secret stream key is ready for live streaming.");
+
+        SetUiFontScale(
+            1f);
+
+        ImGui.Dummy(
+            UiVec(0f, 8f));
+
+        if (cachedKey is { Length: > 0 })
+        {
+            var displayKey =
+                streamKeyRevealed
+                    ? cachedKey
+                    : new string(
+                        '•',
+                        Math.Min(
+                            cachedKey.Length,
+                            32));
+
+            ImGui.SetNextItemWidth(
+                -1f);
+
+            using (ImRaii.PushStyle(
+                       ImGuiStyleVar.FrameRounding,
+                       8f)
+                   .Push(
+                       ImGuiStyleVar.FramePadding,
+                       UiVec(14f, 10f)))
+            using (ImRaii.PushColor(
+                       ImGuiCol.FrameBg,
+                       new Vector4(
+                           0.045f,
+                           0.06f,
+                           0.105f,
+                           1f))
+                   .Push(
+                       ImGuiCol.FrameBgHovered,
+                       new Vector4(
+                           0.045f,
+                           0.06f,
+                           0.105f,
+                           1f))
+                   .Push(
+                       ImGuiCol.FrameBgActive,
+                       new Vector4(
+                           0.045f,
+                           0.06f,
+                           0.105f,
+                           1f)))
+            {
+                ImGui.InputText(
+                    "##accountStreamKey",
+                    ref displayKey,
+                    256,
+                    ImGuiInputTextFlags.ReadOnly);
+            }
+
+            ImGui.Dummy(
+                UiVec(0f, 8f));
+
+            using (ImRaii.PushStyle(
+                       ImGuiStyleVar.FrameRounding,
+                       8f))
+            {
+                if (ImGui.Button(
+                        streamKeyRevealed
+                            ? "Hide key"
+                            : "Reveal key",
+                        UiVec(110f, 34f)))
+                {
+                    streamKeyRevealed =
+                        !streamKeyRevealed;
+                }
+
+                ImGui.SameLine(
+                    0f,
+                    8f);
+
+                if (ImGui.Button(
+                        "Copy key",
+                        UiVec(110f, 34f)))
+                {
+                    ImGui.SetClipboardText(
+                        cachedKey);
+                }
+
+                ImGui.SameLine(
+                    0f,
+                    8f);
+            }
+        }
+
+        using (ImRaii.Disabled(
+                   keyRotating))
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.FrameRounding,
+                   8f))
+        using (ImRaii.PushColor(
+                   ImGuiCol.Button,
+                   cachedKey is null
+                       ? Accent
+                       : new Vector4(
+                           0.055f,
+                           0.07f,
+                           0.115f,
+                           1f))
+               .Push(
+                   ImGuiCol.ButtonHovered,
+                   cachedKey is null
+                       ? AccentHover
+                       : new Vector4(
+                           0.075f,
+                           0.095f,
+                           0.15f,
+                           1f))
+               .Push(
+                   ImGuiCol.ButtonActive,
+                   cachedKey is null
+                       ? AccentActive
+                       : new Vector4(
+                           0.075f,
+                           0.095f,
+                           0.15f,
+                           1f)))
+        {
+            if (ImGui.Button(
+                    keyRotating
+                        ? "Generating..."
+                        : cachedKey is null
+                            ? "Generate secret key"
+                            : "Regenerate secret key",
+                    UiVec(174f, 34f)))
+            {
+                if (cachedKey is null)
+                {
+                    RotateStreamKey(
+                        session);
+                }
+                else
+                {
+                    keyRegenerateConfirmPending =
+                        true;
+                }
+            }
+        }
+
+        if (keyRegenerateConfirmPending)
+        {
+            ImGui.Dummy(
+                UiVec(0f, 10f));
+
+            ImGui.TextWrapped(
+                "Regenerating this key will invalidate the previous key and disconnect any live-streaming software using it. Continue?");
+
+            ImGui.Dummy(
+                UiVec(0f, 8f));
+
+            using (ImRaii.PushStyle(
+                       ImGuiStyleVar.FrameRounding,
+                       7f))
+            using (ImRaii.PushColor(
+                       ImGuiCol.Button,
+                       Danger))
+            {
+                if (ImGui.Button(
+                        "Yes, regenerate",
+                        UiVec(150f, 34f)))
+                {
+                    keyRegenerateConfirmPending =
+                        false;
+
+                    RotateStreamKey(
+                        session);
+                }
+            }
+
+            ImGui.SameLine(
+                0f,
+                8f);
+
+            if (ImGui.Button(
+                    "Cancel",
+                    UiVec(90f, 34f)))
+            {
+                keyRegenerateConfirmPending =
+                    false;
+            }
+        }
+
+        if (keyError is { Length: > 0 } error)
+        {
+            ImGui.Dummy(
+                UiVec(0f, 8f));
+
+            ImGui.TextColored(
+                Danger,
+                error);
+        }
+
+        ImGui.Dummy(
+            UiVec(0f, 6f));
+
+        SetUiFontScale(
+            0.76f);
+
+        ImGui.TextColored(
+            MutedText,
+            "Keep this key private. Anyone with it could publish to your Alpha Channel stream.");
+
+        SetUiFontScale(
+            1f);
+
+        ImGui.Dummy(
+            UiVec(0f, 10f));
+
+        ImGui.TextWrapped(
+            "Copy broadcast diagnostics, can be used for troubleshooting stream quality or when requesting support on our discord server");
+
+        ImGui.Dummy(
+            UiVec(0f, 6f));
+
+        var broadcastDiagnostics =
+            video.BroadcastDiagnostics;
+
+        var canCopyBroadcastDiagnostics =
+            stream.Mode == StreamMode.Hosting &&
+            broadcastDiagnostics.Active &&
+            stream.Roster.Length > 0;
+
+        using (ImRaii.Disabled(
+                   !canCopyBroadcastDiagnostics))
+        using (ImRaii.PushStyle(
+                   ImGuiStyleVar.FrameRounding,
+                   8f))
+        {
+            if (ImGui.Button(
+                    "Copy Broadcast Diagnostics",
+                    UiVec(220f, 34f)))
+            {
+                ImGui.SetClipboardText(
+                    broadcastDiagnostics.ToSanitizedSummary());
+            }
+        }
+
+        if (!canCopyBroadcastDiagnostics &&
+            ImGui.IsItemHovered(
+                ImGuiHoveredFlags.AllowWhenDisabled))
+        {
+            ImGui.SetTooltip(
+                "You must be broadcasting with at least 1 active viewer to copy diagnostics");
+        }
+
     }
 
     private void DrawProfileEditor(CharacterSession session)
@@ -601,16 +889,16 @@ internal sealed partial class MainWindow
         // =========================================================
 
         var pictureCardHeight =
-            profileAvatarMode == ProfileAvatarMode.Image
-                ? 410f
-                : 760f;
+     profileAvatarMode == ProfileAvatarMode.Image
+         ? 470f
+         : 820f;
 
         using (ImRaii.PushStyle(
             ImGuiStyleVar.ChildRounding,
             10f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(20f, 18f)))
+                UiVec(20f, 18f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(0.045f, 0.06f, 0.10f, 1f))
@@ -630,28 +918,28 @@ internal sealed partial class MainWindow
                 // Heading
                 // -----------------------------------------------------
 
-                ImGui.SetWindowFontScale(1.10f);
+                SetUiFontScale(1.10f);
 
                 ImGui.TextColored(
                     Vector4.One,
                     "Profile picture");
 
-                ImGui.SetWindowFontScale(1f);
+                SetUiFontScale(1f);
 
-                ImGui.Dummy(new Vector2(0f, 3f));
+                ImGui.Dummy(UiVec(0f, 3f));
 
                 ImGui.TextColored(
                     MutedText,
                     "Choose an image or a styled icon.");
 
-                ImGui.Dummy(new Vector2(0f, 14f));
+                ImGui.Dummy(UiVec(0f, 14f));
 
                 // -----------------------------------------------------
                 // Image / Icon selector
                 // -----------------------------------------------------
 
-                const float selectorWidth = 132f;
-                const float selectorHeight = 38f;
+                var selectorWidth = Ui(132f);
+                var selectorHeight = Ui(38f);
 
                 DrawProfileModeButton(
                     ProfileAvatarMode.Image,
@@ -669,7 +957,7 @@ internal sealed partial class MainWindow
                     selectorWidth,
                     selectorHeight);
 
-                ImGui.Dummy(new Vector2(0f, 16f));
+                ImGui.Dummy(UiVec(0f, 16f));
 
                 // -----------------------------------------------------
                 // Divider
@@ -689,7 +977,7 @@ internal sealed partial class MainWindow
                         ImGui.GetColorU32(BorderSubtle));
 
                 ImGui.Dummy(
-                    new Vector2(dividerWidth, 16f));
+                    new Vector2(dividerWidth, Ui(16f)));
 
                 // =====================================================
                 // IMAGE MODE
@@ -707,15 +995,15 @@ internal sealed partial class MainWindow
 
                     ImGui.BeginGroup();
 
-                    ImGui.SetWindowFontScale(1.05f);
+                    SetUiFontScale(1.05f);
 
                     ImGui.TextColored(
                         Vector4.One,
                         "Current image");
 
-                    ImGui.SetWindowFontScale(1f);
+                    SetUiFontScale(1f);
 
-                    ImGui.Dummy(new Vector2(0f, 5f));
+                    ImGui.Dummy(UiVec(0f, 5f));
 
                     if (profileImageUrl is { Length: > 0 })
                     {
@@ -723,7 +1011,7 @@ internal sealed partial class MainWindow
                             MutedText,
                             "Custom profile image");
 
-                        ImGui.Dummy(new Vector2(0f, 7f));
+                        ImGui.Dummy(UiVec(0f, 7f));
 
                         ImGui.TextColored(
                             Good,
@@ -735,7 +1023,7 @@ internal sealed partial class MainWindow
                             MutedText,
                             "No custom image selected.");
 
-                        ImGui.Dummy(new Vector2(0f, 7f));
+                        ImGui.Dummy(UiVec(0f, 7f));
 
                         ImGui.TextColored(
                             MutedText,
@@ -744,14 +1032,14 @@ internal sealed partial class MainWindow
 
                     ImGui.EndGroup();
 
-                    ImGui.Dummy(new Vector2(0f, 18f));
+                    ImGui.Dummy(UiVec(0f, 18f));
 
                     // -------------------------------------------------
                     // Image actions
                     // -------------------------------------------------
 
-                    const float actionGap = 10f;
-                    const float horizontalInset = 8f;
+                    var actionGap = Ui(10f);
+                    var horizontalInset = Ui(8f);
 
                     var fullActionWidth =
                         ImGui.GetContentRegionAvail().X;
@@ -842,19 +1130,19 @@ internal sealed partial class MainWindow
 
                     profileAvatarFileDialog.Draw();
 
-                    ImGui.Dummy(new Vector2(0f, 14f));
+                    ImGui.Dummy(UiVec(0f, 14f));
 
-                    ImGui.SetWindowFontScale(0.78f);
+                    SetUiFontScale(0.78f);
 
                     ImGui.TextColored(
                         MutedText,
                         "Recommended: square PNG, JPG or WebP. Max 1 MB.");
 
-                    ImGui.SetWindowFontScale(1f);
+                    SetUiFontScale(1f);
 
                     if (profileAvatarError is { Length: > 0 } avatarError)
                     {
-                        ImGui.Dummy(new Vector2(0f, 7f));
+                        ImGui.Dummy(UiVec(0f, 7f));
 
                         ImGui.TextColored(
                             Danger,
@@ -878,15 +1166,15 @@ internal sealed partial class MainWindow
 
                     ImGui.BeginGroup();
 
-                    ImGui.SetWindowFontScale(1.05f);
+                    SetUiFontScale(1.05f);
 
                     ImGui.TextColored(
                         Vector4.One,
                         "Styled icon");
 
-                    ImGui.SetWindowFontScale(1f);
+                    SetUiFontScale(1f);
 
-                    ImGui.Dummy(new Vector2(0f, 5f));
+                    ImGui.Dummy(UiVec(0f, 5f));
 
                     ImGui.TextColored(
                         MutedText,
@@ -894,13 +1182,13 @@ internal sealed partial class MainWindow
 
                     if (profileImageUrl is { Length: > 0 })
                     {
-                        ImGui.Dummy(new Vector2(0f, 7f));
+                        ImGui.Dummy(UiVec(0f, 7f));
 
                         ImGui.TextColored(
                             MutedText,
                             "Your custom image is currently active.");
 
-                        ImGui.Dummy(new Vector2(0f, 8f));
+                        ImGui.Dummy(UiVec(0f, 8f));
 
                         using (ImRaii.Disabled(profileAvatarBusy))
                         using (ImRaii.PushStyle(
@@ -923,7 +1211,7 @@ internal sealed partial class MainWindow
                         {
                             if (ImGui.Button(
                                 "Use icon instead",
-                                new Vector2(130f, 30f)))
+                                UiVec(130f, 30f)))
                             {
                                 ClearProfileAvatar(session);
                             }
@@ -932,7 +1220,7 @@ internal sealed partial class MainWindow
 
                     ImGui.EndGroup();
 
-                    ImGui.Dummy(new Vector2(0f, 18f));
+                    ImGui.Dummy(UiVec(0f, 18f));
 
                     // -------------------------------------------------
                     // Icon picker
@@ -942,14 +1230,14 @@ internal sealed partial class MainWindow
                         Vector4.One,
                         "Icon");
 
-                    ImGui.Dummy(new Vector2(0f, 7f));
+                    ImGui.Dummy(UiVec(0f, 7f));
 
                     using (ImRaii.PushStyle(
     ImGuiStyleVar.ChildRounding,
     8f)
     .Push(
         ImGuiStyleVar.WindowPadding,
-        new Vector2(12f, 12f)))
+        UiVec(12f, 12f)))
                     using (ImRaii.PushColor(
                         ImGuiCol.ChildBg,
                         new Vector4(
@@ -974,7 +1262,7 @@ internal sealed partial class MainWindow
                         }
                     }
 
-                    ImGui.Dummy(new Vector2(0f, 14f));
+                    ImGui.Dummy(UiVec(0f, 14f));
 
                     // -------------------------------------------------
                     // Color
@@ -984,7 +1272,7 @@ internal sealed partial class MainWindow
                         Vector4.One,
                         "Color");
 
-                    ImGui.Dummy(new Vector2(0f, 7f));
+                    ImGui.Dummy(UiVec(0f, 7f));
 
                     // Give the colour controls their own padded area.
                     using (ImRaii.PushStyle(
@@ -992,7 +1280,7 @@ internal sealed partial class MainWindow
     8f)
     .Push(
         ImGuiStyleVar.WindowPadding,
-        new Vector2(14f, 14f)))
+        UiVec(14f, 14f)))
                     using (ImRaii.PushColor(
                         ImGuiCol.ChildBg,
                         new Vector4(
@@ -1020,7 +1308,7 @@ internal sealed partial class MainWindow
             }
         }
 
-        ImGui.Dummy(new Vector2(0f, 14f));
+        ImGui.Dummy(UiVec(0f, 14f));
 
         // =========================================================
         // ABOUT YOU
@@ -1031,7 +1319,7 @@ internal sealed partial class MainWindow
             10f)
             .Push(
                 ImGuiStyleVar.WindowPadding,
-                new Vector2(20f, 18f)))
+                UiVec(20f, 18f)))
         using (ImRaii.PushColor(
             ImGuiCol.ChildBg,
             new Vector4(0.045f, 0.06f, 0.10f, 1f))
@@ -1040,28 +1328,28 @@ internal sealed partial class MainWindow
                 BorderSubtle))
         using (var aboutCard = ImRaii.Child(
             "##profileAboutCard",
-            new Vector2(-1f, Ui(465f)),
-            true,
+            new Vector2(-1f, Ui(565f)),
+                    true,
             ImGuiWindowFlags.NoScrollbar |
             ImGuiWindowFlags.NoScrollWithMouse))
         {
             if (aboutCard)
             {
-                ImGui.SetWindowFontScale(1.10f);
+                SetUiFontScale(1.10f);
 
                 ImGui.TextColored(
                     Vector4.One,
                     "About you");
 
-                ImGui.SetWindowFontScale(1f);
+                SetUiFontScale(1f);
 
-                ImGui.Dummy(new Vector2(0f, 2f));
+                ImGui.Dummy(UiVec(0f, 2f));
 
                 ImGui.TextColored(
                     MutedText,
                     "Let others know a bit about you.");
 
-                ImGui.Dummy(new Vector2(0f, 10f));
+                ImGui.Dummy(UiVec(0f, 10f));
 
                 // -----------------------------------------------------
                 // Status
@@ -1073,15 +1361,15 @@ internal sealed partial class MainWindow
 
                 ImGui.SameLine();
 
-                ImGui.SetWindowFontScale(0.76f);
+                SetUiFontScale(0.76f);
 
                 ImGui.TextColored(
                     MutedText,
                     "Short message shown beside your name.");
 
-                ImGui.SetWindowFontScale(1f);
+                SetUiFontScale(1f);
 
-                ImGui.Dummy(new Vector2(0f, 5f));
+                ImGui.Dummy(UiVec(0f, 5f));
 
                 ImGui.SetNextItemWidth(-1f);
 
@@ -1090,7 +1378,7 @@ internal sealed partial class MainWindow
                     8f)
                     .Push(
                         ImGuiStyleVar.FramePadding,
-                        new Vector2(12f, 9f)))
+                        UiVec(12f, 9f)))
                 using (ImRaii.PushColor(
                     ImGuiCol.FrameBg,
                     new Vector4(
@@ -1120,7 +1408,7 @@ internal sealed partial class MainWindow
                         64);
                 }
 
-                ImGui.SetWindowFontScale(0.72f);
+                SetUiFontScale(0.72f);
 
                 var statusCounter =
                     $"{profileStatusInput.Length} / 64";
@@ -1137,9 +1425,9 @@ internal sealed partial class MainWindow
                     MutedText,
                     statusCounter);
 
-                ImGui.SetWindowFontScale(1f);
+                SetUiFontScale(1f);
 
-                ImGui.Dummy(new Vector2(0f, 9f));
+                ImGui.Dummy(UiVec(0f, 9f));
 
                 // -----------------------------------------------------
                 // Bio
@@ -1151,22 +1439,22 @@ internal sealed partial class MainWindow
 
                 ImGui.SameLine();
 
-                ImGui.SetWindowFontScale(0.76f);
+                SetUiFontScale(0.76f);
 
                 ImGui.TextColored(
                     MutedText,
                     "A little about yourself. Shown on your profile.");
 
-                ImGui.SetWindowFontScale(1f);
+                SetUiFontScale(1f);
 
-                ImGui.Dummy(new Vector2(0f, 5f));
+                ImGui.Dummy(UiVec(0f, 5f));
 
                 using (ImRaii.PushStyle(
                     ImGuiStyleVar.FrameRounding,
                     8f)
                     .Push(
                         ImGuiStyleVar.FramePadding,
-                        new Vector2(12f, 10f)))
+                        UiVec(12f, 10f)))
                 using (ImRaii.PushColor(
                     ImGuiCol.FrameBg,
                     new Vector4(
@@ -1196,7 +1484,7 @@ internal sealed partial class MainWindow
                         new Vector2(-1f, Ui(145f)));
                 }
 
-                ImGui.SetWindowFontScale(0.72f);
+                SetUiFontScale(0.72f);
 
                 var bioCounter =
                     $"{profileBioInput.Length} / 160";
@@ -1213,17 +1501,55 @@ internal sealed partial class MainWindow
                     MutedText,
                     bioCounter);
 
-                ImGui.SetWindowFontScale(1f);
+                SetUiFontScale(
+                    1f);
+
+                ImGui.Dummy(
+                    UiVec(0f, 12f));
+
+                using (ImRaii.PushStyle(
+                           ImGuiStyleVar.FrameRounding,
+                           8f))
+                using (ImRaii.PushColor(
+                           ImGuiCol.Button,
+                           new Vector4(
+                               0.055f,
+                               0.07f,
+                               0.115f,
+                               1f))
+                           .Push(
+                               ImGuiCol.ButtonHovered,
+                               CardBgHover)
+                           .Push(
+                               ImGuiCol.ButtonActive,
+                               AccentActive))
+                {
+                    if (ImGui.Button(
+                            "Preview my profile",
+                            UiVec(-1f, 36f)))
+                    {
+                        OpenProfilePopup(
+                            session,
+                            session.AccountId,
+                            session.DisplayName);
+                    }
+                }
+
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip(
+                        "Be sure to save any changes before previewing");
+                }
             }
         }
 
-        ImGui.Dummy(new Vector2(0f, 14f));
+        ImGui.Dummy(UiVec(0f, 14f));
 
         // =========================================================
         // SAVE PROFILE
         // =========================================================
 
-        const float saveWidth = 138f;
+        var saveWidth = Ui(138f);
 
         ImGui.SetCursorPosX(
             ImGui.GetCursorPosX() +
@@ -1250,7 +1576,7 @@ internal sealed partial class MainWindow
                     : "Save profile",
                 new Vector2(
                     saveWidth,
-                    40f)))
+                    Ui(40f))))
             {
                 SaveProfile(session);
             }
@@ -1258,7 +1584,7 @@ internal sealed partial class MainWindow
 
         if (profileError is { Length: > 0 } error)
         {
-            ImGui.Dummy(new Vector2(0f, 8f));
+            ImGui.Dummy(UiVec(0f, 8f));
 
             ImGui.TextColored(
                 Danger,
@@ -1377,7 +1703,7 @@ internal sealed partial class MainWindow
         using (ImRaii.PushFont(
             UiBuilder.IconFont))
         {
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 new Vector2(
                     contentX,
                     glyphY),
@@ -1388,7 +1714,7 @@ internal sealed partial class MainWindow
                 glyph);
         }
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             new Vector2(
                 contentX +
                 glyphSize.X +
@@ -1413,7 +1739,7 @@ internal sealed partial class MainWindow
         var size =
             new Vector2(
                 width,
-                50f);
+                Ui(50f));
 
         var origin =
             ImGui.GetCursorScreenPos();
@@ -1475,7 +1801,7 @@ internal sealed partial class MainWindow
         var discOrigin =
             origin +
             new Vector2(
-                10f,
+                Ui(10f),
                 (size.Y - disc) * 0.5f);
 
         drawList.AddRectFilled(
@@ -1502,7 +1828,7 @@ internal sealed partial class MainWindow
                 ImGui.CalcTextSize(
                     glyph);
 
-            drawList.AddText(
+            drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
                 discOrigin +
                 new Vector2(disc, disc) * 0.5f -
                 glyphSize * 0.5f,
@@ -1535,16 +1861,16 @@ internal sealed partial class MainWindow
                     0.35f)
                 : MutedText;
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             origin +
-            new Vector2(50f, 9f),
+            UiVec(50f, 9f),
             ImGui.GetColorU32(
                 titleColor),
             title);
 
-        drawList.AddText(
+        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize(), 
             origin +
-            new Vector2(50f, 27f),
+            UiVec(50f, 27f),
             ImGui.GetColorU32(
                 subtitleColor),
             subtitle);
@@ -1565,8 +1891,6 @@ internal sealed partial class MainWindow
         session.AvatarImageUrl = updated.AvatarImageUrl;
         session.Bio = updated.Bio;
         session.StatusMessage = updated.StatusMessage;
-        session.PatreonTier = updated.PatreonTier;
-        session.IsDeveloper = updated.IsDeveloper;
         profileIconInput = updated.AvatarIcon;
         profileColorInput = updated.AvatarColorHex;
         profileImageUrl = updated.AvatarImageUrl;
@@ -1768,7 +2092,7 @@ internal sealed partial class MainWindow
             signInModalPending = false;
         }
 
-        ImGui.SetNextWindowSize(new Vector2(360, 0));
+        ImGui.SetNextWindowSize(UiVec(360, 0));
         if (!ImGui.BeginPopupModal("Sign in with XIVAuth", ImGuiWindowFlags.NoResize))
         {
             return;

@@ -2,27 +2,52 @@ using AlphaChannel.Contracts;
 
 namespace AlphaChannel.Server;
 
-internal sealed class RoomDirectoryService(RoomManager rooms, UserDirectory directory)
+internal sealed class RoomDirectoryService(
+    RoomManager rooms,
+    UserDirectory directory)
 {
-    public IReadOnlyList<RoomDirectoryDto> List(RoomKind? kind)
+    public IReadOnlyList<RoomDirectoryDto> List(
+        RoomKind? kind)
     {
-        return rooms.ListListable(kind).Select(ToDto).ToList();
+        return rooms
+            .ListListable(kind)
+            .Select(ToDto)
+            .ToList();
     }
 
-    private RoomDirectoryDto ToDto(Room room)
+    private RoomDirectoryDto ToDto(
+        Room room)
     {
-        var state = room.LastState;
-        var hasMedia = !string.IsNullOrWhiteSpace(state?.Url);
-        var url = room.Kind == RoomKind.Locked ? null : state?.Url;
+        var state =
+            room.LastState;
+
+        var hasMedia =
+            !string.IsNullOrWhiteSpace(
+                state?.Url);
+
+        //
+        // Locked-room playback URLs remain private. Display metadata
+        // is safe to expose so the directory can still describe what
+        // the room is watching before the password is entered.
+        //
+        var url =
+            room.Kind ==
+            RoomKind.Locked
+                ? null
+                : state?.Url;
+
         return new RoomDirectoryDto(
             room.HostUserId,
-            directory.DisplayNameOrFallback(room.HostUserId),
+            directory.DisplayNameOrFallback(
+                room.HostUserId),
             room.Description,
             room.Location,
             room.Kind,
             room.Viewers.Count,
             state?.Paused ?? true,
             hasMedia,
-            url);
+            url,
+            state?.MediaTitle,
+            state?.MediaThumbnailUrl);
     }
 }

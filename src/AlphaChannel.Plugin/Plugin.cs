@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using AlphaChannel.Plugin.Auth;
 using AlphaChannel.Plugin.Video;
+using AlphaChannel.Plugin.Net;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Objects.Enums;
@@ -16,10 +18,22 @@ namespace AlphaChannel.Plugin;
 
 public sealed class Plugin : IDalamudPlugin
 {
-    [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
-    [PluginService] internal static ICommandManager CommandManager { get; private set; } = null!;
+    //
+    // TEMPORARY TESTING SWITCH
+    //
+    // When true, the username/topic onboarding and first-launch splash
+    // are shown once on every plugin load. Saved usernames, topics and
+    // caches are retained.
+    //
+    internal const bool ForceFirstLaunchExperienceForTesting =
+        false;
+
+    private bool forcedFirstLaunchPromptRequested;
+
+    [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!; [PluginService] internal static ICommandManager CommandManager { get; private set; } = null!;
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
     [PluginService] internal static IClientState ClientState { get; private set; } = null!;
+    [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
     [PluginService] internal static IGameInteropProvider InteropProvider { get; private set; } = null!;
     [PluginService] internal static INamePlateGui NamePlateGui { get; private set; } = null!;
@@ -41,14 +55,14 @@ public sealed class Plugin : IDalamudPlugin
     private readonly AetherStreamQueue queue;
     private readonly StreamClient stream;
     private readonly MainWindow mainWindow;
+    private readonly MiniPlayerWindow miniPlayerWindow;
+    private readonly MiniChatWindow miniChatWindow;
     private readonly AuthClient authClient;
     private readonly SignInFlow signInFlow;
     private readonly FriendsClient friendsClient;
     private readonly ActivityClient activityClient;
     private readonly DmClient dmClient;
     private readonly ReportClient reportClient;
-    private readonly TweeterClient tweeterClient;
-    private readonly PluginHubClient pluginHubClient;
     private readonly VenuesClient venuesClient;
     private readonly LiveClient liveClient;
     private readonly RoomsClient roomsClient;
@@ -56,9 +70,15 @@ public sealed class Plugin : IDalamudPlugin
     private readonly TwitchClient twitchClient;
     private readonly KeysClient keysClient;
     private readonly AlphaChannel.Plugin.Crypto.KeyVault keyVault;
-    private readonly Whispers.WhisperMirror whisperMirror;
     private readonly NearbyAutoWatch nearbyAutoWatch;
-    private ulong lastWhisperContentId = ulong.MaxValue;
+    private readonly ConcurrentQueue<Action> frameworkActions = new();
+    private readonly CancellationTokenSource sessionValidationLifetime = new();
+    private Task? sessionValidationTask;
+    private int disposeStarted;
+    private ulong observedSessionContentId;
+    private ulong validatedSessionContentId;
+    private ulong validatingSessionContentId;
+    private DateTime nextSessionValidationAttemptUtc = DateTime.MinValue;
 
     // Written from the network thread (OnRemoteState), read/cleared on the main thread
     // (OnFrameworkUpdate) - a plain reference field is fine here, a single pointer swap is already
@@ -84,6 +104,17 @@ public sealed class Plugin : IDalamudPlugin
     // first one ever finishes initializing - exactly what looked like a permanently frozen screen.
     private string? lastAppliedRemoteUrl;
     private bool waitingForMedia;
+    private bool loggedEmptyRemoteState;
+
+    // MediaMTX can briefly return 404 while a new RTMP publisher creates
+    // its HLS manifest. Retry live URLs without launching a new renderer
+    // every framework update.
+    private DateTime nextLiveHlsRetryUtc =
+        DateTime.MinValue;
+
+    private static readonly TimeSpan LiveHlsRetryDelay =
+        TimeSpan.FromSeconds(
+            2);
 
     private bool screenRangePaused;
     private bool screenRangeWarningShown;
@@ -106,8 +137,31 @@ public sealed class Plugin : IDalamudPlugin
 
     public Plugin()
     {
-        Cfg = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
-        Cfg.Initialize(PluginInterface);
+        Cfg = ConfigurationMigration.Load(
+            PluginInterface,
+            out var configurationWasReset);
+
+        if (configurationWasReset)
+        {
+            ChatGui.Print(
+                "Your Alpha Channel config file has been reset to allow compatibility with a newer version and migration system. This will only happen once");
+        }
+
+#if !DEBUG
+        // Public builds always use the authenticated production endpoint. This
+        // also repairs configurations retained after running a Debug build.
+        if (!string.Equals(
+                Cfg.RelayServerUrl?.TrimEnd('/'),
+                Configuration.ProductionRelayServerUrl,
+                StringComparison.OrdinalIgnoreCase) ||
+            Cfg.ShowServerStackSwitcher)
+        {
+            Cfg.RelayServerUrl = Configuration.ProductionRelayServerUrl;
+            Cfg.ShowServerStackSwitcher = false;
+            Cfg.Save();
+        }
+#endif
+
         // Old builds defaulted AutoWatchNearby to true; that scan wiped YouTube typing by
         // flipping Player tabs / joining nearby names. Force off until the feature is re-enabled.
         if (Cfg.AutoWatchNearby)
@@ -116,26 +170,31 @@ public sealed class Plugin : IDalamudPlugin
             Cfg.Save();
         }
 
-        // VideoEngine's own constructor calls DxHandler.Initialise, matching the original
-        // Aetherphone ordering - no separate call needed here.
+        // VideoEngine initializes DxHandler in its constructor; no separate call is needed here.
         screenController = new ScreenController(() => true);
         video = new VideoPlayer(screenController.Engine);
         video.SetVolume(Cfg.Muted ? 0 : Cfg.Volume);
-        video.CookiesPath = Cfg.YouTubeCookiesPath;
-        if (Cfg.UseFirefoxCookies && string.IsNullOrWhiteSpace(Cfg.YouTubeCookiesBrowser))
-        {
-            Cfg.YouTubeCookiesBrowser = "firefox";
-        }
 
-        video.CookiesBrowser = Cfg.YouTubeCookiesBrowser;
-        video.CookiesBrowserProfile = Cfg.YouTubeCookiesProfilePath;
-        _ = Task.Run(() => YouTubeCookieExport.Ensure(Cfg, video));
+        video.CookiesPath =
+            YouTubeEmbeddedBrowserSession.IsConnected(Cfg)
+                ? YouTubeEmbeddedBrowserSession.CookieFilePath
+                : null;
+
+        //
+        // Repair/migrate saved queue slots before reading ActiveQueueSlot.
+        //
+        QueueManager.NormalizeConfiguration(
+            Cfg);
+
         var activeProfile =
-    Cfg.SavedQueueProfiles[Cfg.ActiveQueueSlot];
+            Cfg.SavedQueueProfiles[
+                Cfg.ActiveQueueSlot];
 
-        queue = new AetherStreamQueue(
-            video,
-            activeProfile?.Entries ?? Enumerable.Empty<VideoQueueRecord>());
+        queue =
+            new AetherStreamQueue(
+                video,
+                activeProfile?.Entries ??
+                Enumerable.Empty<VideoQueueRecord>());
         stream = new StreamClient(Cfg, () => Cfg.CharacterDisplayNames.GetValueOrDefault(ReadLocalContentId()),
             () => Cfg.CharacterSessions.GetValueOrDefault(ReadLocalContentId()));
         stream.OnState += OnRemoteState;
@@ -148,8 +207,6 @@ public sealed class Plugin : IDalamudPlugin
         activityClient = new ActivityClient(Cfg);
         dmClient = new DmClient(Cfg);
         reportClient = new ReportClient(Cfg);
-        tweeterClient = new TweeterClient(Cfg);
-        pluginHubClient = new PluginHubClient(Cfg);
         venuesClient = new VenuesClient(Cfg);
         liveClient = new LiveClient(Cfg);
         roomsClient = new RoomsClient(Cfg);
@@ -157,17 +214,36 @@ public sealed class Plugin : IDalamudPlugin
         twitchClient = new TwitchClient(Cfg);
         keysClient = new KeysClient(Cfg);
         keyVault = new AlphaChannel.Plugin.Crypto.KeyVault(Cfg, keysClient);
-        whisperMirror = new Whispers.WhisperMirror(Cfg, PluginInterface.ConfigDirectory.FullName);
-
         mainWindow = new MainWindow(screenController, video, queue, stream, RequestRename, authClient, signInFlow,
-            friendsClient, activityClient, dmClient, reportClient, tweeterClient, pluginHubClient, venuesClient, liveClient,
+            friendsClient, activityClient, dmClient, reportClient, venuesClient, liveClient,
             roomsClient, radioClient,
-            twitchClient, keyVault, whisperMirror, UpdateSessionForCurrentCharacter);
+            twitchClient, keyVault, UpdateSessionForCurrentCharacter);
 
         mainWindow.OnViewerTvSpawnRequested = SpawnViewerTv;
 
+        miniPlayerWindow = new MiniPlayerWindow(
+            video,
+            screenController.Engine,
+            stream,
+            () => mainWindow.GetMiniModeTitle(),
+            OpenMiniChat,
+            () => mainWindow.OpenUi());
+
+        miniChatWindow = new MiniChatWindow(
+            stream,
+            () => mainWindow.GetMiniPartyTitle(),
+            mainWindow.DrawMiniPartyChatContents,
+            OpenMiniPlayer,
+            mainWindow.OpenFullWatchPartyChat);
+
+        mainWindow.OnMiniPlayerRequested = OpenMiniPlayer;
+        mainWindow.OnMiniChatRequested = OpenMiniChat;
+        mainWindow.IsMiniPlayerOpen = () => miniPlayerWindow.IsOpen;
+
         nearbyAutoWatch = new NearbyAutoWatch(stream, mainWindow);
         windowSystem.AddWindow(mainWindow);
+        windowSystem.AddWindow(miniPlayerWindow);
+        windowSystem.AddWindow(miniChatWindow);
 
         Framework.Update += OnFrameworkUpdate;
         PluginInterface.UiBuilder.Draw += windowSystem.Draw;
@@ -175,7 +251,7 @@ public sealed class Plugin : IDalamudPlugin
         ContextMenu.OnMenuOpened += OnMenuOpened;
         CommandManager.AddHandler("/alpha", new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open Alpha Channel. /alpha watch <name> | leave | stage.",
+            HelpMessage = "Open Alpha Channel. /alpha watch <name> | leave | stage | patreon true/false.",
         });
         CommandManager.AddHandler("/wp", new CommandInfo(OnWatchPartyChatCommand)
         {
@@ -225,6 +301,39 @@ public sealed class Plugin : IDalamudPlugin
                 catch (Exception exception)
                 {
                     ChatGui.Print($"[AlphaChannel] Couldn't run /dance: {exception.Message}");
+                }
+
+                break;
+
+            case "patreon":
+                if (string.Equals(
+                        rest,
+                        "true",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    Cfg.PatreonMember = true;
+                    Cfg.PatreonMembershipTier = 3;
+                    Cfg.Save();
+                    mainWindow.NotifyLocalPatreonMembershipChanged();
+                    ChatGui.Print(
+                        "[AlphaChannel] Patreon simulation enabled at tier 3. Use Refresh access on the DJ Live page.");
+                }
+                else if (string.Equals(
+                             rest,
+                             "false",
+                             StringComparison.OrdinalIgnoreCase))
+                {
+                    Cfg.PatreonMember = false;
+                    Cfg.PatreonMembershipTier = null;
+                    Cfg.Save();
+                    mainWindow.NotifyLocalPatreonMembershipChanged();
+                    ChatGui.Print(
+                        "[AlphaChannel] Patreon simulation disabled.");
+                }
+                else
+                {
+                    ChatGui.Print(
+                        "Usage: /alpha patreon true|false");
                 }
 
                 break;
@@ -325,23 +434,11 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        args.AddMenuItem(new MenuItem
-        {
-            Name = "Join Stream",
-            PrefixChar = 'A',
-            PrefixColor = 588,
-            OnClicked = _ =>
-            {
-                queue.Clear();
-                mainWindow.OpenViewerAndJoin(target.TargetName);
-            },
-        });
-
         // "Make it easier for people to find one another": resolves by the target's actual FFXIV
         // character identity (name+world), not a chosen name anyone has to know/type - if you can
         // see them, you can add them. Needs both a signed-in caller and a resolvable world (cross-
-        // world/instanced targets don't always carry one - see the try/catch below, same defensive
-        // pattern WhisperMirror.cs uses for the same RowRef<World> API).
+        // world/instanced targets don't always carry one, so world resolution remains guarded by
+        // the try/catch below.
         if (mainWindow.CurrentSession is { } session)
         {
             var characterName = target.TargetName;
@@ -359,15 +456,52 @@ public sealed class Plugin : IDalamudPlugin
             {
                 args.AddMenuItem(new MenuItem
                 {
-                    Name = "Add AlphaChannel Friend",
+                    Name = "Join Stream",
                     PrefixChar = 'A',
                     PrefixColor = 588,
                     OnClicked = clickedArgs =>
                     {
                         _ = Task.Run(async () =>
                         {
-                            var ok = await friendsClient.SendRequestByCharacterAsync(session.Token, characterName, world);
-                            mainWindow.HandleAddFriendByCharacterResult(ok, characterName);
+                            var result = await friendsClient.FindJoinableStreamByCharacterAsync(
+                                session.Token, characterName, world);
+                            if (result is null)
+                            {
+                                frameworkActions.Enqueue(() =>
+                                    ChatGui.Print($"[AlphaChannel] {characterName} is not hosting a joinable Watch Party."));
+                                return;
+                            }
+
+                            if (result.Kind == AlphaChannel.Contracts.RoomKind.Locked)
+                            {
+                                frameworkActions.Enqueue(() =>
+                                    ChatGui.Print($"[AlphaChannel] {characterName}'s Watch Party requires a password. Join it from the Party Directory."));
+                                return;
+                            }
+
+                            frameworkActions.Enqueue(() =>
+                            {
+                                queue.Clear();
+                                mainWindow.OpenViewerAndJoin(
+                                    result.AccountId,
+                                    visibleHostName: result.DisplayName);
+                            });
+                        });
+                    },
+                });
+
+                args.AddMenuItem(new MenuItem
+                {
+                    Name = "Add Alpha Channel Friend",
+                    PrefixChar = 'A',
+                    PrefixColor = 588,
+                    OnClicked = clickedArgs =>
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            var outcome = await friendsClient.SendRequestByCharacterAsync(session.Token, characterName, world);
+                            frameworkActions.Enqueue(() =>
+                                mainWindow.HandleAddFriendByCharacterResult(outcome, characterName));
                         });
                     },
                 });
@@ -388,104 +522,209 @@ public sealed class Plugin : IDalamudPlugin
 
     private void ApplyHostScreenRangePause()
     {
-        // Viewer playback is handled separately.
-        if (stream.Mode != StreamMode.Hosting)
+        var engine =
+            screenController.Engine;
+
+        var isViewing =
+            stream.Mode ==
+            StreamMode.Viewing;
+
+        //
+        // A viewer must have explicitly spawned their TV. Solo and hosting
+        // modes use the engine's own active state.
+        //
+        if (!engine.IsActive ||
+            (
+                isViewing &&
+                !mainWindow.ViewerTvEnabled
+            ))
         {
-            screenRangePaused = false;
-            screenRangeWarningShown = false;
+            screenRangePaused =
+                false;
+
+            screenRangeWarningShown =
+                false;
+
             return;
         }
 
-        // Nothing currently playing locally.
-        if (queue.Current is null || !screenController.Engine.IsActive)
-        {
-            screenRangePaused = false;
-            screenRangeWarningShown = false;
-            return;
-        }
+        var localPlayer =
+            ObjectTable.LocalPlayer;
 
-        var localPlayer = ObjectTable.LocalPlayer;
-
-        // LocalPlayer commonly disappears briefly during zoning/teleport.
-        // Treat that the same as leaving the TV's usable area.
+        //
+        // Zoning can temporarily remove LocalPlayer. Treat that as being
+        // outside the allowed range.
+        //
         if (localPlayer is null)
         {
             if (!screenRangePaused)
             {
-                ChatGui.Print(
-                    "[AlphaChannel] Playback paused because you're no longer near the TV.");
+                if (isViewing)
+                {
+                    ChatGui.Print(
+                        "[AlphaChannel] TV despawned because you're no longer near it.");
 
-                AepLog.Info(
-                    "[WatchParty] Host left TV area; pausing playback.");
+                    AepLog.Info(
+                        "[WatchParty] Viewer left TV area; despawning local TV.");
 
-                video.Pause(true);
-                screenRangePaused = true;
+                    mainWindow.DespawnViewerTv(stopPlayback: !miniPlayerWindow.IsOpen);
+                }
+                else
+                {
+                    ChatGui.Print(
+                        miniPlayerWindow.IsOpen
+                            ? "[AlphaChannel] TV despawned; playback is continuing in Mini Player."
+                            : "[AlphaChannel] Playback paused because you're no longer near the TV.");
+
+                    AepLog.Info(
+                        miniPlayerWindow.IsOpen
+                            ? "[Screen] Player left TV area; continuing playback in Mini Player."
+                            : "[Screen] Player left TV area; pausing playback and despawning TV.");
+
+                    if (!miniPlayerWindow.IsOpen)
+                    {
+                        video.Pause(true);
+                    }
+
+                    engine.DespawnScreen();
+                }
+
+                screenRangePaused =
+                    true;
             }
 
             return;
         }
 
-        var distance = Vector3.Distance(
-            localPlayer.Position,
-            screenController.Engine.ScreenPosition);
+        var distance =
+            Vector3.Distance(
+                localPlayer.Position,
+                engine.ScreenPosition);
 
-        // One warning while approaching the cutoff.
-        if (distance > HostScreenWarnDistance &&
-            distance <= HostScreenPauseDistance &&
+        //
+        // Warn once while approaching the cutoff.
+        //
+        if (distance >
+                HostScreenWarnDistance &&
+            distance <=
+                HostScreenPauseDistance &&
             !screenRangeWarningShown)
         {
             ChatGui.Print(
-                "[AlphaChannel] You're getting too far from the TV. Move closer or playback will pause.");
+                isViewing || miniPlayerWindow.IsOpen
+                    ? "[AlphaChannel] You're getting too far from the TV. Move closer or it will despawn."
+                    : "[AlphaChannel] You're getting too far from the TV. Move closer or playback will pause and the TV will despawn.");
 
-            screenRangeWarningShown = true;
+            screenRangeWarningShown =
+                true;
         }
 
-        // Hard cutoff.
-        if (distance > HostScreenPauseDistance)
+        //
+        // Apply the hard cutoff once.
+        //
+        if (distance >
+            HostScreenPauseDistance)
         {
             if (!screenRangePaused)
             {
-                ChatGui.Print(
-                    "[AlphaChannel] Playback paused because you're too far from the TV.");
+                if (isViewing)
+                {
+                    ChatGui.Print(
+                        "[AlphaChannel] TV despawned because you moved too far away.");
 
-                AepLog.Info(
-                    $"[WatchParty] Host is {distance:F1} yalms from TV; pausing playback.");
+                    AepLog.Info(
+                        $"[WatchParty] Viewer is {distance:F1} yalms from TV; despawning local TV.");
 
-                video.Pause(true);
-                screenRangePaused = true;
+                    mainWindow.DespawnViewerTv(stopPlayback: !miniPlayerWindow.IsOpen);
+                }
+                else
+                {
+                    ChatGui.Print(
+                        miniPlayerWindow.IsOpen
+                            ? "[AlphaChannel] TV despawned; playback is continuing in Mini Player."
+                            : "[AlphaChannel] Playback paused and the TV despawned because you moved too far away.");
+
+                    AepLog.Info(
+                        miniPlayerWindow.IsOpen
+                            ? $"[Screen] Player is {distance:F1} yalms from TV; continuing playback in Mini Player."
+                            : $"[Screen] Player is {distance:F1} yalms from TV; pausing playback and despawning TV.");
+
+                    if (!miniPlayerWindow.IsOpen)
+                    {
+                        video.Pause(true);
+                    }
+
+                    engine.DespawnScreen();
+                }
+
+                screenRangePaused =
+                    true;
             }
 
             return;
         }
 
-        // Back inside the safe zone. Allow a future warning/pause cycle,
-        // but deliberately do NOT resume playback automatically.
-        if (distance <= HostScreenWarnDistance)
+        //
+        // Reset the warning after returning to the safe area. Playback and
+        // the TV deliberately remain paused/despawned until manually restored.
+        //
+        if (distance <=
+            HostScreenWarnDistance)
         {
-            screenRangeWarningShown = false;
-            screenRangePaused = false;
+            screenRangeWarningShown =
+                false;
+
+            screenRangePaused =
+                false;
         }
     }
 
     private void OnFrameworkUpdate(IFramework framework)
     {
-        screenController.OnFrameworkUpdate();
-        queue.OnFrameworkUpdate();
-        EnsureCharacterHasName();
-        var contentId = ReadLocalContentId();
-        if (contentId != lastWhisperContentId)
+        while (frameworkActions.TryDequeue(out var action))
         {
-            lastWhisperContentId = contentId;
-            whisperMirror.SetCharacter(contentId);
-            mainWindow.ResetWhisperUi();
+            action();
         }
 
+        screenController.OnFrameworkUpdate();
+        queue.OnFrameworkUpdate();
+        video.UpdateIdleScreensaver();
+        EnsureCharacterHasName();
+        var contentId = ReadLocalContentId();
         mainWindow.CurrentDisplayName = Cfg.CharacterDisplayNames.GetValueOrDefault(contentId);
         mainWindow.CurrentSession = Cfg.CharacterSessions.GetValueOrDefault(contentId);
+        UpdateSessionValidation(contentId, mainWindow.CurrentSession);
         mainWindow.CurrentCharacterName = ObjectTable.LocalPlayer?.Name.TextValue;
         mainWindow.CurrentWorldName = ReadLocalWorldName();
+        mainWindow.RefreshHostedRoomWorldMetadata();
+        mainWindow.UpdateLocalPartyAlerts();
+        mainWindow.UpdatePromotionalAlerts();
         mainWindow.CurrentIsLalafell = ReadIsLalafell();
-        mainWindow.ApplyPendingJoinQueueClear();
+        if (mainWindow.ApplyPendingJoinQueueClear())
+        {
+            //
+            // Joining may be confirmed just after the host's first state was
+            // received. The local cleanup above stops the old browser/game and
+            // TV, so forget every previous playback guard and replay only the
+            // state that belongs to the newly joined room. This also allows the
+            // TV spawn prompt to appear again for the new room.
+            //
+            lastReceivedRemoteUrl = null;
+            lastAppliedRemoteUrl = null;
+            waitingForMedia = true;
+            loggedEmptyRemoteState = false;
+            nextLiveHlsRetryUtc = DateTime.MinValue;
+            latestRemoteState = stream.CurrentRoomState;
+            pendingRemoteState = stream.CurrentRoomState;
+            AepLog.Info(
+                "[WatchParty] Viewer join confirmed; reset local playback and replayed the new room state.");
+        }
+        mainWindow.ApplyPendingRoomEndedReset();
+
+        if (stream.Mode == StreamMode.None && miniChatWindow.IsOpen)
+        {
+            miniChatWindow.IsOpen = false;
+        }
 
         if (pendingRemoteState is { } remoteState)
         {
@@ -493,12 +732,16 @@ public sealed class Plugin : IDalamudPlugin
             ApplyRemoteState(remoteState);
         }
 
-        if (mainWindow.ViewerTvEnabled &&
+        if ((mainWindow.ViewerTvEnabled || miniPlayerWindow.IsOpen) &&
             waitingForMedia &&
             !screenController.Engine.IsActive)
         {
             AepLog.Warning("[WatchParty] Attempting waiting screen spawn");
             video.ShowWaitingScreen();
+            if (!mainWindow.ViewerTvEnabled && miniPlayerWindow.IsOpen)
+            {
+                screenController.Engine.DespawnScreen();
+            }
         }
 
         ApplyAutoPause();
@@ -510,56 +753,158 @@ public sealed class Plugin : IDalamudPlugin
 
         nearbyAutoWatch.OnFrameworkUpdate();
 
-        // Hosting: push the local queue's current state out to the relay every tick it changes
-        // meaningfully - PublishStateAsync itself is cheap to call repeatedly (a JSON send), the
-        // server is what dedupes/broadcasts, so no local diff-check is needed for a v1.
-        // Mode != Viewing, not Mode == Hosting: PublishStateAsync is what SETS Mode to Hosting in
-        // the first place, so gating on it already being Hosting is a deadlock - a fresh host
-        // (Mode.None) would never publish, never become Hosting, and nobody could ever join them.
-        // Mode != Viewing still correctly blocks a host who was just transferred away (Mode flips
-        // to Viewing) from continuing to publish their own stale local queue state.
-        var current = queue.Current;
-        var engine = screenController.Engine;
+        //
+        // Local playback remains local until the user explicitly creates
+        // a Watch Party. Once hosting, publish the current media and current
+        // timestamp exactly as before.
+        //
+        // SNES/Game Boy use a separate armed broadcast URL. Their encoder is
+        // demand-controlled by UpdateGameBroadcastDemand(), but the room
+        // continues advertising the HLS URL while the broadcast is armed.
+        //
+        var current =
+            queue.Current;
+
+        var engine =
+            screenController.Engine;
+
+        mainWindow.UpdateGameBroadcastDemand();
+        mainWindow.UpdateLocalVideoBroadcastDemand();
 
         if (stream.Mode == StreamMode.Hosting)
         {
-            var (position, _, paused) = current is null ? (0d, 0d, true) : video.GetProgress();
-            _ = stream.PublishStateAsync(
-                current?.Url,
-                position,
-                paused,
-                engine.IsActive ? engine.ScreenPosition : null,
-                engine.IsActive ? engine.ScreenYaw : null,
-                engine.IsActive ? engine.ScreenScale : null);
+            var localVideoBroadcastUrl =
+     mainWindow.ActiveLocalVideoBroadcastHlsUrl;
 
-            if (current is not null)
+            var gameBroadcastUrl =
+                mainWindow.ActiveGameBroadcastHlsUrl;
+
+            var browserBroadcastUrl =
+                mainWindow.ActiveBrowserBroadcastHlsUrl;
+
+            var relayBroadcastUrl =
+                !string.IsNullOrWhiteSpace(
+                    localVideoBroadcastUrl)
+                    ? localVideoBroadcastUrl
+                    : !string.IsNullOrWhiteSpace(
+                        browserBroadcastUrl)
+                        ? browserBroadcastUrl
+                        : gameBroadcastUrl;
+
+            if (!string.IsNullOrWhiteSpace(
+                    relayBroadcastUrl))
             {
-                video.SetOverlayTitle(current.Title, current.Source);
+                var isLocalVideoBroadcast =
+                    !string.IsNullOrWhiteSpace(
+                        localVideoBroadcastUrl);
+
+                var isBrowserBroadcast =
+                    !isLocalVideoBroadcast &&
+                    !string.IsNullOrWhiteSpace(
+                        browserBroadcastUrl);
+
+                _ = stream.PublishStateAsync(
+                    relayBroadcastUrl,
+                    0d,
+                    isLocalVideoBroadcast &&
+                    mainWindow.ActiveLocalVideoBroadcastPaused,
+                    engine.IsActive
+                        ? engine.ScreenPosition
+                        : null,
+                    engine.IsActive
+                        ? engine.ScreenYaw
+                        : null,
+ engine.IsActive
+    ? engine.ScreenScale
+    : null,
+engine.IsActive
+    ? engine.DisableFixedScreenScaleRatio
+    : null,
+engine.IsActive
+    ? engine.ScreenWidthScale
+    : null,
+engine.IsActive
+    ? engine.ScreenHeightScale
+    : null,
+                  isLocalVideoBroadcast
+    ? mainWindow.ActiveLocalVideoBroadcastTitle ??
+      "Local Video"
+    : isBrowserBroadcast
+    ? mainWindow.ActiveBrowserBroadcastTitle ??
+      "Web Browser"
+    : mainWindow.ActiveGameBroadcastTitle ??
+      "Gameplay",
+null);
             }
-        }
-        else if (stream.Mode != StreamMode.Viewing &&
-                 current is not null &&
-                 engine.IsActive)
-        {
-            var (position, _, paused) = video.GetProgress();
+            else
+            {
+                var (position, _, paused) =
+                    current is null
+                        ? (0d, 0d, true)
+                        : video.GetProgress();
 
-            _ = stream.PublishStateAsync(
-                current.Url,
-                position,
-                paused,
-                engine.ScreenPosition,
-                engine.ScreenYaw,
-                engine.ScreenScale);
+                //
+                // Direct URL entries use the URL as their temporary
+                // title until AetherStreamQueue finishes resolving
+                // metadata. Do not expose that placeholder as a title.
+                //
+                var mediaTitle =
+                    mainWindow.IsGameBroadcastArmed
+                        ? mainWindow.ActiveGameBroadcastTitle
+                        : current is not null &&
+                    !string.IsNullOrWhiteSpace(
+                        current.Title) &&
+                    !string.Equals(
+                        current.Title,
+                        current.Url,
+                        StringComparison.OrdinalIgnoreCase)
+                        ? current.Title
+                        : null;
 
-            video.SetOverlayTitle(
-                current.Title,
-                current.Source);
+                var publishedUrl =
+    current?.Url;
+
+                if (!string.IsNullOrWhiteSpace(
+                        publishedUrl) &&
+                    engine.IsAudioOnly)
+                {
+                    publishedUrl =
+                        AudioVisualizerSelection.AddToUrl(
+                            publishedUrl,
+                            mainWindow.PartyVisualizerMode,
+                            mainWindow.PartyVisualizerTheme);
+                }
+
+                _ = stream.PublishStateAsync(
+                    publishedUrl,
+                    position,
+                                    paused,
+                    engine.IsActive
+                        ? engine.ScreenPosition
+                        : null,
+                    engine.IsActive
+                        ? engine.ScreenYaw
+                        : null,
+                    engine.IsActive
+                        ? engine.ScreenScale
+                        : null,
+                    mediaTitle,
+                    current?.ThumbnailUrl);
+
+                if (current is not null)
+                {
+                    video.SetOverlayTitle(
+                        current.Title,
+                        current.Source);
+                }
+            }
         }
     }
 
     internal void UpdateRecentlyWatched()
     {
-        if (queue.Current is not { } current)
+        if (queue.Current is not { } current ||
+            current.IsTransient)
         {
             return;
         }
@@ -704,7 +1049,8 @@ mainWindow.AddPartyReactionToFeed(
     // title screen, well before that's known.
     private void EnsureCharacterHasName()
     {
-        var contentId = ReadLocalContentId();
+        var contentId =
+            ReadLocalContentId();
 
         if (contentId == 0 ||
             mainWindow.IsNamePromptActive)
@@ -712,13 +1058,46 @@ mainWindow.AddPartyReactionToFeed(
             return;
         }
 
-        if (Cfg.CharacterDisplayNames.ContainsKey(contentId))
+        //
+        // Temporary testing mode: show the onboarding once on every plugin
+        // load, even when this character already has a saved username.
+        //
+        if (ForceFirstLaunchExperienceForTesting)
+        {
+            if (forcedFirstLaunchPromptRequested ||
+                !mainWindow.IsOpen)
+            {
+                return;
+            }
+
+            forcedFirstLaunchPromptRequested =
+                true;
+
+            var suggested =
+                Cfg.CharacterDisplayNames
+                    .GetValueOrDefault(
+                        contentId) ??
+                ObjectTable.LocalPlayer?
+                    .Name.TextValue ??
+                "Player";
+
+            PromptForName(
+                contentId,
+                suggested);
+
+            return;
+        }
+
+        if (Cfg.CharacterDisplayNames.ContainsKey(
+                contentId))
         {
             return;
         }
 
-        // Don't force the whole plugin UI open just because the
-        // character still needs a username. Wait until they open it.
+        //
+        // Don't force the whole plugin UI open just because the character
+        // still needs a username. Wait until they open Alpha Channel.
+        //
         if (!mainWindow.IsOpen)
         {
             return;
@@ -726,7 +1105,9 @@ mainWindow.AddPartyReactionToFeed(
 
         PromptForName(
             contentId,
-            ObjectTable.LocalPlayer?.Name.TextValue ?? "Player");
+            ObjectTable.LocalPlayer?
+                .Name.TextValue ??
+            "Player");
     }
 
     // Manually triggered from MainWindow's "Rename" button - same flow as the automatic
@@ -796,10 +1177,162 @@ mainWindow.AddPartyReactionToFeed(
         {
             waitingForMedia = true;
             video.ShowWaitingScreen();
+            AepLog.Info(
+                "[WatchParty] Spawned viewer TV with the waiting screen while media state is pending.");
             return;
         }
 
         ApplyRemoteState(state);
+        screenController.Engine.RespawnScreen();
+        AepLog.Info(
+            "[WatchParty] Spawned viewer TV and applied the host's current media state.");
+    }
+
+    private void UpdateSessionValidation(
+        ulong contentId,
+        CharacterSession? session)
+    {
+        if (contentId != observedSessionContentId)
+        {
+            observedSessionContentId = contentId;
+            validatedSessionContentId = 0;
+            validatingSessionContentId = 0;
+            nextSessionValidationAttemptUtc = DateTime.MinValue;
+            mainWindow.SessionValidationInProgress = false;
+        }
+
+        if (contentId == 0)
+        {
+            return;
+        }
+
+        if (session is null)
+        {
+            validatedSessionContentId = contentId;
+            mainWindow.SessionValidationInProgress = false;
+            return;
+        }
+
+        // A structurally incomplete session cannot authenticate and is safe to
+        // remove locally without making a request. The encrypted vault itself
+        // is left intact if loading it failed; Configuration never supplies a
+        // partially loaded vault in that case.
+        if (string.IsNullOrWhiteSpace(session.Token) ||
+            string.IsNullOrWhiteSpace(session.AccountId))
+        {
+            Cfg.CharacterSessions.Remove(contentId);
+            Cfg.Save();
+            validatedSessionContentId = contentId;
+            mainWindow.SessionValidationInProgress = false;
+            return;
+        }
+
+        if (validatedSessionContentId == contentId ||
+            validatingSessionContentId == contentId ||
+            DateTime.UtcNow < nextSessionValidationAttemptUtc)
+        {
+            return;
+        }
+
+        validatingSessionContentId = contentId;
+        mainWindow.SessionValidationInProgress = true;
+        var token = session.Token;
+
+        sessionValidationTask = Task.Run(async () =>
+        {
+            var result = await authClient
+                .ValidateSessionAsync(token, sessionValidationLifetime.Token)
+                .ConfigureAwait(false);
+
+            frameworkActions.Enqueue(() =>
+            {
+                if (ReadLocalContentId() != contentId)
+                {
+                    return;
+                }
+
+                validatingSessionContentId = 0;
+                mainWindow.SessionValidationInProgress = false;
+
+                if (result.Account is { } account)
+                {
+                    if (!Cfg.CharacterSessions.TryGetValue(contentId, out var current) ||
+                        !string.Equals(current.Token, token, StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+
+                    mainWindow.NotifySessionRefreshed(
+                        current.AvatarImageUrl,
+                        account.AvatarImageUrl);
+                    current.AccountId = account.AccountId;
+                    current.Handle = account.Handle;
+                    current.DisplayName = account.DisplayName;
+                    current.InviteCode = account.InviteCode;
+                    current.AvatarIcon = account.AvatarIcon;
+                    current.AvatarColorHex = account.AvatarColorHex;
+                    current.AvatarImageUrl = account.AvatarImageUrl;
+                    current.Bio = account.Bio;
+                    current.StatusMessage = account.StatusMessage;
+                    Cfg.Save();
+                    validatedSessionContentId = contentId;
+                    return;
+                }
+
+                if (result.Failure?.Failure == NetworkFailure.Unauthorized)
+                {
+                    // Only a definite authentication rejection removes the
+                    // token. Timeouts, outages and malformed responses retain
+                    // it so a temporary problem cannot sign the player out.
+                    if (Cfg.CharacterSessions.TryGetValue(contentId, out var current) &&
+                        string.Equals(current.Token, token, StringComparison.Ordinal))
+                    {
+                        Cfg.CharacterSessions.Remove(contentId);
+                        Cfg.Save();
+                    }
+
+                    validatedSessionContentId = contentId;
+                    return;
+                }
+
+                // Retry temporary failures quietly. The existing session stays
+                // usable while the server or network recovers.
+                nextSessionValidationAttemptUtc =
+                    DateTime.UtcNow.AddMinutes(5);
+            });
+        });
+    }
+
+    private void OpenMiniPlayer()
+    {
+        miniPlayerWindow.IsOpen = true;
+
+        if (stream.Mode != StreamMode.Viewing)
+        {
+            return;
+        }
+
+        var state = latestRemoteState;
+        if (state is null || string.IsNullOrWhiteSpace(state.Url))
+        {
+            waitingForMedia = true;
+            video.ShowWaitingScreen();
+            screenController.Engine.DespawnScreen();
+            return;
+        }
+
+        ApplyRemoteState(state);
+    }
+
+    private void OpenMiniChat()
+    {
+        if (stream.Mode is not (StreamMode.Hosting or StreamMode.Viewing))
+        {
+            ChatGui.Print("[AlphaChannel] Join or create a Watch Party to use Mini Chat.");
+            return;
+        }
+
+        miniChatWindow.IsOpen = true;
     }
 
     // Viewer path (including /achannel watch): apply URL/position/pause + screen transform to this
@@ -813,47 +1346,139 @@ mainWindow.AddPartyReactionToFeed(
             return;
         }
 
-        // Always remember the host's latest state, even when this viewer has
-        // chosen not to spawn their local TV.
-        latestRemoteState = message;
+        //
+        // Always remember the host's latest state, including while the
+        // viewer has chosen not to spawn their local TV.
+        //
+        latestRemoteState =
+            message;
 
-        // Joining the watch party no longer automatically starts local
-        // playback or creates a screen.
-        if (!mainWindow.ViewerTvEnabled)
+        if (string.IsNullOrWhiteSpace(message.Url))
         {
+            if (!loggedEmptyRemoteState)
+            {
+                AepLog.Info(
+                    "[WatchParty] Waiting for the host's media stream.");
+                loggedEmptyRemoteState = true;
+            }
+
+            waitingForMedia =
+                true;
+
+            //
+            // A livestream source may briefly disappear while FFmpeg and
+            // MediaMTX change publishers. Let the same URL be applied again
+            // when it returns.
+            //
+            lastAppliedRemoteUrl =
+                null;
+
+            nextLiveHlsRetryUtc =
+                DateTime.MinValue;
+
             return;
         }
 
-        if (string.IsNullOrEmpty(message.Url))
+        waitingForMedia =
+            false;
+
+        loggedEmptyRemoteState =
+            false;
+
+        //
+        // Viewers do not automatically spawn a TV. The first shared state
+        // received for this room offers them the choice instead.
+        //
+        if (!mainWindow.ViewerTvEnabled &&
+            !miniPlayerWindow.IsOpen)
         {
-            AepLog.Warning("[WatchParty] Received empty media state");
-            waitingForMedia = true;
+            mainWindow.RequestViewerTvSpawnPrompt();
             return;
         }
 
-        waitingForMedia = false;
+        var url =
+     message.Url;
 
-        var url = message.Url;
+        var isLiveHls =
+            Uri.TryCreate(
+                url,
+                UriKind.Absolute,
+                out var liveMediaUri) &&
+            liveMediaUri.Port == 8888 &&
+            liveMediaUri.AbsolutePath.StartsWith(
+                "/live/",
+                StringComparison.OrdinalIgnoreCase) &&
+            liveMediaUri.AbsolutePath.EndsWith(
+                "/index.m3u8",
+                StringComparison.OrdinalIgnoreCase);
 
-        // Also re-trigger whenever the local player is genuinely idle (e.g. right after Join's own
-        // queue.Clear()/video.Stop()) even if the URL happens to match the last one applied -
-        // otherwise rejoining the same still-playing host would never actually restart playback.
-        if (url != lastAppliedRemoteUrl || video.State == VideoPlaybackState.Idle)
+        var urlChanged =
+            !string.Equals(
+                url,
+                lastAppliedRemoteUrl,
+                StringComparison.Ordinal);
+
+        var livePlaybackNeedsRetry =
+            isLiveHls &&
+            video.State is
+                VideoPlaybackState.Failed or
+                VideoPlaybackState.Idle;
+
+        var retryIsDue =
+            DateTime.UtcNow >=
+            nextLiveHlsRetryUtc;
+
+        if (urlChanged)
         {
-            lastAppliedRemoteUrl = url;
-            video.Play(url);
+            lastAppliedRemoteUrl =
+                url;
+
+            nextLiveHlsRetryUtc =
+                DateTime.UtcNow +
+                LiveHlsRetryDelay;
+
+            video.Play(
+                url);
+        }
+        else if (livePlaybackNeedsRetry &&
+                 retryIsDue)
+        {
+            //
+            // Keep the viewer's TV present while MediaMTX prepares the new HLS
+            // manifest, then make another clean playback attempt. This also
+            // recovers after the first attempt entered Failed rather than Idle.
+            //
+            video.ShowWaitingScreen();
+
+            nextLiveHlsRetryUtc =
+                DateTime.UtcNow +
+                LiveHlsRetryDelay;
+
+            AepLog.Info(
+                "[WatchParty] Retrying live HLS playback after a temporary failure.");
+
+            video.Play(
+                url);
+        }
+        else if (!isLiveHls &&
+                 video.State ==
+                 VideoPlaybackState.Idle)
+        {
+            //
+            // Preserve the previous same-URL restart behaviour for ordinary
+            // media after joining or resetting local playback.
+            //
+            video.Play(
+                url);
         }
 
-        bool isLiveHls =
-     url.Contains(
-         ":8888/live/",
-         StringComparison.OrdinalIgnoreCase)
-     &&
-     url.EndsWith(
-         "/index.m3u8",
-         StringComparison.OrdinalIgnoreCase);
-
-        if (!isLiveHls)
+        //
+        // Ordinary videos use position correction. Live HLS and audio-only
+        // streams are not safely seekable and must remain attached to their
+        // live edge.
+        //
+        if (!isLiveHls &&
+            !video.IsAudioOnly)
         {
             if (message.PositionSeconds is double remotePosition)
             {
@@ -875,10 +1500,30 @@ mainWindow.AddPartyReactionToFeed(
             message.Paused ?? false);
         video.SetOverlayTitle(url, string.Empty);
 
-        if (message.ScreenX is { } x && message.ScreenY is { } y && message.ScreenZ is { } z &&
-            message.ScreenYaw is { } yaw && message.ScreenScale is { } scale)
+        if (mainWindow.PartySyncTvPlacement &&
+            message.ScreenX is { } x &&
+            message.ScreenY is { } y &&
+            message.ScreenZ is { } z &&
+            message.ScreenYaw is { } yaw &&
+            message.ScreenScale is { } scale)
         {
-            screenController.Engine.ApplyRemoteScreenTransform(new Vector3(x, y, z), yaw, scale);
+            screenController.Engine.ApplyRemoteScreenTransform(
+                new Vector3(
+                    x,
+                    y,
+                    z),
+                yaw,
+                scale,
+                message.ScreenDisableFixedScaleRatio ??
+                false,
+                message.ScreenWidthScale,
+                message.ScreenHeightScale);
+        }
+
+        if (!mainWindow.ViewerTvEnabled &&
+            miniPlayerWindow.IsOpen)
+        {
+            screenController.Engine.DespawnScreen();
         }
     }
 
@@ -888,12 +1533,39 @@ mainWindow.AddPartyReactionToFeed(
         return state is null ? 0 : state->ContentId;
     }
 
-    private static string? ReadLocalWorldName() => ObjectTable.LocalPlayer?.HomeWorld.Value.Name.ToString();
+    // CurrentWorld follows world visits and data-centre travel.
+    // HomeWorld would always return the character's original server.
+    private static string? ReadLocalWorldName()
+    {
+        var player =
+            ObjectTable.LocalPlayer;
 
-    // Race 3 = Lalafell, per the same customize-byte-array lookup Aetherphone's Velvet feature
-    // already uses (Apps/Velvet/VelvetShell.cs's IsLalafellCharacter) for its own Lalafell-specific
-    // access gating - kept as a private const here rather than an enum since this is the only place
-    // AlphaChannel needs it.
+        if (player is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var worldName =
+                player.CurrentWorld.Value.Name
+                    .ToString();
+
+            return string.IsNullOrWhiteSpace(
+                    worldName)
+                ? null
+                : worldName;
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning(
+                $"[World] Could not resolve current world: {exception.Message}");
+
+            return null;
+        }
+    }
+
+    // Lalafell race ID in the character customization data.
     private const byte LalafellRaceId = 3;
 
     private static bool ReadIsLalafell()
@@ -934,18 +1606,58 @@ mainWindow.AddPartyReactionToFeed(
 
     public void Dispose()
     {
-        CommandManager.RemoveHandler("/alpha");
-        CommandManager.RemoveHandler("/wp");
-        ContextMenu.OnMenuOpened -= OnMenuOpened;
-        PluginInterface.UiBuilder.OpenMainUi -= ToggleMainWindow;
-        PluginInterface.UiBuilder.Draw -= windowSystem.Draw;
-        Framework.Update -= OnFrameworkUpdate;
+        if (Interlocked.Exchange(ref disposeStarted, 1) != 0)
+        {
+            return;
+        }
 
-        mainWindow.Dispose();
-        nearbyAutoWatch.Dispose();
-        whisperMirror.Dispose();
-        stream.Dispose();
-        screenController.Dispose();
-        DxHandler.Dispose();
+        static void Cleanup(
+            string name,
+            Action action)
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception exception)
+            {
+                AepLog.Error(
+                    $"[Shutdown] {name} cleanup failed: {exception}");
+            }
+        }
+
+        Cleanup("session validation cancellation", sessionValidationLifetime.Cancel);
+        Cleanup(
+            "session validation worker",
+            () =>
+            {
+                if (sessionValidationTask is { IsCompleted: false } &&
+                    !sessionValidationTask.Wait(TimeSpan.FromSeconds(3)))
+                {
+                    AepLog.Warning(
+                        "[Shutdown] Session validation worker did not stop within 3 seconds.");
+                }
+            });
+        Cleanup("/alpha command", () => CommandManager.RemoveHandler("/alpha"));
+        Cleanup("/wp command", () => CommandManager.RemoveHandler("/wp"));
+        Cleanup("context menu", () => ContextMenu.OnMenuOpened -= OnMenuOpened);
+        Cleanup("main UI callback", () => PluginInterface.UiBuilder.OpenMainUi -= ToggleMainWindow);
+        Cleanup("window draw callback", () => PluginInterface.UiBuilder.Draw -= windowSystem.Draw);
+        Cleanup("framework update callback", () => Framework.Update -= OnFrameworkUpdate);
+
+        Cleanup("main window", mainWindow.Dispose);
+        Cleanup("mini player", miniPlayerWindow.Dispose);
+        Cleanup("mini chat", miniChatWindow.Dispose);
+        Cleanup("nearby auto-watch", nearbyAutoWatch.Dispose);
+        Cleanup("queue", queue.Dispose);
+
+        Cleanup("stream event", () => stream.OnState -= OnRemoteState);
+        Cleanup("rename event", () => stream.OnRenameRequired -= OnRenameRequired);
+        Cleanup("realtime connection", stream.Dispose);
+
+        Cleanup("video player", video.Dispose);
+        Cleanup("screen controller", screenController.Dispose);
+        Cleanup("DirectX hook", DxHandler.Dispose);
+        Cleanup("session validation token", sessionValidationLifetime.Dispose);
     }
 }
