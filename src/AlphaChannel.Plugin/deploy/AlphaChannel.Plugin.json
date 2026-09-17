@@ -1,0 +1,20 @@
+{
+  "Author": "K.I.R.O",
+  "Name": "AlphaChannel",
+  "InternalName": "AlphaChannel.Plugin",
+  "AssemblyVersion": "1.0.9.0",
+  "Description": "Renders an in-world video screen and syncs playback with other players running AlphaChannel over a self-hosted relay.",
+  "ApplicableVersion": "any",
+  "Tags": [
+    "video",
+    "watch party",
+    "media"
+  ],
+  "DalamudApiLevel": 15,
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "CanUnloadAsync": false,
+  "LoadPriority": 0,
+  "Punchline": "A shared in-world video screen.",
+  "AcceptsFeedback": true
+}

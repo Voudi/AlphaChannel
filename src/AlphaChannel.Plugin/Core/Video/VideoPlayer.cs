@@ -9,19 +9,34 @@ internal enum VideoPlaybackState : byte
     Failed,
 }
 
-// Adapter over VideoEngine (the ported AlphaChannel engine, Voudi, GPL-3.0), keeping the public
-// contract the rest of AetherStream (the queue, WatchAlongSession, the debug/screen windows)
-// already depends on. The old hand-rolled libmpv p/invoke wrapper this replaced is gone; playback
-// itself now lives on VideoEngine, shared with ScreenController so both the phone's UI and the
-// in-world screen VFX are driven by the same single mpv instance.
+// Adapter over VideoEngine (the ported AlphaChannel engine, Voudi, GPL-3.0).
+// Exposes playback controls and state to AlphaChannel's UI and queue.
+// Shares the engine owned by ScreenController, keeping playback controls
+// and the in-world screen driven by the same playback engine.
 internal sealed class VideoPlayer : IDisposable
 {
     private readonly VideoEngine engine;
 
+    private string? currentMediaUrl;
+    private DateTime? idleScreensaverEligibleSinceUtc;
+    private string? idleScreensaverStatus;
+    private int idleScreensaverPlaybackAttemptId = -1;
+    private int waitingScreenVersion;
+    private int idleScreensaverWaitingScreenVersion = -1;
+
+    private AudioVisualizerMode currentVisualizerMode =
+        AudioVisualizerMode.ClassicBars;
+
+    private AudioVisualizerTheme currentVisualizerTheme =
+    AudioVisualizerTheme.AlphaPurple;
+
     public VideoPlayer(VideoEngine engine)
     {
         this.engine = engine;
+        engine.ExternalPlaybackTakingOver += OnExternalPlaybackTakingOver;
     }
+
+    internal event Action? ExternalPlaybackTakingOver;
 
     public VideoPlaybackState State { get; private set; } = VideoPlaybackState.Idle;
     public string? LastError { get; private set; }
@@ -30,8 +45,26 @@ internal sealed class VideoPlayer : IDisposable
     public bool IsPlayingSnes =>
         engine.IsPlayingSnes;
 
+    public bool IsPlayingGame =>
+        engine.IsPlayingGame;
+
+    public bool IsPlayingBrowser =>
+        engine.IsPlayingBrowser;
+
     public bool IsPlayingLocalVideo =>
         engine.IsPlayingLocalVideo;
+
+    public bool IsPlayingImage =>
+    engine.IsPlayingImage;
+
+    internal bool HasVideoPlaybackSession =>
+        engine.HasVideoPlaybackSession;
+
+    internal BroadcastDiagnosticsSnapshot BroadcastDiagnostics =>
+        engine.BroadcastDiagnostics;
+
+    public bool IsAudioOnly =>
+    engine.IsAudioOnly;
 
     public bool HardwareDecoding
     {
@@ -57,24 +90,53 @@ internal sealed class VideoPlayer : IDisposable
         set => engine.CookiesPath = value;
     }
 
-    public string? CookiesBrowser
-    {
-        get => engine.CookiesBrowser;
-        set => engine.CookiesBrowser = value;
-    }
-
-    public string? CookiesBrowserProfile
-    {
-        get => engine.CookiesBrowserProfile;
-        set => engine.CookiesBrowserProfile = value;
-    }
-
     public void ShowWaitingScreen()
     {
+        waitingScreenVersion++;
         engine.ShowWaitingScreen();
     }
 
+    public void UpdateIdleScreensaver()
+    {
+        string? status = null;
+        if (engine.IsActive)
+        {
+            status = engine.IsShowingWaitingScreen
+                ? "Waiting for content"
+                : State == VideoPlaybackState.Paused
+                    ? "Playback paused"
+                    : State is VideoPlaybackState.Idle or VideoPlaybackState.Failed
+                        ? "Nothing playing"
+                        : null;
+        }
+
+        var activityChanged = idleScreensaverPlaybackAttemptId != PlaybackAttemptId ||
+                              idleScreensaverWaitingScreenVersion != waitingScreenVersion ||
+                              !string.Equals(idleScreensaverStatus, status, StringComparison.Ordinal);
+        if (activityChanged)
+        {
+            idleScreensaverPlaybackAttemptId = PlaybackAttemptId;
+            idleScreensaverWaitingScreenVersion = waitingScreenVersion;
+            idleScreensaverStatus = status;
+            idleScreensaverEligibleSinceUtc = status is null ? null : DateTime.UtcNow;
+            engine.SetIdleScreensaver(null);
+        }
+
+        if (status is null)
+        {
+            idleScreensaverEligibleSinceUtc = null;
+            engine.SetIdleScreensaver(null);
+            return;
+        }
+
+        idleScreensaverEligibleSinceUtc ??= DateTime.UtcNow;
+        if (DateTime.UtcNow - idleScreensaverEligibleSinceUtc.Value >= TimeSpan.FromMinutes(10))
+            engine.SetIdleScreensaver(status);
+    }
+
     public void SetVolume(int volumePercent) => engine.SetVolume(volumePercent);
+
+    public void SetOutputMuted(bool muted) => engine.SetOutputMuted(muted);
 
     public void SetOverlayTitle(string title, string source) => engine.SetOverlayTitle(title, source);
 
@@ -166,12 +228,30 @@ internal sealed class VideoPlayer : IDisposable
     // VideoPlayer this replaces, there's no separate YoutubeExplode pre-resolution step needed
     // here; that resolver (VideoUrlResolver) is kept only for AetherStreamQueue's metadata
     // enrichment (title/duration/thumbnail), not for the playback URL itself.
-    public void Play(string url)
+
+    private static bool IsAlphaChannelLiveHls(
+    string url)
     {
-        if (engine.IsPlayingSnes)
+        return Uri.TryCreate(
+                   url,
+                   UriKind.Absolute,
+                   out var uri) &&
+               uri.Port == 8888 &&
+               uri.AbsolutePath.StartsWith(
+                   "/live/",
+                   StringComparison.OrdinalIgnoreCase) &&
+               uri.AbsolutePath.EndsWith(
+                   "/index.m3u8",
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void Play(
+    string url)
+    {
+        if (engine.IsPlayingGame || engine.IsPlayingBrowser)
         {
             Plugin.ChatGui.Print(
-                "[AlphaChannel] Exit the SNES game before using video playback.");
+                "[AlphaChannel] Stop the current game or browser before using video playback.");
 
             return;
         }
@@ -184,35 +264,217 @@ internal sealed class VideoPlayer : IDisposable
             return;
         }
 
+        //
+        // Image descriptors must be handled before AudioVisualizerSelection,
+        // because both features store synchronization metadata in URL
+        // fragments. Image URLs never reach mpv or yt-dlp.
+        //
+        if (ImageMediaSelection.TryParse(
+                url,
+                out var imageSelection) &&
+            imageSelection is not null)
+        {
+            var sameImageMedia =
+                !string.IsNullOrWhiteSpace(
+                    currentMediaUrl) &&
+                string.Equals(
+                    currentMediaUrl,
+                    url,
+                    StringComparison.Ordinal) &&
+                engine.IsPlayingImage &&
+                State is
+                    VideoPlaybackState.Loading or
+                    VideoPlaybackState.Playing or
+                    VideoPlaybackState.Paused;
+
+            if (sameImageMedia)
+            {
+                return;
+            }
+
+            try
+            {
+                PlaybackAttemptId++;
+
+                currentMediaUrl =
+                    url;
+
+                currentVisualizerMode =
+                    AudioVisualizerMode.ClassicBars;
+
+                currentVisualizerTheme =
+                    AudioVisualizerTheme.AlphaPurple;
+
+                LastError =
+                    null;
+
+                State =
+                    VideoPlaybackState.Loading;
+
+                engine.PlayImage(
+                    imageSelection);
+
+                if (engine.LastError is { } immediateError)
+                {
+                    State =
+                        VideoPlaybackState.Failed;
+
+                    LastError =
+                        immediateError;
+
+                    return;
+                }
+
+                State =
+                    VideoPlaybackState.Playing;
+            }
+            catch (Exception exception)
+            {
+                currentMediaUrl =
+                    null;
+
+                State =
+                    VideoPlaybackState.Failed;
+
+                LastError =
+                    exception.Message;
+
+                AepLog.Warning(
+                    $"[Image] Failed to start playback: {exception.Message}");
+            }
+
+            return;
+        }
+
+        //
+        // A malformed AlphaChannel image descriptor must not fall through to
+        // mpv as an ordinary web/video URL.
+        //
+        if (url.Contains(
+                "#acmedia=",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            currentMediaUrl =
+                null;
+
+            State =
+                VideoPlaybackState.Failed;
+
+            LastError =
+                "The shared image or slideshow information is invalid.";
+
+            return;
+        }
+
+        var expectedAudioOnly =
+            AudioVisualizerSelection
+                .HasAudioVisualizerMetadata(
+                    url);
+
+        var selection =
+            AudioVisualizerSelection.Parse(
+                url);
+
+        var sameMedia =
+            !string.IsNullOrWhiteSpace(
+                currentMediaUrl) &&
+            string.Equals(
+                currentMediaUrl,
+                selection.MediaUrl,
+                StringComparison.Ordinal) &&
+            // A game/browser can stop MPV directly while this facade still
+            // remembers the last URL. Only suppress a duplicate Play request
+            // when the engine still owns a live or pending MPV session.
+            engine.HasVideoPlaybackSession &&
+            State is
+                VideoPlaybackState.Loading or
+                VideoPlaybackState.Playing or
+                VideoPlaybackState.Paused;
+
+        //
+        // Always record/apply the visualizer selection first. During Loading,
+        // VideoEngine remembers it and applies it once audio-only playback is
+        // confirmed.
+        //
+        var visualizerChanged =
+            currentVisualizerMode != selection.Mode ||
+            currentVisualizerTheme != selection.Theme;
+
+        currentVisualizerMode =
+            selection.Mode;
+        currentVisualizerTheme =
+    selection.Theme;
+
+        engine.SetAudioVisualizerMode(
+            selection.Mode,
+            selection.Theme);
+
+        //
+        // A fragment-only change is presentation state, not new media.
+        // Do not call PlayVideo because that would reload the Icecast stream.
+        //
+        if (sameMedia)
+        {
+            if (visualizerChanged)
+            {
+                AepLog.Info(
+                    $"[AudioVisualizer] Applied URL selection: {AudioVisualizerSelection.GetDisplayName(selection.Mode)}.");
+            }
+
+            return;
+        }
+
         try
         {
             PlaybackAttemptId++;
 
-            LastError = null;
-            State = VideoPlaybackState.Loading;
+            currentMediaUrl =
+                selection.MediaUrl;
 
-            engine.PlayVideo(url);
+            LastError =
+                null;
 
-            State = VideoPlaybackState.Playing;
+            State =
+                VideoPlaybackState.Loading;
+
+            //
+            // Only the normalized media URL is passed to MPV. The fragment is
+            // AlphaChannel synchronization metadata and never reaches Icecast.
+            //
+            engine.PlayVideo(
+     selection.MediaUrl,
+     allowWebResolverFallback:
+         !IsAlphaChannelLiveHls(
+             selection.MediaUrl),
+     expectedAudioOnly:
+         expectedAudioOnly);
+
+            State =
+                VideoPlaybackState.Playing;
         }
         catch (Exception exception)
         {
-            State = VideoPlaybackState.Failed;
-            LastError = exception.Message;
+            currentMediaUrl =
+                null;
+
+            State =
+                VideoPlaybackState.Failed;
+
+            LastError =
+                exception.Message;
 
             AepLog.Warning(
                 $"[Video] Failed to start playback: {exception.Message}");
         }
     }
 
-
     public bool PlayLocalVideo(
         string path)
     {
-        if (engine.IsPlayingSnes)
+        if (engine.IsPlayingGame || engine.IsPlayingBrowser)
         {
             Plugin.ChatGui.Print(
-                "[AlphaChannel] Exit the SNES game before playing a local video.");
+                "[AlphaChannel] Stop the current game or browser before playing a local video.");
 
             return false;
         }
@@ -276,10 +538,30 @@ internal sealed class VideoPlayer : IDisposable
         }
     }
 
-    public void Pause(bool pause)
+    public void Pause(
+      bool pause)
     {
-        engine.Pause(pause);
-        State = pause ? VideoPlaybackState.Paused : VideoPlaybackState.Playing;
+        //
+        // A remote Watch Party state can call Pause every framework update.
+        // Check the renderer first and preserve Failed/Idle so the same MPV
+        // failure is not reset to Playing and reported again every frame.
+        //
+
+        CheckForPlaybackFailure();
+
+        if (State == VideoPlaybackState.Failed ||
+            State == VideoPlaybackState.Idle)
+        {
+            return;
+        }
+
+        engine.Pause(
+            pause);
+
+        State =
+            pause
+                ? VideoPlaybackState.Paused
+                : VideoPlaybackState.Playing;
     }
 
     public void Seek(float seconds) => engine.Seek((int)MathF.Round(seconds));
@@ -305,11 +587,39 @@ internal sealed class VideoPlayer : IDisposable
     public void Stop()
     {
         engine.StopVideo();
+
+        currentMediaUrl =
+            null;
+
+        currentVisualizerMode =
+            AudioVisualizerMode.ClassicBars;
+
+        currentVisualizerTheme =
+    AudioVisualizerTheme.AlphaPurple;
+
+        State =
+            VideoPlaybackState.Idle;
+    }
+
+    private void OnExternalPlaybackTakingOver()
+    {
+        // Queue listeners save the current resume point before this facade
+        // forgets the MPV session.
+        ExternalPlaybackTakingOver?.Invoke();
+
+        currentMediaUrl = null;
+        currentVisualizerMode = AudioVisualizerMode.ClassicBars;
+        currentVisualizerTheme = AudioVisualizerTheme.AlphaPurple;
+        LastError = null;
         State = VideoPlaybackState.Idle;
+        PlaybackAttemptId++;
+        idleScreensaverEligibleSinceUtc = null;
+        engine.SetIdleScreensaver(null);
     }
 
     public void Dispose()
     {
+        engine.ExternalPlaybackTakingOver -= OnExternalPlaybackTakingOver;
         Stop();
     }
 }

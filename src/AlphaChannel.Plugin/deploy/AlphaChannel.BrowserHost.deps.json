@@ -1,0 +1,158 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0/win-x64",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {},
+    ".NETCoreApp,Version=v10.0/win-x64": {
+      "AlphaChannel.BrowserHost/1.0.0": {
+        "dependencies": {
+          "CefSharp.OffScreen.NETCore": "150.0.110"
+        },
+        "runtime": {
+          "AlphaChannel.BrowserHost.dll": {}
+        }
+      },
+      "CefSharp.Common.NETCore/150.0.110": {
+        "dependencies": {
+          "chromiumembeddedframework.runtime": "150.0.11"
+        },
+        "runtime": {
+          "runtimes/win-x64/lib/net6.0/CefSharp.Core.Runtime.dll": {
+            "assemblyVersion": "150.0.110.0",
+            "fileVersion": "150.0.110.0"
+          },
+          "runtimes/win-x64/lib/net6.0/CefSharp.Core.dll": {
+            "assemblyVersion": "150.0.110.0",
+            "fileVersion": "150.0.110.0"
+          },
+          "runtimes/win-x64/lib/net6.0/CefSharp.dll": {
+            "assemblyVersion": "150.0.110.0",
+            "fileVersion": "150.0.110.0"
+          },
+          "runtimes/win-x64/lib/net6.0/Ijwhost.dll": {
+            "fileVersion": "6.0.3324.36610"
+          }
+        },
+        "native": {
+          "runtimes/win-x64/native/CefSharp.BrowserSubprocess.Core.dll": {
+            "assemblyVersion": "150.0.110.0",
+            "fileVersion": "150.0.110.0"
+          },
+          "runtimes/win-x64/native/CefSharp.BrowserSubprocess.dll": {
+            "assemblyVersion": "150.0.110.0",
+            "fileVersion": "150.0.110.0"
+          },
+          "runtimes/win-x64/native/CefSharp.BrowserSubprocess.exe": {
+            "fileVersion": "150.0.110.0"
+          },
+          "runtimes/win-x64/native/CefSharp.BrowserSubprocess.runtimeconfig.json": {
+            "fileVersion": "0.0.0.0"
+          }
+        }
+      },
+      "CefSharp.OffScreen.NETCore/150.0.110": {
+        "dependencies": {
+          "CefSharp.Common.NETCore": "150.0.110"
+        },
+        "runtime": {
+          "lib/net6.0-windows7.0/CefSharp.OffScreen.dll": {
+            "assemblyVersion": "150.0.110.0",
+            "fileVersion": "150.0.110.0"
+          }
+        }
+      },
+      "chromiumembeddedframework.runtime/150.0.11": {
+        "dependencies": {
+          "chromiumembeddedframework.runtime.win-x64": "150.0.11"
+        }
+      },
+      "chromiumembeddedframework.runtime.win-x64/150.0.11": {
+        "native": {
+          "runtimes/win-x64/native/chrome_100_percent.pak": {
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/chrome_200_percent.pak": {
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/chrome_elf.dll": {
+            "fileVersion": "150.0.7871.115"
+          },
+          "runtimes/win-x64/native/d3dcompiler_47.dll": {
+            "fileVersion": "10.0.26100.7705"
+          },
+          "runtimes/win-x64/native/dxcompiler.dll": {
+            "fileVersion": "1.9.2602.0"
+          },
+          "runtimes/win-x64/native/dxil.dll": {
+            "fileVersion": "101.7.2308.24"
+          },
+          "runtimes/win-x64/native/icudtl.dat": {
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/libEGL.dll": {
+            "fileVersion": "2.1.27952.0"
+          },
+          "runtimes/win-x64/native/libGLESv2.dll": {
+            "fileVersion": "2.1.27952.0"
+          },
+          "runtimes/win-x64/native/libcef.dll": {
+            "fileVersion": "150.0.11.0"
+          },
+          "runtimes/win-x64/native/resources.pak": {
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/v8_context_snapshot.bin": {
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/vk_swiftshader.dll": {
+            "fileVersion": "5.0.0.1"
+          },
+          "runtimes/win-x64/native/vk_swiftshader_icd.json": {
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/vulkan-1.dll": {
+            "fileVersion": "1.4.352.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "AlphaChannel.BrowserHost/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "CefSharp.Common.NETCore/150.0.110": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-Be0CSj498218OE3iFP1FHZBtpr14nuX3bDYxMNSWM7wMNWlqrs8hM0FqTWf2WeMXc5gyGfh1IhHgyI4g9kEN/g==",
+      "path": "cefsharp.common.netcore/150.0.110",
+      "hashPath": "cefsharp.common.netcore.150.0.110.nupkg.sha512"
+    },
+    "CefSharp.OffScreen.NETCore/150.0.110": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-KTxdhlXioWP9yKxdWGR8Sr3Ono0AouwWXqnFes5/uA3Ga5w5NlujLogpk7jBUdjGjj4U0xtFQucsrekGUhZBQQ==",
+      "path": "cefsharp.offscreen.netcore/150.0.110",
+      "hashPath": "cefsharp.offscreen.netcore.150.0.110.nupkg.sha512"
+    },
+    "chromiumembeddedframework.runtime/150.0.11": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-KpN6vX5/DnJows8lSV4hYv6fyy+O7IAxypGu7fGulD5/o+71nzHBNVng/2y7b/vlRv74FvBArUwGtrsFdxZ70g==",
+      "path": "chromiumembeddedframework.runtime/150.0.11",
+      "hashPath": "chromiumembeddedframework.runtime.150.0.11.nupkg.sha512"
+    },
+    "chromiumembeddedframework.runtime.win-x64/150.0.11": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-BLXOY63ffJm3rBTk/WXZQbnSTLXdJ3jAtbPwmSDxmKa7L1/UbuzKB2vmsES7FpBT761J6hmZSA0vChAyDJuysA==",
+      "path": "chromiumembeddedframework.runtime.win-x64/150.0.11",
+      "hashPath": "chromiumembeddedframework.runtime.win-x64.150.0.11.nupkg.sha512"
+    }
+  }
+}
