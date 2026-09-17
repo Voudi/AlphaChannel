@@ -184,14 +184,19 @@ internal sealed partial class MainWindow : Window, IDisposable
     new(1220f, 840f);
 
     //
-    // Allow the experimental 1.5x interface preset to use a larger design
-    // canvas. Ordinary presets still apply their own named size.
-    //
+    // Base manual-resize ceiling. Named presets apply their additional
+    // resolution-specific allowance below.
     private static readonly Vector2 MaximumWindowSize =
-        WindowSize * 1.5f;
+        WindowSize * 1.05f;
 
-    // The 4K preset keeps its existing initial size, but may be manually
-    // resized up to 50% beyond the ordinary expanded-window limit.
+    // Named resolution presets keep their existing initial sizes, but expose
+    // progressively larger manual-resize ceilings.
+    private static readonly Vector2 FullHdMaximumWindowSize =
+        MaximumWindowSize * 1.1f;
+
+    private static readonly Vector2 QhdMaximumWindowSize =
+        MaximumWindowSize * 1.2f;
+
     private static readonly Vector2 UhdMaximumWindowSize =
         MaximumWindowSize * 1.5f;
 
@@ -257,9 +262,13 @@ internal sealed partial class MainWindow : Window, IDisposable
     };
 
     private Vector2 CurrentMaximumWindowSize =>
-        Plugin.Cfg.WindowSizePreset == UiWindowSizePreset.Uhd
-            ? UhdMaximumWindowSize
-            : MaximumWindowSize;
+        Plugin.Cfg.WindowSizePreset switch
+        {
+            UiWindowSizePreset.FullHd => FullHdMaximumWindowSize,
+            UiWindowSizePreset.Qhd => QhdMaximumWindowSize,
+            UiWindowSizePreset.Uhd => UhdMaximumWindowSize,
+            _ => MaximumWindowSize,
+        };
 
     private Vector2 ClampWindowSize(Vector2 size)
     {
@@ -289,6 +298,8 @@ internal sealed partial class MainWindow : Window, IDisposable
         var hasValidSavedSize =
             cfg.WindowSizePreset is
                 UiWindowSizePreset.Custom or
+                UiWindowSizePreset.FullHd or
+                UiWindowSizePreset.Qhd or
                 UiWindowSizePreset.Uhd &&
             cfg.WindowWidth >=
                 650f &&
@@ -3085,8 +3096,9 @@ tagline);
                 // flag here would make PreDraw force the size on the following
                 // frame and fight ImGui while the drag is still in progress.
                 userWindowSize = currentSize;
-                if (Plugin.Cfg.WindowSizePreset !=
-                    UiWindowSizePreset.Uhd)
+                if (Plugin.Cfg.WindowSizePreset is
+                    UiWindowSizePreset.Design or
+                    UiWindowSizePreset.Custom)
                 {
                     Plugin.Cfg.WindowSizePreset =
                         UiWindowSizePreset.Custom;
