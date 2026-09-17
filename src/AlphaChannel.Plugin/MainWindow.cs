@@ -190,6 +190,11 @@ internal sealed partial class MainWindow : Window, IDisposable
     private static readonly Vector2 MaximumWindowSize =
         WindowSize * 1.5f;
 
+    // The 4K preset keeps its existing initial size, but may be manually
+    // resized up to 50% beyond the ordinary expanded-window limit.
+    private static readonly Vector2 UhdMaximumWindowSize =
+        MaximumWindowSize * 1.5f;
+
     private static readonly Vector2 FirstLaunchWindowSize =
         new(
             WindowSize.X * 0.90f,
@@ -237,11 +242,11 @@ internal sealed partial class MainWindow : Window, IDisposable
             x * activeLayoutScale,
             y * activeLayoutScale);
 
-    // Every explicit font adjustment in the main-window partials is expressed
-    // relative to the 1x design. This preserves the existing rendering at 1x
-    // and applies the UHD multiplier only while that preset is active.
-    private void SetUiFontScale(float relativeScale) =>
-        ImGui.SetWindowFontScale(relativeScale * layoutScale);
+    // Explicit font adjustments remain relative to the active global font
+    // scale. GlobalFontScaleScope already applies the UHD multiplier, so
+    // multiplying it here as well would scale adjusted text twice.
+    private static void SetUiFontScale(float relativeScale) =>
+        ImGui.SetWindowFontScale(relativeScale);
 
     private static Vector2 NamedWindowSize(UiWindowSizePreset preset) => preset switch
     {
@@ -251,17 +256,24 @@ internal sealed partial class MainWindow : Window, IDisposable
         _ => WindowSize,
     };
 
-    private static Vector2 ClampWindowSize(Vector2 size)
+    private Vector2 CurrentMaximumWindowSize =>
+        Plugin.Cfg.WindowSizePreset == UiWindowSizePreset.Uhd
+            ? UhdMaximumWindowSize
+            : MaximumWindowSize;
+
+    private Vector2 ClampWindowSize(Vector2 size)
     {
+        var maximumSize = CurrentMaximumWindowSize;
+
         return new Vector2(
      Math.Clamp(
                 size.X,
                 MinimumWindowSize.X,
-                MaximumWindowSize.X),
+                maximumSize.X),
             Math.Clamp(
                 size.Y,
                 MinimumWindowSize.Y,
-                MaximumWindowSize.Y));
+                maximumSize.Y));
     }
 
     private void LoadWindowSizeFromConfig()
@@ -274,15 +286,16 @@ internal sealed partial class MainWindow : Window, IDisposable
         // minimum constraints. This also repairs configurations written by
         // older builds that accidentally stored the minimized capsule size.
         //
-        var hasValidCustomSize =
-            cfg.WindowSizePreset ==
-                UiWindowSizePreset.Custom &&
+        var hasValidSavedSize =
+            cfg.WindowSizePreset is
+                UiWindowSizePreset.Custom or
+                UiWindowSizePreset.Uhd &&
             cfg.WindowWidth >=
                 650f &&
             cfg.WindowHeight >=
                 MinimumWindowSize.Y;
 
-        if (hasValidCustomSize)
+        if (hasValidSavedSize)
         {
             userWindowSize =
                 ClampWindowSize(
@@ -680,7 +693,7 @@ internal sealed partial class MainWindow : Window, IDisposable
         SizeConstraints = new WindowSizeConstraints
         {
             MinimumSize = MinimumWindowSize,
-            MaximumSize = MaximumWindowSize,
+            MaximumSize = CurrentMaximumWindowSize,
         };
 
         LoadWindowSizeFromConfig();
@@ -2877,7 +2890,7 @@ tagline);
             new WindowSizeConstraints
             {
                 MinimumSize = MinimumWindowSize,
-                MaximumSize = MaximumWindowSize,
+                MaximumSize = CurrentMaximumWindowSize,
             };
 
         if (userResized)
@@ -3072,8 +3085,12 @@ tagline);
                 // flag here would make PreDraw force the size on the following
                 // frame and fight ImGui while the drag is still in progress.
                 userWindowSize = currentSize;
-                Plugin.Cfg.WindowSizePreset =
-                    UiWindowSizePreset.Custom;
+                if (Plugin.Cfg.WindowSizePreset !=
+                    UiWindowSizePreset.Uhd)
+                {
+                    Plugin.Cfg.WindowSizePreset =
+                        UiWindowSizePreset.Custom;
+                }
                 Plugin.Cfg.WindowWidth = userWindowSize.X;
                 Plugin.Cfg.WindowHeight = userWindowSize.Y;
                 windowSizeSavePending = true;
