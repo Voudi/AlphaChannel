@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using AlphaChannel.Contracts;
+using AlphaChannel.Plugin.Net;
 
 namespace AlphaChannel.Plugin.Auth;
 
@@ -8,9 +9,7 @@ internal sealed class DmClient(Configuration configuration)
 {
     private HttpClient Http(string bearerToken)
     {
-        var http = new HttpClient { BaseAddress = new Uri(configuration.RelayServerUrl) };
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
-        return http;
+        return PluginHttpClients.CreateApiClient(configuration, bearerToken);
     }
 
     // One member = 1:1 (resumes the existing conversation with that pair if there is one); two or
@@ -21,7 +20,7 @@ internal sealed class DmClient(Configuration configuration)
         try
         {
             var response = await http.PostAsJsonAsync("/dm/conversations", new CreateConversationRequest(memberAccountIds, name)).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            if (!NetworkFailureClassifier.IsSuccess("Messages", "Create conversation", response))
             {
                 return null;
             }
@@ -31,7 +30,7 @@ internal sealed class DmClient(Configuration configuration)
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Dm] create conversation failed: {exception.Message}");
+            NetworkFailureClassifier.FromException("Messages", "Create conversation", exception);
             return null;
         }
     }
@@ -50,13 +49,13 @@ internal sealed class DmClient(Configuration configuration)
         try
         {
             var response = await http.PostAsJsonAsync($"/dm/conversations/{conversationId}/messages", request).ConfigureAwait(false);
-            return response.IsSuccessStatusCode
+            return NetworkFailureClassifier.IsSuccess("Messages", "Send message", response)
                 ? await response.Content.ReadFromJsonAsync<MessageDto>().ConfigureAwait(false)
                 : null;
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Dm] send failed: {exception.Message}");
+            NetworkFailureClassifier.FromException("Messages", "Send message", exception);
             return null;
         }
     }
@@ -66,11 +65,12 @@ internal sealed class DmClient(Configuration configuration)
         using var http = Http(bearerToken);
         try
         {
-            await http.PostAsync($"/dm/conversations/{conversationId}/read", null).ConfigureAwait(false);
+            using var response = await http.PostAsync($"/dm/conversations/{conversationId}/read", null).ConfigureAwait(false);
+            _ = NetworkFailureClassifier.IsSuccess("Messages", "Mark conversation read", response);
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Dm] mark-read failed: {exception.Message}");
+            NetworkFailureClassifier.FromException("Messages", "Mark conversation read", exception);
         }
     }
 
@@ -80,13 +80,13 @@ internal sealed class DmClient(Configuration configuration)
         try
         {
             var response = await http.GetAsync(path).ConfigureAwait(false);
-            return response.IsSuccessStatusCode
+            return NetworkFailureClassifier.IsSuccess("Messages", $"Request {path}", response)
                 ? await response.Content.ReadFromJsonAsync<T>().ConfigureAwait(false)
                 : default;
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Dm] request to {path} failed: {exception.Message}");
+            NetworkFailureClassifier.FromException("Messages", $"Request {path}", exception);
             return default;
         }
     }

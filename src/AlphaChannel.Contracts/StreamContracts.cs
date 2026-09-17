@@ -1,8 +1,6 @@
 namespace AlphaChannel.Contracts;
 
-// Ported from Aetherphone's Core/Telephony/Contracts/Signals.cs - the stream.* slice only. That
-// file multiplexes call.*/chat.*/velvet.*/etc signals onto the same socket because Aetherphone is
-// a whole phone; AlphaChannel only ever had streaming, so there is nothing else to multiplex.
+// Signal names for Alpha Channel's watch-party state, membership, chat, and reactions.
 public static class SignalType
 {
     public const string StreamState = "stream.state";
@@ -42,9 +40,8 @@ public static class SignalType
     public const string StreamChat = "stream.chat";
 }
 
-// Same flat envelope shape as Aetherphone's CallControl, trimmed to only the fields the stream.*
-// signals actually use - nulls are omitted on the wire, unknown fields are ignored, so this stays
-// wire-compatible with a server that happens to also speak the fuller Aetherphone dialect.
+// Shared message envelope for Alpha Channel's stream.* signals.
+// Each signal uses the fields relevant to its operation.
 public sealed record StreamControl
 {
     public string Type { get; init; } = string.Empty;
@@ -59,6 +56,12 @@ public sealed record StreamControl
     public string? ChatText { get; init; }
 
     public string? Url { get; init; }
+
+    // Display metadata for room directories. These do not control
+    // playback; Url remains the authoritative media source.
+    public string? MediaTitle { get; init; }
+    public string? MediaThumbnailUrl { get; init; }
+
     public double? PositionSeconds { get; init; }
     public bool? Paused { get; init; }
 
@@ -85,7 +88,15 @@ public sealed record StreamControl
     public float? ScreenY { get; init; }
     public float? ScreenZ { get; init; }
     public float? ScreenYaw { get; init; }
+
+    // Compatibility value for clients that only support fixed-ratio scaling.
     public float? ScreenScale { get; init; }
+
+    public bool? ScreenDisableFixedScaleRatio { get; init; }
+
+    public float? ScreenWidthScale { get; init; }
+
+    public float? ScreenHeightScale { get; init; }
 }
 
 public sealed record ParticipantInfo(string UserId, string DisplayName);
@@ -106,4 +117,6 @@ public sealed record RoomDirectoryDto(
     int ViewerCount,
     bool Paused,
     bool HasMedia,
-    string? Url);
+    string? Url,
+    string? MediaTitle,
+    string? MediaThumbnailUrl);

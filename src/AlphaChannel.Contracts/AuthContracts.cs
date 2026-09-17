@@ -1,10 +1,8 @@
 namespace AlphaChannel.Contracts;
 
-// REST contracts for the XIVAuth device-flow sign-in, mirrored from Aetherphone's
-// /auth/xivauth/start + /auth/xivauth/poll shape. AlphaChannel's server is the actual OAuth client
-// registered with XIVAuth (client_id/secret) - the plugin never talks to XIVAuth directly, it just
-// opens a browser to VerificationUri and polls this server, same reasoning Aetherphone has: a
-// Dalamud plugin can't receive an OAuth redirect callback.
+// REST contracts for XIVAuth device-flow sign-in.
+// The Alpha Channel server is the registered OAuth client and communicates with XIVAuth.
+// The plugin opens the verification URL in a browser and polls the server for the result.
 
 // Fresh sign-in uses POST /auth/xivauth/start (anonymous). Linking an additional character to an
 // already-signed-in account uses the separate POST /auth/xivauth/link/start (Bearer-authed) -
@@ -86,6 +84,8 @@ public sealed record AccountProfileDto(
     string? AvatarIcon, string AvatarColorHex, string? Bio, string? StatusMessage, long? FriendsSinceUnix,
     string? AvatarImageUrl,
     bool IsDeveloper = false,
-    PatreonTier PatreonTier = PatreonTier.None);
+    PatreonTier PatreonTier = PatreonTier.None,
+    string? CharacterName = null,
+    string? CharacterWorld = null);
 
 public sealed record AdminPatchAccountRequest(PatreonTier? PatreonTier, bool? IsDeveloper);

@@ -1,5 +1,3 @@
-using AlphaChannel.Contracts;
-
 namespace AlphaChannel.Plugin.Auth;
 
 // One of these per FFXIV character that's been signed in on this install, keyed by LocalContentId
@@ -26,6 +24,4 @@ internal sealed class CharacterSession
     // which is why this is refreshed from the server rather than treated as a fixed value.
     public string InviteCode { get; set; } = "";
 
-    public PatreonTier PatreonTier { get; set; } = PatreonTier.None;
-    public bool IsDeveloper { get; set; }
 }

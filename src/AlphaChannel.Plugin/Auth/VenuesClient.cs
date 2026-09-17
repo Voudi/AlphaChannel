@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using AlphaChannel.Contracts;
+using AlphaChannel.Plugin.Net;
 
 namespace AlphaChannel.Plugin.Auth;
 
@@ -8,9 +9,7 @@ internal sealed class VenuesClient(Configuration configuration)
 {
     private HttpClient Http(string bearerToken)
     {
-        var http = new HttpClient { BaseAddress = new Uri(configuration.RelayServerUrl) };
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
-        return http;
+        return PluginHttpClients.CreateApiClient(configuration, bearerToken);
     }
 
     internal async Task<VenueDto?> CreateAsync(string bearerToken, CreateVenueRequest request)
@@ -19,11 +18,13 @@ internal sealed class VenuesClient(Configuration configuration)
         try
         {
             var response = await http.PostAsJsonAsync("/venues", request).ConfigureAwait(false);
-            return response.IsSuccessStatusCode ? await response.Content.ReadFromJsonAsync<VenueDto>().ConfigureAwait(false) : null;
+            return NetworkFailureClassifier.IsSuccess("Venues", "Create venue", response)
+                ? await response.Content.ReadFromJsonAsync<VenueDto>().ConfigureAwait(false)
+                : null;
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Venues] create failed: {exception.Message}");
+            NetworkFailureClassifier.FromException("Venues", "Create venue", exception);
             return null;
         }
     }
@@ -41,11 +42,11 @@ internal sealed class VenuesClient(Configuration configuration)
         try
         {
             var response = await http.DeleteAsync($"/venues/{venueId}").ConfigureAwait(false);
-            return response.IsSuccessStatusCode;
+            return NetworkFailureClassifier.IsSuccess("Venues", "Delete venue", response);
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Venues] delete failed: {exception.Message}");
+            NetworkFailureClassifier.FromException("Venues", "Delete venue", exception);
             return false;
         }
     }
@@ -56,11 +57,13 @@ internal sealed class VenuesClient(Configuration configuration)
         try
         {
             var response = await http.GetAsync(path).ConfigureAwait(false);
-            return response.IsSuccessStatusCode ? await response.Content.ReadFromJsonAsync<T>().ConfigureAwait(false) : default;
+            return NetworkFailureClassifier.IsSuccess("Venues", $"Request {path}", response)
+                ? await response.Content.ReadFromJsonAsync<T>().ConfigureAwait(false)
+                : default;
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Venues] request to {path} failed: {exception.Message}");
+            NetworkFailureClassifier.FromException("Venues", $"Request {path}", exception);
             return default;
         }
     }

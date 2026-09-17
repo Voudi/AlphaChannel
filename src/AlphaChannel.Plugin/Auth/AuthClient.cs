@@ -2,17 +2,37 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using AlphaChannel.Contracts;
 using AlphaChannel.Plugin;
+using AlphaChannel.Plugin.Net;
 
 namespace AlphaChannel.Plugin.Auth;
 
 internal sealed record UpdateDisplayNameOutcome(AccountSummary? Account, bool NameTaken, bool InvalidFormat);
+internal sealed record SessionValidationResult(AccountSummary? Account, NetworkFailureInfo? Failure);
 
-// Thin REST wrapper around AlphaChannel.Server's /auth/* + /me endpoints. Separate from
-// StreamClient (which only ever speaks the /rt websocket) since sign-in is plain request/response,
-// not a persistent connection - same split Aetherphone draws between HttpService and RealtimeConnection.
+// REST client for the Alpha Channel server's /auth/* and /me endpoints.
+// Sign-in uses HTTP requests; StreamClient handles the persistent /rt WebSocket connection.
 internal sealed class AuthClient(Configuration configuration)
 {
-    private HttpClient Http => new() { BaseAddress = new Uri(configuration.RelayServerUrl) };
+    private const string NetworkArea = "Auth";
+    private HttpClient Http => PluginHttpClients.CreateApiClient(configuration);
+
+    internal NetworkFailureInfo? LastFailure =>
+        NetworkFailureClassifier.GetLast(NetworkArea);
+
+    private static bool IsSuccess(HttpResponseMessage response, string operation)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            NetworkFailureClassifier.Clear(NetworkArea);
+            return true;
+        }
+
+        NetworkFailureClassifier.FromResponse(NetworkArea, operation, response);
+        return false;
+    }
+
+    private static void Failed(string operation, Exception exception) =>
+        NetworkFailureClassifier.FromException(NetworkArea, operation, exception);
 
     // Used to pick up server-side changes the client didn't itself just cause - currently only the
     // invite code, which rotates whenever someone else redeems it (see FriendService.
@@ -24,14 +44,58 @@ internal sealed class AuthClient(Configuration configuration)
         try
         {
             var response = await http.GetAsync("/me").ConfigureAwait(false);
-            return response.IsSuccessStatusCode
+            return IsSuccess(response, "Fetch account")
                 ? await response.Content.ReadFromJsonAsync<AccountSummary>().ConfigureAwait(false)
                 : null;
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Auth] fetching /me failed: {exception.Message}");
+            Failed("Fetch account", exception);
             return null;
+        }
+    }
+
+    internal async Task<SessionValidationResult> ValidateSessionAsync(
+        string bearerToken,
+        CancellationToken cancellationToken)
+    {
+        using var http = Http;
+        http.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", bearerToken);
+
+        try
+        {
+            using var response = await http
+                .GetAsync("/me", cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!IsSuccess(response, "Restore session"))
+            {
+                return new SessionValidationResult(null, LastFailure);
+            }
+
+            var account = await response.Content
+                .ReadFromJsonAsync<AccountSummary>(cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+
+            if (account is null)
+            {
+                Failed(
+                    "Restore session",
+                    new System.Text.Json.JsonException("The account response was empty."));
+                return new SessionValidationResult(null, LastFailure);
+            }
+
+            return new SessionValidationResult(account, null);
+        }
+        catch (Exception exception)
+        {
+            NetworkFailureClassifier.FromException(
+                NetworkArea,
+                "Restore session",
+                exception,
+                cancellationToken.IsCancellationRequested);
+            return new SessionValidationResult(null, LastFailure);
         }
     }
 
@@ -54,11 +118,11 @@ internal sealed class AuthClient(Configuration configuration)
         try
         {
             var response = await http.PostAsJsonAsync("/me/onboarding", new OnboardingRequest(races, wantsToSeeLalafellContent)).ConfigureAwait(false);
-            return response.IsSuccessStatusCode;
+            return IsSuccess(response, "Submit onboarding");
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Auth] onboarding submit failed: {exception.Message}");
+            Failed("Submit onboarding", exception);
             return false;
         }
     }
@@ -73,7 +137,7 @@ internal sealed class AuthClient(Configuration configuration)
         try
         {
             var response = await http.PatchAsJsonAsync("/me", request).ConfigureAwait(false);
-            if (response.IsSuccessStatusCode)
+            if (IsSuccess(response, "Update profile"))
             {
                 return new UpdateDisplayNameOutcome(await response.Content.ReadFromJsonAsync<AccountSummary>().ConfigureAwait(false), false, false);
             }
@@ -83,7 +147,7 @@ internal sealed class AuthClient(Configuration configuration)
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Auth] display name update failed: {exception.Message}");
+            Failed("Update profile", exception);
             return new UpdateDisplayNameOutcome(null, false, false);
         }
     }
@@ -101,13 +165,13 @@ internal sealed class AuthClient(Configuration configuration)
             content.Add(part, "file", Path.GetFileName(filePath));
 
             var response = await http.PostAsync("/me/avatar", content).ConfigureAwait(false);
-            return response.IsSuccessStatusCode
+            return IsSuccess(response, "Upload avatar")
                 ? await response.Content.ReadFromJsonAsync<AccountSummary>().ConfigureAwait(false)
                 : null;
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Auth] avatar upload failed: {exception.Message}");
+            Failed("Upload avatar", exception);
             return null;
         }
     }
@@ -119,13 +183,13 @@ internal sealed class AuthClient(Configuration configuration)
         try
         {
             var response = await http.DeleteAsync("/me/avatar").ConfigureAwait(false);
-            return response.IsSuccessStatusCode
+            return IsSuccess(response, "Clear avatar")
                 ? await response.Content.ReadFromJsonAsync<AccountSummary>().ConfigureAwait(false)
                 : null;
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Auth] avatar clear failed: {exception.Message}");
+            Failed("Clear avatar", exception);
             return null;
         }
     }
@@ -147,13 +211,13 @@ internal sealed class AuthClient(Configuration configuration)
         try
         {
             var response = await http.GetAsync($"/accounts/{accountId}/profile").ConfigureAwait(false);
-            return response.IsSuccessStatusCode
+            return IsSuccess(response, "Fetch profile")
                 ? await response.Content.ReadFromJsonAsync<AccountProfileDto>().ConfigureAwait(false)
                 : null;
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Auth] fetching profile failed: {exception.Message}");
+            Failed("Fetch profile", exception);
             return null;
         }
     }
@@ -165,13 +229,13 @@ internal sealed class AuthClient(Configuration configuration)
         try
         {
             var response = await http.GetAsync("/me/characters").ConfigureAwait(false);
-            return response.IsSuccessStatusCode
+            return IsSuccess(response, "Fetch linked characters")
                 ? await response.Content.ReadFromJsonAsync<LinkedCharacterDto[]>().ConfigureAwait(false)
                 : null;
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Auth] fetching linked characters failed: {exception.Message}");
+            Failed("Fetch linked characters", exception);
             return null;
         }
     }
@@ -182,11 +246,12 @@ internal sealed class AuthClient(Configuration configuration)
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
         try
         {
-            await http.PostAsync("/auth/token/revoke", null).ConfigureAwait(false);
+            using var response = await http.PostAsync("/auth/token/revoke", null).ConfigureAwait(false);
+            _ = IsSuccess(response, "Revoke session");
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Auth] revoke failed: {exception.Message}");
+            Failed("Revoke session", exception);
         }
     }
 
@@ -201,13 +266,13 @@ internal sealed class AuthClient(Configuration configuration)
         try
         {
             var response = await http.PostAsJsonAsync(path, body).ConfigureAwait(false);
-            return response.IsSuccessStatusCode
+            return IsSuccess(response, $"Request {path}")
                 ? await response.Content.ReadFromJsonAsync<T>().ConfigureAwait(false)
                 : default;
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Auth] request to {path} failed: {exception.Message}");
+            Failed($"Request {path}", exception);
             return default;
         }
     }

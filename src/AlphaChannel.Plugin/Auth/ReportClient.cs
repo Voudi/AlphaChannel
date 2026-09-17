@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using AlphaChannel.Contracts;
+using AlphaChannel.Plugin.Net;
 
 namespace AlphaChannel.Plugin.Auth;
 
@@ -10,17 +11,16 @@ internal sealed class ReportClient(Configuration configuration)
         string bearerToken, string category, string? note, string? targetAccountId, string? targetMessageId,
         string? revealedBody, string? frankingKeyBase64)
     {
-        using var http = new HttpClient { BaseAddress = new Uri(configuration.RelayServerUrl) };
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+        using var http = PluginHttpClients.CreateApiClient(configuration, bearerToken);
         try
         {
             var response = await http.PostAsJsonAsync("/reports",
                 new SubmitReportRequest(category, note, targetAccountId, targetMessageId, revealedBody, frankingKeyBase64)).ConfigureAwait(false);
-            return response.IsSuccessStatusCode;
+            return NetworkFailureClassifier.IsSuccess("Reports", "Submit report", response);
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Report] submit failed: {exception.Message}");
+            NetworkFailureClassifier.FromException("Reports", "Submit report", exception);
             return false;
         }
     }

@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
-  <PropertyGroup>
-    <LangVersion>preview</LangVersion>
-    <IsPackable>false</IsPackable>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.0.9.0</Version>
-  </PropertyGroup>
+	<PropertyGroup>
+		<LangVersion>preview</LangVersion>
+		<IsPackable>false</IsPackable>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Version>1.0.9.0</Version>
+		<Deterministic>true</Deterministic>
+		<PathMap>$(MSBuildProjectDirectory)\..\..=/_/</PathMap>
+	</PropertyGroup>
 
   <PropertyGroup Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Linux)))'">
     <DalamudLibPath>$(DALAMUD_HOME)/</DalamudLibPath>
@@ -80,6 +82,87 @@
   <ItemGroup>
     <ProjectReference Include="..\AlphaChannel.Contracts\AlphaChannel.Contracts.csproj" />
   </ItemGroup>
+
+  <!-- Chromium runs out-of-process because Dalamud plugins use a collectible
+       AssemblyLoadContext that cannot load CefSharp's mixed C++/CLI bridge. -->
+  <PropertyGroup>
+    <BrowserHostOutputPath>$(MSBuildProjectDirectory)\..\AlphaChannel.BrowserHost\bin\BrowserPayload\$(Configuration)\</BrowserHostOutputPath>
+    <!-- A Release build made from Visual Studio or dotnet produces a clean,
+         copy-ready directory that excludes public-release archives. -->
+  </PropertyGroup>
+
+  <Target Name="BuildBrowserHost"
+          AfterTargets="CopyFilesToOutputDirectory"
+          BeforeTargets="DefaultDalamudPackagerDebug;DefaultDalamudPackagerRelease">
+    <MSBuild Projects="..\AlphaChannel.BrowserHost\AlphaChannel.BrowserHost.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration);NuGetAudit=false;OutputPath=$(BrowserHostOutputPath)" />
+    <ItemGroup>
+      <BrowserHostPayload Include="$(BrowserHostOutputPath)**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BrowserHostPayload)"
+          DestinationFiles="@(BrowserHostPayload->'$(OutputPath)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Error Condition="!Exists('$(OutputPath)AlphaChannel.BrowserHost.exe')"
+           Text="The Alpha Channel browser host was not produced." />
+    <Error Condition="!Exists('$(OutputPath)libcef.dll')"
+           Text="The Chromium browser runtime was not produced." />
+  </Target>
+
+  <!-- The Dalamud packager scans OutputPath recursively. Remove artifacts
+       produced by earlier Release builds before that scan so a previous ZIP
+       or copy-ready deployment can never be embedded in the next package. -->
+  <Target Name="CleanReleasePackagingArtifacts"
+          BeforeTargets="DefaultDalamudPackagerRelease"
+          Condition="'$(Configuration)' == 'Release'">
+    <RemoveDir Directories="$(OutputPath)deploy\;$(OutputPath)AlphaChannel.Plugin\" />
+    <Delete Files="$(OutputPath)latest.zip" />
+  </Target>
+
+  <Target Name="CreateReleaseDeployment"
+          AfterTargets="DefaultDalamudPackagerRelease"
+          DependsOnTargets="BuildBrowserHost"
+          Condition="'$(Configuration)' == 'Release'">
+    <PropertyGroup>
+      <!-- Keep the copy-ready deployment outside OutputPath. The Dalamud
+           packager scans OutputPath recursively on subsequent builds. -->
+      <ReleaseDeployDirectory>$(MSBuildProjectDirectory)\deploy\</ReleaseDeployDirectory>
+    </PropertyGroup>
+    <RemoveDir Directories="$(ReleaseDeployDirectory)" />
+
+    <ItemGroup>
+      <!-- Evaluate this after clearing deploy. Package output, loose ZIPs,
+           debug symbols, and legacy in-output deployments are excluded. -->
+      <ReleaseDeployFiles Include="$(OutputPath)**\*"
+                          Exclude="$(OutputPath)deploy\**\*;$(OutputPath)AlphaChannel.Plugin\**\*;$(OutputPath)**\latest.zip;$(OutputPath)**\*.pdb" />
+    </ItemGroup>
+
+    <Error Condition="!Exists('$(OutputPath)AlphaChannel.Plugin.dll')"
+           Text="Release deployment failed: AlphaChannel.Plugin.dll is missing." />
+    <Error Condition="!Exists('$(OutputPath)AlphaChannel.Plugin.json')"
+           Text="Release deployment failed: AlphaChannel.Plugin.json is missing." />
+    <Error Condition="!Exists('$(OutputPath)AlphaChannel.BrowserHost.exe')"
+           Text="Release deployment failed: AlphaChannel.BrowserHost.exe is missing." />
+    <Error Condition="!Exists('$(OutputPath)libcef.dll')"
+           Text="Release deployment failed: libcef.dll is missing." />
+    <Error Condition="!Exists('$(OutputPath)resources.pak')"
+           Text="Release deployment failed: Chromium resources.pak is missing." />
+    <Error Condition="!Exists('$(OutputPath)icudtl.dat')"
+           Text="Release deployment failed: Chromium icudtl.dat is missing." />
+    <Error Condition="!Exists('$(OutputPath)locales\en-US.pak')"
+           Text="Release deployment failed: Chromium locales are missing." />
+    <Error Condition="!Exists('$(OutputPath)Fonts\Inter-Regular.ttf')"
+           Text="Release deployment failed: plugin fonts are missing." />
+    <Error Condition="!Exists('$(OutputPath)Assets\alphaicon.png')"
+           Text="Release deployment failed: plugin assets are missing." />
+
+    <Copy SourceFiles="@(ReleaseDeployFiles)"
+          DestinationFiles="@(ReleaseDeployFiles->'$(ReleaseDeployDirectory)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="false" />
+
+    <Message Importance="high"
+             Text="Alpha Channel copy-ready Release created at: $(ReleaseDeployDirectory)" />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />

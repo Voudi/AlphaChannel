@@ -47,5 +47,11 @@ public sealed record SocialControl
     // Already-resolved display text (e.g. "watching Alice's stream") - no client-side lookup needed.
     public string? WatchingLabel { get; init; }
 
+    //
+    // True only when this account currently hosts a non-private
+    // Watch Party that one of their friends can attempt to join.
+    //
+    public bool? HostingJoinableWatchParty { get; init; }
+
     public string? ActivityType { get; init; }
 }

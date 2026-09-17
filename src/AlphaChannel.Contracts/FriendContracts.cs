@@ -7,8 +7,16 @@ public sealed record AccountSummaryDto(string Id, string Handle, string DisplayN
 // AvatarImageUrl/StatusMessage are included inline (not just on the dedicated profile endpoint) so
 // the friends list itself can render an avatar chip and status without an extra round-trip per friend.
 public sealed record FriendDto(
-    string AccountId, string Handle, string DisplayName, bool Online, string? WatchingLabel,
-    string? AvatarIcon, string AvatarColorHex, string? StatusMessage, string? AvatarImageUrl);
+    string AccountId,
+    string Handle,
+    string DisplayName,
+    bool Online,
+    string? WatchingLabel,
+    string? AvatarIcon,
+    string AvatarColorHex,
+    string? StatusMessage,
+    string? AvatarImageUrl,
+    bool HostingJoinableWatchParty);
 
 public sealed record FriendRequestDto(string Id, string OtherAccountId, string OtherHandle, string OtherDisplayName, long CreatedAtUnix);
 
@@ -21,6 +29,13 @@ public sealed record SendFriendRequestRequest(string DisplayName);
 // Right-click "Add Friend" in-game - looks up by real FFXIV character identity instead of a chosen
 // name, see FriendService.SendRequestByCharacterAsync.
 public sealed record SendFriendRequestByCharacterRequest(string CharacterName, string World);
+
+public sealed record FriendRequestOutcomeDto(string Outcome);
+
+// Result of resolving a visible in-game character to a currently joinable Watch Party.
+// AccountId is used for the actual join so Alpha Channel display names never need to match
+// FFXIV character names.
+public sealed record CharacterStreamDto(string AccountId, string DisplayName, RoomKind Kind);
 
 // The "share out of band" path - see FriendService.RedeemInviteCodeAsync for why this skips
 // straight to an accepted friendship rather than a pending request.

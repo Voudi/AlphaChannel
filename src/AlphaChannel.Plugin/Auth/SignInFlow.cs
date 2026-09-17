@@ -16,11 +16,9 @@ internal enum SignInOutcome
 
 internal sealed record SignInResult(SignInOutcome Outcome, CharacterSession? Session, string? Message, bool IsNewAccount = false);
 
-// Orchestrates one XIVAuth device-flow sign-in (or character-link) end to end: start the flow,
-// open the verification URL in the system browser (same Process.Start pattern the Ko-fi button
-// already uses), poll on the server-provided interval, and resolve to a CharacterSession or a
-// reason it didn't work. Mirrors Aetherphone's SignInFlow.cs at a much smaller scale - AlphaChannel
-// only has the one XIVAuth-backed flow, not Aetherphone's Lodestone-code alternative.
+// Orchestrates XIVAuth device-flow sign-in or character linking.
+// Opens the verification URL in the system browser, polls at the server-provided
+// interval, and returns a CharacterSession or the reason sign-in did not complete.
 internal sealed class SignInFlow(AuthClient authClient)
 {
     internal async Task<SignInResult> RunAsync(
@@ -37,7 +35,11 @@ internal sealed class SignInFlow(AuthClient authClient)
 
         if (start is null)
         {
-            return new SignInResult(SignInOutcome.Error, null, "Could not reach the AlphaChannel relay.");
+            return new SignInResult(
+                SignInOutcome.Error,
+                null,
+                authClient.LastFailure?.UserMessage ??
+                "Could not reach the Alpha Channel server.");
         }
 
         onFlowStarted(start);
@@ -92,8 +94,6 @@ internal sealed class SignInFlow(AuthClient authClient)
                         Bio = poll.Account.Bio,
                         StatusMessage = poll.Account.StatusMessage,
                         InviteCode = poll.Account.InviteCode,
-                        PatreonTier = poll.Account.PatreonTier,
-                        IsDeveloper = poll.Account.IsDeveloper,
                     }, null, poll.IsNewAccount);
 
                 case AuthPollStatus.Denied:

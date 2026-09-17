@@ -1,16 +1,18 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using AlphaChannel.Contracts;
+using AlphaChannel.Plugin.Net;
 
 namespace AlphaChannel.Plugin.Auth;
 
 internal sealed class LiveClient(Configuration configuration)
 {
+    internal NetworkFailureInfo? LastFailure =>
+        NetworkFailureClassifier.GetLast("Live");
+
     private HttpClient Http(string bearerToken)
     {
-        var http = new HttpClient { BaseAddress = new Uri(configuration.RelayServerUrl) };
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
-        return http;
+        return PluginHttpClients.CreateApiClient(configuration, bearerToken);
     }
 
     // Regenerating instantly invalidates any previous key - an OBS session still pushing with the
@@ -21,7 +23,7 @@ internal sealed class LiveClient(Configuration configuration)
         try
         {
             var response = await http.PostAsync("/live/key/rotate", null).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            if (!NetworkFailureClassifier.IsSuccess("Live", "Rotate stream key", response))
             {
                 return null;
             }
@@ -31,7 +33,7 @@ internal sealed class LiveClient(Configuration configuration)
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Live] key rotate failed: {exception.Message}");
+            NetworkFailureClassifier.FromException("Live", "Rotate stream key", exception);
             return null;
         }
     }
@@ -47,13 +49,13 @@ internal sealed class LiveClient(Configuration configuration)
         try
         {
             var response = await http.GetAsync(path).ConfigureAwait(false);
-            return response.IsSuccessStatusCode
+            return NetworkFailureClassifier.IsSuccess("Live", $"Request {path}", response)
                 ? await response.Content.ReadFromJsonAsync<T>().ConfigureAwait(false)
                 : default;
         }
         catch (Exception exception)
         {
-            AepLog.Warning($"[Live] request to {path} failed: {exception.Message}");
+            NetworkFailureClassifier.FromException("Live", $"Request {path}", exception);
             return default;
         }
     }
