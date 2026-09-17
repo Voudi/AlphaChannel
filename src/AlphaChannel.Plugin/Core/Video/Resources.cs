@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -6,6 +7,7 @@ using Dalamud.Utility;
 using SharpCompress.Archives;
 using SharpCompress.Common;
 using Newtonsoft.Json.Linq;
+using AlphaChannel.Plugin.Net;
 
 namespace AlphaChannel.Plugin.Video;
 
@@ -13,6 +15,16 @@ internal sealed class Resources : IDisposable
 {
     private readonly HttpClient _httpClient;
     private readonly string _configDir;
+    private readonly YouTubePoTokenService _youtubePoTokenService;
+    private readonly CancellationTokenSource shutdown = new();
+    private readonly ConcurrentDictionary<int, Task> backgroundTasks = new();
+    private int nextBackgroundTaskId;
+    private volatile bool disposed;
+
+    internal YouTubePlaybackPolicy YouTubePolicy
+    {
+        get;
+    }
 
     internal string[] MpvCheckResult { get; private set; } = [string.Empty, string.Empty];
     internal string[] YtdlpCheckResult { get; private set; } = [string.Empty, string.Empty];
@@ -26,32 +38,100 @@ internal sealed class Resources : IDisposable
 
     internal Resources()
     {
-        _httpClient = new HttpClient();
-        _httpClient.DefaultRequestHeaders.Add("User-Agent", "AlphaChannelUpdater/1.0");
-        _configDir = Plugin.PluginInterface.ConfigDirectory.FullName;
+        _httpClient =
+            PluginHttpClients.CreateDownloadClient();
+
+        _httpClient.DefaultRequestHeaders.Add(
+            "User-Agent",
+            "AlphaChannelUpdater/1.0");
+
+        _configDir =
+            Plugin.PluginInterface
+                .ConfigDirectory
+                .FullName;
+
+        _youtubePoTokenService =
+            new YouTubePoTokenService();
+
+        YouTubePolicy =
+            new YouTubePlaybackPolicy(
+                Plugin.Cfg,
+                _youtubePoTokenService);
+
+
 
         Initialize();
     }
 
     public void Dispose()
     {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        shutdown.Cancel();
         _httpClient.Dispose();
+
+        try
+        {
+            Task.WaitAll(
+                backgroundTasks.Values.ToArray(),
+                TimeSpan.FromSeconds(5));
+        }
+        catch (Exception exception)
+        {
+            AepLog.Debug(
+                $"[Resources] Background cleanup warning: {exception.Message}");
+        }
+
+        backgroundTasks.Clear();
+        _youtubePoTokenService.Dispose();
+        NativeLoader.Release(this);
+        shutdown.Dispose();
+
         GC.SuppressFinalize(this);
+    }
+
+    private void Track(Task task)
+    {
+        if (disposed)
+        {
+            _ = task.ContinueWith(
+                completed => _ = completed.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously |
+                TaskContinuationOptions.OnlyOnFaulted,
+                TaskScheduler.Default);
+            return;
+        }
+
+        var id =
+            Interlocked.Increment(ref nextBackgroundTaskId);
+
+        backgroundTasks[id] = task;
+        _ = task.ContinueWith(
+            completedTask => backgroundTasks.TryRemove(id, out _),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private void Initialize()
     {
+
+
         if (!Directory.Exists(Path.Combine(_configDir, "roms")))
         {
             Directory.CreateDirectory(Path.Combine(_configDir, "roms"));
         }
-        _ = GetNtpUtcAsync().ContinueWith(task =>
+        Track(GetNtpUtcAsync().ContinueWith(task =>
         {
             //Set NTP time
             if (task.IsCompletedSuccessfully)
             {
                 _ntpTimeOffset = task.GetResultSafely();
-                AepLog.Debug("Received NTP Time Offset: " + (_ntpTimeOffset - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) + " ms.");
             }
             _sysTimeOffset = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         }).ContinueWith(_ =>
@@ -60,7 +140,7 @@ internal sealed class Resources : IDisposable
             //tester never has to visit Settings at all for mpv to become ready. The Settings
             //page's own button (see AetherStreamApp.Settings.cs) stays as a manual fallback for
             //when this attempt hits a network hiccup at plugin load.
-            CheckMPVAsync().ContinueWith(task =>
+            Track(CheckMPVAsync().ContinueWith(task =>
             {
                 if (!task.IsCompletedSuccessfully)
                 {
@@ -70,13 +150,13 @@ internal sealed class Resources : IDisposable
 
                 if (MpvCheckResult[0].Length > 0)
                 {
-                    _ = DownloadMPVAsync();
+                    Track(DownloadMPVAsync());
                 }
-            });
+            }));
         }).ContinueWith(_ =>
         {
             //Check for YTDLP Updates - same auto-download reasoning as the MPV check above.
-            CheckYTDLPAsync().ContinueWith(task =>
+            Track(CheckYTDLPAsync().ContinueWith(task =>
             {
                 if (!task.IsCompletedSuccessfully)
                 {
@@ -86,17 +166,17 @@ internal sealed class Resources : IDisposable
 
                 if (YtdlpCheckResult[0].Length > 0)
                 {
-                    _ = DownloadYTDLPAsync();
+                    Track(DownloadYTDLPAsync());
                 }
-            });
-        });
+            }));
+        }));
 
         // SNES9x is downloaded lazily in the background if it is
         // not already installed. This keeps the native core out of
         // the plugin package itself.
         if (GetLocationSNES9X() is null)
         {
-            _ = Task.Run(async () =>
+            Track(Task.Run(async () =>
             {
                 AepLog.Info(
                     "[SNES9X] Core not found; downloading libretro core.");
@@ -113,7 +193,7 @@ internal sealed class Resources : IDisposable
                     AepLog.Warning(
                         "[SNES9X] Core download failed.");
                 }
-            });
+            }, shutdown.Token));
         }
 
 
@@ -125,7 +205,7 @@ internal sealed class Resources : IDisposable
 
         if (GetLocationGambatte() is null)
         {
-            _ = Task.Run(async () =>
+            Track(Task.Run(async () =>
             {
                 AepLog.Info(
                     "[GAMBATTE] Core not found; downloading libretro core.");
@@ -143,7 +223,43 @@ internal sealed class Resources : IDisposable
                     AepLog.Warning(
                         "[GAMBATTE] Core download failed.");
                 }
-            });
+            }, shutdown.Token));
+        }
+
+        // Nintendo Entertainment System - Nestopia libretro core.
+        if (GetLocationNestopia() is null)
+        {
+            Track(Task.Run(async () =>
+            {
+                AepLog.Info("[NESTOPIA] Core not found; downloading libretro core.");
+                var installed = await DownloadNestopiaAsync();
+                if (installed) AepLog.Info("[NESTOPIA] Core downloaded successfully.");
+                else AepLog.Warning("[NESTOPIA] Core download failed.");
+            }, shutdown.Token));
+        }
+
+        // Game Boy Advance - mGBA libretro core.
+        if (GetLocationMgba() is null)
+        {
+            Track(Task.Run(async () =>
+            {
+                AepLog.Info("[MGBA] Core not found; downloading libretro core.");
+                var installed = await DownloadMgbaAsync();
+                if (installed) AepLog.Info("[MGBA] Core downloaded successfully.");
+                else AepLog.Warning("[MGBA] Core download failed.");
+            }, shutdown.Token));
+        }
+
+        // Sega Master System / SG-1000 - Gearsystem libretro core.
+        if (GetLocationGearsystem() is null)
+        {
+            Track(Task.Run(async () =>
+            {
+                AepLog.Info("[GEARSYSTEM] Core not found; downloading libretro core.");
+                var installed = await DownloadGearsystemAsync();
+                if (installed) AepLog.Info("[GEARSYSTEM] Core downloaded successfully.");
+                else AepLog.Warning("[GEARSYSTEM] Core download failed.");
+            }, shutdown.Token));
         }
 
 
@@ -162,7 +278,7 @@ internal sealed class Resources : IDisposable
             AepLog.Warning(
                 "[FFMPEG] ffmpeg.exe NOT FOUND. Starting download.");
 
-            _ = Task.Run(async () =>
+            Track(Task.Run(async () =>
             {
                 var installed =
                     await DownloadFFmpegAsync();
@@ -183,7 +299,7 @@ internal sealed class Resources : IDisposable
                     AepLog.Error(
                         "[FFMPEG] FAILED - ffmpeg.exe still does not exist after download.");
                 }
-            });
+            }, shutdown.Token));
         }
         else
         {
@@ -229,7 +345,7 @@ internal sealed class Resources : IDisposable
 
             if (File.Exists(exe))
             {
-                AepLog.Debug($"[YTDLP] Using executable: {exe}");
+                AepLog.Info($"[YTDLP] Using executable: {exe}");
                 return exe;
             }
         }
@@ -283,6 +399,48 @@ internal sealed class Resources : IDisposable
         return File.Exists(file)
             ? file
             : null;
+    }
+
+    internal string? GetLocationNestopia()
+    {
+        const string directoryName = "nestopia";
+        var directory = Path.Combine(_configDir, directoryName);
+        if (!Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+            return null;
+        }
+
+        var file = Path.Combine(directory, "nestopia_libretro.dll");
+        return File.Exists(file) ? file : null;
+    }
+
+    internal string? GetLocationMgba()
+    {
+        const string directoryName = "mgba";
+        var directory = Path.Combine(_configDir, directoryName);
+        if (!Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+            return null;
+        }
+
+        var file = Path.Combine(directory, "mgba_libretro.dll");
+        return File.Exists(file) ? file : null;
+    }
+
+    internal string? GetLocationGearsystem()
+    {
+        const string directoryName = "gearsystem";
+        var directory = Path.Combine(_configDir, directoryName);
+        if (!Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+            return null;
+        }
+
+        var file = Path.Combine(directory, "gearsystem_libretro.dll");
+        return File.Exists(file) ? file : null;
     }
 
 
@@ -465,7 +623,7 @@ internal sealed class Resources : IDisposable
     private async Task<string[]> CheckForUpdateAsync(string configDir, string nameStartsWith, string nameEndsWith, string checkURL)
     {
         try {
-            string json = await _httpClient.GetStringAsync(checkURL);
+            string json = await _httpClient.GetStringAsync(checkURL, shutdown.Token);
             var doc = JObject.Parse(json);
             long remoteId = doc["id"]!.Value<long>();
             var asset = doc["assets"]!
@@ -496,34 +654,42 @@ internal sealed class Resources : IDisposable
 
     private async Task<bool> UpdateAsync(string configDir, string nameStartsWith, string nameEndsWith, string downloadURL, string folderName)
     {
+        string? tempFile = null;
+        string? extractFolder = null;
+
         try
         {
-            AepLog.Debug("Downloading Update: " + downloadURL);
-            string tempFile = Path.GetTempFileName() + nameEndsWith;
-            var response = await _httpClient.GetAsync(downloadURL, HttpCompletionOption.ResponseHeadersRead);
+            AepLog.Info("Downloading Update: " + downloadURL);
+            tempFile = Path.Combine(
+                Path.GetTempPath(),
+                $"alphachannel-update-{Guid.NewGuid():N}{nameEndsWith}");
+            using var response = await _httpClient.GetAsync(
+                downloadURL,
+                HttpCompletionOption.ResponseHeadersRead,
+                shutdown.Token);
             await using (var fs = File.OpenWrite(tempFile))
             {
-                await response.Content.CopyToAsync(fs);
+                await response.Content.CopyToAsync(fs, shutdown.Token);
             }
-            AepLog.Debug("Finished Downloading " + downloadURL);
+            AepLog.Info("Finished Downloading " + downloadURL);
             if (nameEndsWith == ".7z")
             {
                 string targetFolder = Path.Combine(configDir, folderName);
                 if (Directory.Exists(targetFolder))
                 {
-                    File.Delete(tempFile);
                     TryDeleteOldVersionFolders(configDir, nameStartsWith, keepFolder: targetFolder);
                     return true;
                 }
 
                 // Extract into a temp dir, then rename into place — never delete the currently-loaded
                 // libmpv folder first (that throws Access Denied under Wine while the DLL is mapped).
-                string extractFolder = Path.Combine(configDir, Path.GetRandomFileName());
+                extractFolder = Path.Combine(configDir, Path.GetRandomFileName());
                 Directory.CreateDirectory(extractFolder);
                 using (var archive = ArchiveFactory.OpenArchive(tempFile))
                 {
                     foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
                     {
+                        shutdown.Token.ThrowIfCancellationRequested();
                         entry.WriteToDirectory(extractFolder, new ExtractionOptions
                         {
                             ExtractFullPath = true,
@@ -532,8 +698,8 @@ internal sealed class Resources : IDisposable
                     }
                 }
 
-                File.Delete(tempFile);
                 Directory.Move(extractFolder, targetFolder);
+                extractFolder = null;
                 TryDeleteOldVersionFolders(configDir, nameStartsWith, keepFolder: targetFolder);
             }
             else
@@ -543,7 +709,6 @@ internal sealed class Resources : IDisposable
 
                 string targetPath = Path.Combine(localFolder, nameStartsWith.EndsWith(nameEndsWith, StringComparison.Ordinal) ? nameStartsWith : nameStartsWith + nameEndsWith);
                 File.Copy(tempFile, targetPath, overwrite: true);
-                File.Delete(tempFile);
                 TryDeleteOldVersionFolders(configDir, nameStartsWith, keepFolder: localFolder);
             }
             return true;
@@ -552,6 +717,20 @@ internal sealed class Resources : IDisposable
         {
             AepLog.Error($"Error updating {nameStartsWith}: {e.Message}");
             return false;
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(tempFile) && File.Exists(tempFile))
+            {
+                try { File.Delete(tempFile); }
+                catch { }
+            }
+
+            if (!string.IsNullOrWhiteSpace(extractFolder) && Directory.Exists(extractFolder))
+            {
+                try { Directory.Delete(extractFolder, recursive: true); }
+                catch { }
+            }
         }
     }
 
@@ -588,7 +767,7 @@ internal sealed class Resources : IDisposable
 
         try
         {
-            AepLog.Warning(
+            AepLog.Info(
                 $"[SNES9X] Download starting: {downloadUrl}");
 
             temp = Path.Combine(
@@ -597,19 +776,20 @@ internal sealed class Resources : IDisposable
 
             using var response = await _httpClient.GetAsync(
                 downloadUrl,
-                HttpCompletionOption.ResponseHeadersRead);
+                HttpCompletionOption.ResponseHeadersRead,
+                shutdown.Token);
 
-            AepLog.Warning(
+            AepLog.Info(
                 $"[SNES9X] HTTP response: {(int)response.StatusCode} {response.StatusCode}");
 
             response.EnsureSuccessStatusCode();
 
             await using (var fs = File.Create(temp))
             {
-                await response.Content.CopyToAsync(fs);
+                await response.Content.CopyToAsync(fs, shutdown.Token);
             }
 
-            AepLog.Warning(
+            AepLog.Info(
                 $"[SNES9X] Downloaded archive to: {temp}");
 
             string localFolder =
@@ -621,7 +801,7 @@ internal sealed class Resources : IDisposable
             {
                 foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
                 {
-                    AepLog.Warning(
+                    AepLog.Info(
                         $"[SNES9X] Extracting: {entry.Key}");
 
                     entry.WriteToDirectory(
@@ -647,7 +827,7 @@ internal sealed class Resources : IDisposable
                 return false;
             }
 
-            AepLog.Warning(
+            AepLog.Info(
                 $"[SNES9X] Core installed at: {expectedDll}");
 
             return true;
@@ -699,7 +879,8 @@ internal sealed class Resources : IDisposable
             using var response =
                 await _httpClient.GetAsync(
                     downloadUrl,
-                    HttpCompletionOption.ResponseHeadersRead);
+                    HttpCompletionOption.ResponseHeadersRead,
+                    shutdown.Token);
 
             AepLog.Info(
                 $"[GAMBATTE] HTTP response: {(int)response.StatusCode} {response.StatusCode}");
@@ -710,7 +891,7 @@ internal sealed class Resources : IDisposable
                          File.Create(temp))
             {
                 await response.Content
-                    .CopyToAsync(fs);
+                    .CopyToAsync(fs, shutdown.Token);
             }
 
             var localFolder =
@@ -728,7 +909,7 @@ internal sealed class Resources : IDisposable
                          archive.Entries.Where(
                              entry => !entry.IsDirectory))
                 {
-                    AepLog.Debug(
+                    AepLog.Info(
                         $"[GAMBATTE] Extracting: {entry.Key}");
 
                     entry.WriteToDirectory(
@@ -783,6 +964,166 @@ internal sealed class Resources : IDisposable
         }
     }
 
+    internal async Task<bool> DownloadNestopiaAsync()
+    {
+        const string downloadUrl =
+            "https://buildbot.libretro.com/nightly/windows/x86_64/latest/nestopia_libretro.dll.zip";
+        const string directoryName = "nestopia";
+        string? temp = null;
+
+        try
+        {
+            AepLog.Info($"[NESTOPIA] Download starting: {downloadUrl}");
+            temp = Path.Combine(Path.GetTempPath(), $"alphachannel-nestopia-{Guid.NewGuid():N}.zip");
+            using var response = await _httpClient.GetAsync(
+                downloadUrl,
+                HttpCompletionOption.ResponseHeadersRead,
+                shutdown.Token);
+            AepLog.Info($"[NESTOPIA] HTTP response: {(int)response.StatusCode} {response.StatusCode}");
+            response.EnsureSuccessStatusCode();
+            await using (var fs = File.Create(temp))
+                await response.Content.CopyToAsync(fs, shutdown.Token);
+
+            var localFolder = Path.Combine(_configDir, directoryName);
+            Directory.CreateDirectory(localFolder);
+            using (var archive = ArchiveFactory.OpenArchive(temp))
+            {
+                foreach (var entry in archive.Entries.Where(entry => !entry.IsDirectory))
+                    entry.WriteToDirectory(localFolder, new ExtractionOptions { ExtractFullPath = true, Overwrite = true });
+            }
+
+            var expectedDll = Path.Combine(localFolder, "nestopia_libretro.dll");
+            if (!File.Exists(expectedDll))
+            {
+                AepLog.Error($"[NESTOPIA] Download completed but DLL was not found at: {expectedDll}");
+                return false;
+            }
+
+            AepLog.Info($"[NESTOPIA] Core installed at: {expectedDll}");
+            return true;
+        }
+        catch (Exception exception)
+        {
+            AepLog.Error($"[NESTOPIA] Core download failed: {exception}");
+            return false;
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(temp) && File.Exists(temp))
+            {
+                try { File.Delete(temp); }
+                catch { }
+            }
+        }
+    }
+
+    internal async Task<bool> DownloadMgbaAsync()
+    {
+        const string downloadUrl =
+            "https://buildbot.libretro.com/nightly/windows/x86_64/latest/mgba_libretro.dll.zip";
+        const string directoryName = "mgba";
+        string? temp = null;
+
+        try
+        {
+            AepLog.Info($"[MGBA] Download starting: {downloadUrl}");
+            temp = Path.Combine(Path.GetTempPath(), $"alphachannel-mgba-{Guid.NewGuid():N}.zip");
+            using var response = await _httpClient.GetAsync(
+                downloadUrl,
+                HttpCompletionOption.ResponseHeadersRead,
+                shutdown.Token);
+            AepLog.Info($"[MGBA] HTTP response: {(int)response.StatusCode} {response.StatusCode}");
+            response.EnsureSuccessStatusCode();
+            await using (var fs = File.Create(temp))
+                await response.Content.CopyToAsync(fs, shutdown.Token);
+
+            var localFolder = Path.Combine(_configDir, directoryName);
+            Directory.CreateDirectory(localFolder);
+            using (var archive = ArchiveFactory.OpenArchive(temp))
+            {
+                foreach (var entry in archive.Entries.Where(entry => !entry.IsDirectory))
+                    entry.WriteToDirectory(localFolder, new ExtractionOptions { ExtractFullPath = true, Overwrite = true });
+            }
+
+            var expectedDll = Path.Combine(localFolder, "mgba_libretro.dll");
+            if (!File.Exists(expectedDll))
+            {
+                AepLog.Error($"[MGBA] Download completed but DLL was not found at: {expectedDll}");
+                return false;
+            }
+
+            AepLog.Info($"[MGBA] Core installed at: {expectedDll}");
+            return true;
+        }
+        catch (Exception exception)
+        {
+            AepLog.Error($"[MGBA] Core download failed: {exception}");
+            return false;
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(temp) && File.Exists(temp))
+            {
+                try { File.Delete(temp); }
+                catch { }
+            }
+        }
+    }
+
+    internal async Task<bool> DownloadGearsystemAsync()
+    {
+        const string downloadUrl =
+            "https://buildbot.libretro.com/nightly/windows/x86_64/latest/gearsystem_libretro.dll.zip";
+        const string directoryName = "gearsystem";
+        string? temp = null;
+
+        try
+        {
+            AepLog.Info($"[GEARSYSTEM] Download starting: {downloadUrl}");
+            temp = Path.Combine(Path.GetTempPath(), $"alphachannel-gearsystem-{Guid.NewGuid():N}.zip");
+            using var response = await _httpClient.GetAsync(
+                downloadUrl,
+                HttpCompletionOption.ResponseHeadersRead,
+                shutdown.Token);
+            AepLog.Info($"[GEARSYSTEM] HTTP response: {(int)response.StatusCode} {response.StatusCode}");
+            response.EnsureSuccessStatusCode();
+            await using (var fs = File.Create(temp))
+                await response.Content.CopyToAsync(fs, shutdown.Token);
+
+            var localFolder = Path.Combine(_configDir, directoryName);
+            Directory.CreateDirectory(localFolder);
+            using (var archive = ArchiveFactory.OpenArchive(temp))
+            {
+                foreach (var entry in archive.Entries.Where(entry => !entry.IsDirectory))
+                    entry.WriteToDirectory(localFolder,
+                        new ExtractionOptions { ExtractFullPath = true, Overwrite = true });
+            }
+
+            var expectedDll = Path.Combine(localFolder, "gearsystem_libretro.dll");
+            if (!File.Exists(expectedDll))
+            {
+                AepLog.Error($"[GEARSYSTEM] Download completed but DLL was not found at: {expectedDll}");
+                return false;
+            }
+
+            AepLog.Info($"[GEARSYSTEM] Core installed at: {expectedDll}");
+            return true;
+        }
+        catch (Exception exception)
+        {
+            AepLog.Error($"[GEARSYSTEM] Core download failed: {exception}");
+            return false;
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(temp) && File.Exists(temp))
+            {
+                try { File.Delete(temp); }
+                catch { }
+            }
+        }
+    }
+
     internal async Task<bool> DownloadFFmpegAsync()
     {
         //
@@ -822,7 +1163,8 @@ internal sealed class Resources : IDisposable
             using var response =
                 await _httpClient.GetAsync(
                     downloadUrl,
-                    HttpCompletionOption.ResponseHeadersRead);
+                    HttpCompletionOption.ResponseHeadersRead,
+                    shutdown.Token);
 
             AepLog.Info(
                 $"[FFMPEG] HTTP response: {(int)response.StatusCode} {response.StatusCode}");
@@ -833,7 +1175,7 @@ internal sealed class Resources : IDisposable
                          File.Create(temp))
             {
                 await response.Content
-                    .CopyToAsync(fs);
+                    .CopyToAsync(fs, shutdown.Token);
             }
 
             Directory.CreateDirectory(
@@ -955,14 +1297,14 @@ internal sealed class Resources : IDisposable
             byte[] ntpData = new byte[48];
             ntpData[0] = 0x1B;
 
-            var addresses = await Dns.GetHostAddressesAsync(server);
+            var addresses = await Dns.GetHostAddressesAsync(server, shutdown.Token);
             var ep = new IPEndPoint(addresses[0], 123);
 
             using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
             socket.ReceiveTimeout = 3000;
-            await socket.ConnectAsync(ep);
-            await socket.SendAsync(ntpData);
-            await socket.ReceiveAsync(ntpData);
+            await socket.ConnectAsync(ep, shutdown.Token);
+            await socket.SendAsync(ntpData, SocketFlags.None, shutdown.Token);
+            await socket.ReceiveAsync(ntpData, SocketFlags.None, shutdown.Token);
 
             ulong intPart = ((ulong)ntpData[40] << 24) | ((ulong)ntpData[41] << 16) | ((ulong)ntpData[42] << 8) | ntpData[43];
             ulong fracPart = ((ulong)ntpData[44] << 24) | ((ulong)ntpData[45] << 16) | ((ulong)ntpData[46] << 8) | ntpData[47];
@@ -992,6 +1334,14 @@ internal sealed class Resources : IDisposable
 			_registered = true;
 			NativeLibrary.SetDllImportResolver(typeof(NativeLoader).Assembly, Resolve);
 		}
+
+        internal static void Release(Resources resources)
+        {
+            if (ReferenceEquals(_resources, resources))
+            {
+                _resources = null;
+            }
+        }
 
 		private static IntPtr Resolve(string name, System.Reflection.Assembly assembly, DllImportSearchPath? path)
 		{

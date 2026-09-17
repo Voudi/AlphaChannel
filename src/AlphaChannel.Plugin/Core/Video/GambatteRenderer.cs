@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Buffers;
 using System.Runtime.InteropServices;
 using SharpDX.Direct3D11;
 
@@ -6,7 +7,11 @@ namespace AlphaChannel.Plugin.Video;
 
 internal sealed class GambatteRenderer(
     string corePath,
-    string romsDirectory) : IDisposable
+    string romsDirectory,
+    bool nestopia = false,
+    bool mgba = false,
+    bool gearsystem = false,
+    bool gameGear = false) : IDisposable
 {
     private const uint RETRO_DEVICE_JOYPAD = 1;
     private const uint RETRO_MEMORY_SAVE_RAM = 0;
@@ -19,6 +24,7 @@ internal sealed class GambatteRenderer(
     private const uint ENV_GET_SAVE_DIRECTORY = 31;
 
     private const int PIXFMT_RGB565 = 2;
+    private const int PIXFMT_XRGB8888 = 1;
 
     private static GambatteRenderer? _instance;
 
@@ -69,6 +75,21 @@ internal sealed class GambatteRenderer(
     private readonly string _romsDirectory =
         romsDirectory;
 
+    private readonly bool _isNestopia =
+        nestopia;
+
+    private readonly bool _isMgba =
+        mgba;
+
+    private readonly bool _isGearsystem =
+        gearsystem;
+
+    private readonly bool _isGameGear =
+        gameGear;
+
+    private string LogPrefix => _isNestopia ? "[NESTOPIA]" : _isMgba ? "[MGBA]" : _isGearsystem ? "[GEARSYSTEM]" : "[GAMBATTE]";
+    private string SystemName => _isNestopia ? "NES" : _isMgba ? "Game Boy Advance" : _isGameGear ? "Game Gear" : _isGearsystem ? "Master System / SG-1000" : "Game Boy";
+
     private readonly short[,] _input =
         new short[1, 16];
 
@@ -85,8 +106,11 @@ internal sealed class GambatteRenderer(
 
     private Thread? _runThread;
     private CancellationTokenSource? _cancel;
+    private volatile bool _deferredTeardown;
 
     private volatile bool _running;
+    private volatile bool _failed;
+    private string? _failureMessage;
     private bool _coreInited;
 
     private double _fps =
@@ -94,6 +118,10 @@ internal sealed class GambatteRenderer(
 
     private int _sampleRate =
         48000;
+
+    private int _videoWidth;
+    private int _videoHeight;
+    private int _pixelFormat = nestopia ? PIXFMT_XRGB8888 : PIXFMT_RGB565;
 
     private string _savePath =
         string.Empty;
@@ -434,7 +462,7 @@ internal sealed class GambatteRenderer(
                     _corePath))
             {
                 AepLog.Error(
-                    $"[GAMBATTE] Core DLL not found: {_corePath}");
+                    $"{LogPrefix} Core DLL not found: {_corePath}");
 
                 return false;
             }
@@ -443,7 +471,7 @@ internal sealed class GambatteRenderer(
                     romPath))
             {
                 AepLog.Error(
-                    $"[GAMBATTE] ROM not found: {romPath}");
+                    $"{LogPrefix} ROM not found: {romPath}");
 
                 return false;
             }
@@ -452,18 +480,22 @@ internal sealed class GambatteRenderer(
                 Path.GetExtension(
                     romPath);
 
-            if (!extension.Equals(
-                    ".gb",
-                    StringComparison.OrdinalIgnoreCase) &&
-                !extension.Equals(
-                    ".gbc",
-                    StringComparison.OrdinalIgnoreCase) &&
-                !extension.Equals(
-                    ".dmg",
-                    StringComparison.OrdinalIgnoreCase))
+            var supported = _isNestopia
+                ? extension.Equals(".nes", StringComparison.OrdinalIgnoreCase)
+                : _isMgba
+                    ? extension.Equals(".gba", StringComparison.OrdinalIgnoreCase)
+                    : _isGearsystem
+                        ? extension.Equals(".sms", StringComparison.OrdinalIgnoreCase) ||
+                          extension.Equals(".sg", StringComparison.OrdinalIgnoreCase) ||
+                          extension.Equals(".gg", StringComparison.OrdinalIgnoreCase)
+                        : extension.Equals(".gb", StringComparison.OrdinalIgnoreCase) ||
+                          extension.Equals(".gbc", StringComparison.OrdinalIgnoreCase) ||
+                          extension.Equals(".dmg", StringComparison.OrdinalIgnoreCase);
+
+            if (!supported)
             {
                 AepLog.Error(
-                    $"[GAMBATTE] Unsupported ROM extension: {extension}");
+                    $"{LogPrefix} Unsupported ROM extension: {extension}");
 
                 return false;
             }
@@ -523,7 +555,7 @@ internal sealed class GambatteRenderer(
                 var coreName =
                     Marshal.PtrToStringAnsi(
                         systemInfo.LibraryName) ??
-                    "Gambatte";
+                    (_isNestopia ? "Nestopia" : _isMgba ? "mGBA" : _isGearsystem ? "Gearsystem" : "Gambatte");
 
                 var coreVersion =
                     Marshal.PtrToStringAnsi(
@@ -531,7 +563,7 @@ internal sealed class GambatteRenderer(
                     string.Empty;
 
                 AepLog.Info(
-                    $"[GAMBATTE] Core loaded: {coreName} {coreVersion}");
+                    $"{LogPrefix} Core loaded: {coreName} {coreVersion}");
 
                 var gameInfo =
                     new RetroGameInfo();
@@ -585,7 +617,7 @@ internal sealed class GambatteRenderer(
                             ref gameInfo))
                     {
                         AepLog.Error(
-                            "[GAMBATTE] retro_load_game failed.");
+                            $"{LogPrefix} retro_load_game failed.");
 
                         TeardownLocked();
 
@@ -635,7 +667,7 @@ internal sealed class GambatteRenderer(
 
 
                 AepLog.Info(
-                    $"[GAMBATTE] Loaded {Path.GetFileName(romPath)} " +
+                    $"{LogPrefix} Loaded {Path.GetFileName(romPath)} " +
                     $"@ {_fps:0.##}fps, " +
                     $"{_sampleRate}Hz, " +
                     $"{av.Geometry.BaseWidth}x{av.Geometry.BaseHeight}");
@@ -643,7 +675,7 @@ internal sealed class GambatteRenderer(
             catch (Exception exception)
             {
                 AepLog.Error(
-                    $"[GAMBATTE] Failed to initialize core: {exception}");
+                    $"{LogPrefix} Failed to initialize core: {exception}");
 
                 TeardownLocked();
 
@@ -654,12 +686,15 @@ internal sealed class GambatteRenderer(
         _running =
             true;
 
+        _failed = false;
+        _failureMessage = null;
+
         _runThread =
             new Thread(
                 RunLoop)
             {
                 IsBackground = true,
-                Name = "gambatte-run"
+                Name = _isGearsystem ? "gearsystem-run" : "gambatte-run"
             };
 
         _runThread.Start();
@@ -675,7 +710,32 @@ internal sealed class GambatteRenderer(
 
         _cancel?.Cancel();
 
-        _runThread?.Join();
+        var runThread =
+            _runThread;
+
+        if (runThread is not null &&
+            runThread != Thread.CurrentThread)
+        {
+            _deferredTeardown = true;
+
+            if (!runThread.Join(TimeSpan.FromSeconds(3)))
+            {
+            // Never block Dalamud's unload indefinitely or unload a native
+            // libretro core while its thread may still be executing in it.
+            AepLog.Error(
+                $"{LogPrefix} Emulator thread did not stop within 3 seconds; " +
+                "native teardown will run when the core call returns.");
+                return;
+            }
+
+            if (!_deferredTeardown)
+            {
+                _runThread = null;
+                return;
+            }
+
+            _deferredTeardown = false;
+        }
 
         _runThread =
             null;
@@ -715,7 +775,7 @@ internal sealed class GambatteRenderer(
             catch (Exception exception)
             {
                 AepLog.Warning(
-                    $"[GAMBATTE] retro_unload_game failed: {exception.Message}");
+                    $"{LogPrefix} retro_unload_game failed: {exception.Message}");
             }
 
             try
@@ -725,7 +785,7 @@ internal sealed class GambatteRenderer(
             catch (Exception exception)
             {
                 AepLog.Warning(
-                    $"[GAMBATTE] retro_deinit failed: {exception.Message}");
+                    $"{LogPrefix} retro_deinit failed: {exception.Message}");
             }
 
             _coreInited =
@@ -912,50 +972,55 @@ internal sealed class GambatteRenderer(
 
     private void RunLoop()
     {
-        var frameMs =
-            1000.0 /
-            _fps;
-
-        var stopwatch =
-            Stopwatch.StartNew();
-
-        double next =
-            0;
-
-        while (_running)
+        try
         {
-            if (_cancel?.IsCancellationRequested ==
-                true)
-            {
-                break;
-            }
+            var frameMs = 1000.0 / _fps;
+            var stopwatch = Stopwatch.StartNew();
+            double next = 0;
 
-            lock (_lock)
+            while (_running)
             {
-                if (!_running)
+                if (_cancel?.IsCancellationRequested == true)
                 {
                     break;
                 }
 
-                _run();
+                lock (_lock)
+                {
+                    if (!_running) break;
+                    _run();
+                }
+
+                next += frameMs;
+                var wait = next - stopwatch.Elapsed.TotalMilliseconds;
+                if (wait > 1) Thread.Sleep((int)wait);
+                else if (wait < -250) next = stopwatch.Elapsed.TotalMilliseconds;
             }
-
-            next +=
-                frameMs;
-
-            var wait =
-                next -
-                stopwatch.Elapsed.TotalMilliseconds;
-
-            if (wait > 1)
+        }
+        catch (Exception exception)
+        {
+            if (_running)
             {
-                Thread.Sleep(
-                    (int)wait);
+                _failureMessage = $"The {SystemName} emulator stopped unexpectedly.";
+                _failed = true;
+                AepLog.Error($"{LogPrefix} Emulator loop failed: {exception}");
             }
-            else if (wait < -250)
+        }
+        finally
+        {
+            _running = false;
+
+            if (_deferredTeardown)
             {
-                next =
-                    stopwatch.Elapsed.TotalMilliseconds;
+                lock (_lock)
+                {
+                    if (_deferredTeardown)
+                    {
+                        _deferredTeardown = false;
+                        TeardownLocked();
+                        _runThread = null;
+                    }
+                }
             }
         }
     }
@@ -1002,14 +1067,22 @@ internal sealed class GambatteRenderer(
                     if (format ==
                         PIXFMT_RGB565)
                     {
+                        self._pixelFormat = format;
                         AepLog.Debug(
-                            "[GAMBATTE] Core selected RGB565 video.");
+                            $"{self.LogPrefix} Core selected RGB565 video.");
 
                         return true;
                     }
 
+                    if (format == PIXFMT_XRGB8888)
+                    {
+                        self._pixelFormat = format;
+                        AepLog.Debug("[NESTOPIA] Core selected XRGB8888 video.");
+                        return true;
+                    }
+
                     AepLog.Warning(
-                        $"[GAMBATTE] Unsupported pixel format requested: {format}");
+                        $"{self.LogPrefix} Unsupported pixel format requested: {format}");
 
                     return false;
                 }
@@ -1078,35 +1151,59 @@ internal sealed class GambatteRenderer(
                 return;
             }
 
-            //
-            // Existing local-TV path.
-            //
-
-            self._scaler?.Submit(
-                data,
-                (int)width,
-                (int)height,
-                (int)pitch);
-
-
-            //
-            // Optional livestream path.
-            //
-            // GameBroadcastEncoder immediately snapshots the libretro
-            // framebuffer, so it does not retain this native pointer
-            // after the callback returns.
-            //
-
-            self._broadcastEncoder?.SubmitVideoFrame(
-                data,
-                (int)width,
-                (int)height,
-                (int)pitch);
+            self.SubmitVideoFrame(data, (int)width, (int)height, (int)pitch);
         }
         catch (Exception exception)
         {
             AepLog.Warning(
-                $"[GAMBATTE] Video callback failed: {exception.Message}");
+                $"{_instance?.LogPrefix ?? "[LIBRETRO]"} Video callback failed: {exception.Message}");
+        }
+    }
+
+    private unsafe void SubmitVideoFrame(IntPtr data, int width, int height, int pitch)
+    {
+        _videoWidth = width;
+        _videoHeight = height;
+
+        if (_pixelFormat == PIXFMT_RGB565)
+        {
+            _scaler?.Submit(data, width, height, pitch);
+            _broadcastEncoder?.SubmitVideoFrame(data, width, height, pitch);
+            return;
+        }
+
+        // Cores may supply XRGB8888. Convert at the frontend boundary so
+        // the established TV scaler and FFmpeg encoder continue to receive
+        // the same RGB565 frames used by SNES and Game Boy.
+        var rowBytes = checked(width * 2);
+        var buffer = ArrayPool<byte>.Shared.Rent(checked(rowBytes * height));
+        try
+        {
+            fixed (byte* destinationBase = buffer)
+            {
+                var sourceBase = (byte*)data;
+                for (var y = 0; y < height; y++)
+                {
+                    var source = sourceBase + y * pitch;
+                    var destination = (ushort*)(destinationBase + y * rowBytes);
+                    for (var x = 0; x < width; x++)
+                    {
+                        var offset = x * 4;
+                        var blue = source[offset];
+                        var green = source[offset + 1];
+                        var red = source[offset + 2];
+                        destination[x] = (ushort)(((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3));
+                    }
+                }
+
+                var converted = (IntPtr)destinationBase;
+                _scaler?.Submit(converted, width, height, rowBytes);
+                _broadcastEncoder?.SubmitVideoFrame(converted, width, height, rowBytes);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 
@@ -1175,6 +1272,12 @@ internal sealed class GambatteRenderer(
         _broadcastEncoder?.IsRunning ==
         true;
 
+    internal bool HasFailed => _failed;
+    internal string? FailureMessage => _failureMessage;
+
+    internal BroadcastDiagnosticsSnapshot BroadcastDiagnostics =>
+        _broadcastEncoder?.Diagnostics ?? BroadcastDiagnosticsSnapshot.Idle;
+
 
     internal bool StartBroadcast(
         string ffmpegPath,
@@ -1184,7 +1287,7 @@ internal sealed class GambatteRenderer(
             !_coreInited)
         {
             AepLog.Warning(
-                "[GAMBATTE] Cannot start broadcast because no Game Boy game is running.");
+                $"{LogPrefix} Cannot start broadcast because no {SystemName} game is running.");
 
             return false;
         }
@@ -1193,7 +1296,7 @@ internal sealed class GambatteRenderer(
             true)
         {
             AepLog.Info(
-                "[GAMBATTE] Game broadcast is already running.");
+                $"{LogPrefix} Game broadcast is already running.");
 
             return true;
         }
@@ -1201,9 +1304,7 @@ internal sealed class GambatteRenderer(
         StopBroadcast();
 
         //
-        // Gambatte normally outputs 160x144 RGB565.
-        //
-        // Use the actual core timing that was obtained from
+        // Use the actual core geometry and timing obtained from
         // retro_get_system_av_info when the ROM was loaded.
         //
         // The encoder dimensions are fixed for the lifetime of the
@@ -1211,11 +1312,14 @@ internal sealed class GambatteRenderer(
         // geometry, SubmitVideoFrame will safely ignore those frames.
         //
 
-        const int width =
-            160;
+        var width = _videoWidth;
+        var height = _videoHeight;
 
-        const int height =
-            144;
+        if (width <= 0 || height <= 0)
+        {
+            AepLog.Warning("[GAME-BROADCAST] No emulator video frame has been received yet.");
+            return false;
+        }
 
         var encoder =
             new GameBroadcastEncoder();
@@ -1226,12 +1330,13 @@ internal sealed class GambatteRenderer(
                 width,
                 height,
                 _fps,
-                _sampleRate))
+                _sampleRate,
+                sourceName: SystemName))
         {
             encoder.Dispose();
 
             AepLog.Error(
-                "[GAMBATTE] Failed to start game broadcast.");
+                $"{LogPrefix} Failed to start game broadcast.");
 
             return false;
         }
@@ -1240,7 +1345,7 @@ internal sealed class GambatteRenderer(
             encoder;
 
         AepLog.Info(
-            $"[GAMBATTE] Game broadcast started at {width}x{height} @ {_fps:0.###}fps.");
+            $"{LogPrefix} Game broadcast started at {width}x{height} @ {_fps:0.###}fps.");
 
         return true;
     }
@@ -1266,11 +1371,11 @@ internal sealed class GambatteRenderer(
         catch (Exception exception)
         {
             AepLog.Warning(
-                $"[GAMBATTE] Error while stopping game broadcast: {exception.Message}");
+                $"{LogPrefix} Error while stopping game broadcast: {exception.Message}");
         }
 
         AepLog.Info(
-            "[GAMBATTE] Game broadcast stopped.");
+            $"{LogPrefix} Game broadcast stopped.");
     }
 
 
@@ -1292,8 +1397,7 @@ internal sealed class GambatteRenderer(
 //
 // Standard libretro joypad IDs.
 //
-// Game Boy / Game Boy Color use only:
-// B, Select, Start, D-pad and A.
+// Shared libretro joypad inputs used by Game Boy, NES and Game Boy Advance.
 //
 
 internal enum GambatteInput
@@ -1307,5 +1411,7 @@ internal enum GambatteInput
     Left = 6,
     Right = 7,
 
-    A = 8
+    A = 8,
+    L = 10,
+    R = 11
 }

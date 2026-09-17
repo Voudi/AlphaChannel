@@ -6,8 +6,20 @@ namespace AlphaChannel.Plugin.Video
 	internal class MpvRenderer : IDisposable
 	{
 		private const string DLL = "libmpv-2";
+		private const string AudioLevelFilter =
+			"@alphavol:lavfi=[astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=RMS_level]";
 		private static Resources? _resources;
-		public static void Setup(Resources resources)
+
+        private string _androidYtdlRawOptions =
+    "hls-use-mpegts=,extractor-args=youtube:player_client=android";
+
+        private string _poTokenYtdlRawOptions =
+            "hls-use-mpegts=,extractor-args=youtube:player_client=android";
+
+        private string _authenticatedPoTokenYtdlRawOptions =
+            "hls-use-mpegts=,extractor-args=youtube:player_client=android";
+
+        public static void Setup(Resources resources)
 		{
 			_resources = resources;
 		}
@@ -23,9 +35,20 @@ namespace AlphaChannel.Plugin.Video
 		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr mpv_wait_event(IntPtr ctx, double timeout);
 		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_request_log_messages(IntPtr ctx, string min_level);
 		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern void mpv_terminate_destroy(IntPtr ctx);
-		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_get_property(IntPtr ctx, string name, int format, out double data);
-		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_get_property(IntPtr ctx, string name, int format, IntPtr data);
-		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr mpv_get_property_string(IntPtr ctx, string name);
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        private static extern int mpv_get_property(
+     IntPtr ctx,
+     string name,
+     int format,
+     out double data);
+
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)]
+        private static extern int mpv_get_property(
+            IntPtr ctx,
+            string name,
+            int format,
+            IntPtr data);
+        [DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr mpv_get_property_string(IntPtr ctx, string name);
 		[DllImport(DLL, CallingConvention = CallingConvention.Cdecl)] private static extern void mpv_free(IntPtr data);
 
 		[StructLayout(LayoutKind.Sequential)]
@@ -42,7 +65,7 @@ namespace AlphaChannel.Plugin.Video
 		private bool _useSnapA = true;
 		private int _frameBytes;
 		private int _width, _height;
-		private CancellationTokenSource? _cancelToken;
+		private CancellationToken _cancelToken;
 		private IntPtr _renderParamsPtr;
 		private IntPtr _sizePtr, _stridePtr, _formatPtr;
 		private Texture2D? _targetTexture;
@@ -52,6 +75,12 @@ namespace AlphaChannel.Plugin.Video
 		private bool _closed = true;
 		private Thread? _eventThread;
         private float _smoothedAudioLevel;
+        private bool _audioSpectrumEnabled;
+        private bool _lavfiVisualizerGraphInstalled;
+        private LiveAudioFfmpegRelay? _liveAudioRelay;
+
+        internal bool AudioSpectrumEnabled =>
+            _audioSpectrumEnabled;
         // MPV log warnings/errors.
         //
         // These are useful diagnostics, but they are NOT by themselves proof that
@@ -76,12 +105,12 @@ namespace AlphaChannel.Plugin.Video
         private readonly Lock _snapshotLock = new();
 		private IntPtr _latestSnapshot;
 
-		public void Initialize(int width, int height, Texture2D? targetTexture, CancellationTokenSource cancelToken,
+        public void Initialize(int width, int height, Texture2D? targetTexture, CancellationToken cancelToken,
 			bool hardwareDecoding = false, int maxQualityHeight = 1080, bool allowInsecureDirectUrls = false,
-			int initialVolume = 60, string? cookiesPath = null, string? cookiesBrowser = null,
-			string? cookiesBrowserProfile = null)
+			int initialVolume = 60, string? cookiesPath = null)
 		{
-			_width = width;
+
+            _width = width;
 			_height = height;
 			_cancelToken = cancelToken;
 			_targetTexture = targetTexture;
@@ -99,42 +128,68 @@ namespace AlphaChannel.Plugin.Video
 			_ = mpv_set_option_string(_mpvCtx, "hwdec", hardwareDecoding ? "auto-safe" : "no");
 			_ = mpv_set_option_string(_mpvCtx, "profile", "sw-fast");
 			_ = mpv_set_option_string(_mpvCtx, "ytdl", "yes");
-			_ = mpv_set_option_string(_mpvCtx, "script-opts", $"ytdl_hook-ytdl_path={_resources?.GetLocationYTDLP()}");
-			_ = mpv_set_option_string(_mpvCtx, "ytdl-format", $"bestvideo[height<={maxQualityHeight}][ext=mp4]+bestaudio/best[height<={maxQualityHeight}]");
-			_ = mpv_set_option_string(_mpvCtx, "terminal", "yes");
-			_ = mpv_set_option_string(_mpvCtx, "volume", initialVolume.ToString(System.Globalization.CultureInfo.InvariantCulture));
-			_ = mpv_set_option_string(_mpvCtx, "msg-level", "all=warn,ffmpeg=error");
-			// force-ipv4 used to be set here too, but it only affects yt-dlp's own resolve
-			// request - not mpv/ffmpeg's later fetch of the resolved URL, which has no
-			// equivalent option. On a dual-stack system that pins yt-dlp to IPv4 while mpv's own
-			// fetch still prefers IPv6 by default, so the CDN sees a request from a different IP
-			// than the one baked into the signed URL and returns 403 on every single playback.
-			// Leaving IP family unforced keeps both sides on the same OS-chosen default instead.
-			// YouTube's SABR-only rollout means web/web_safari/mweb/ios/tv_simply now require a
-			// GVS PO token yt-dlp doesn't supply out of the box - even when they resolve *a* URL
-			// it 403s on first fetch, or the video has no non-PO-token formats at all ("Only
-			// images are available"). android is the one client still handing out a working,
-			// PO-token-free progressive stream (itag 18, capped ~360p) confirmed against real
-			// videos end-to-end (resolve + actual curl fetch), so pin extraction to it.
-			var ytdlRawOptions = "hls-use-mpegts=,extractor-args=youtube:player_client=android";
-			if (!string.IsNullOrWhiteSpace(cookiesBrowser))
-			{
-				var browserProfile = !string.IsNullOrWhiteSpace(cookiesBrowserProfile)
-					? cookiesBrowserProfile
-					: YouTubeBrowserCookies.FindProfile(cookiesBrowser);
-				if (!string.IsNullOrWhiteSpace(browserProfile))
-				{
-					ytdlRawOptions +=
-						$",cookies-from-browser={YouTubeBrowserCookies.YtdlArg(cookiesBrowser, browserProfile)}";
-				}
-			}
-			else if (!string.IsNullOrEmpty(cookiesPath))
-			{
-				ytdlRawOptions += $",cookies={cookiesPath.Replace('\\', '/')}";
-			}
+            _ = mpv_set_option_string(
+        _mpvCtx,
+        "script-opts",
+        $"ytdl_hook-ytdl_path={_resources?.GetLocationYTDLP()}");
 
-			_ = mpv_set_option_string(_mpvCtx, "ytdl-raw-options", ytdlRawOptions);
-			_ = mpv_set_option_string(_mpvCtx, "idle", "yes");
+            var qualitySelector =
+                $"bestvideo[height<={maxQualityHeight}]+bestaudio/" +
+                $"best[height<={maxQualityHeight}]";
+
+            _ = mpv_set_option_string(
+                _mpvCtx,
+                "ytdl-format",
+                qualitySelector);
+
+            _ = mpv_set_option_string(
+                _mpvCtx,
+                "terminal",
+                "yes");
+            _ = mpv_set_option_string(_mpvCtx, "volume", initialVolume.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+			_ = mpv_set_option_string(_mpvCtx, "msg-level", "all=warn,ffmpeg=error");
+            // force-ipv4 used to be set here too, but it only affects yt-dlp's own resolve
+            // force-ipv4 used to be set here too, but it only affects yt-dlp's own
+            // resolution request, not mpv's later fetch of the resolved media URL.
+            //
+            // Android remains the normal fast route. The PO-token configuration is
+            // prepared separately and can be selected immediately before loadfile
+            // when compatibility mode is active.
+            var androidBaseOptions =
+                _resources is not null
+                    ? YouTubePoTokenSupport.BuildMpvRawOptions(
+                        _resources,
+                        usePoTokens: false)
+                    : "hls-use-mpegts=," +
+                      "extractor-args=youtube:player_client=android";
+
+            _androidYtdlRawOptions =
+                androidBaseOptions;
+
+            _poTokenYtdlRawOptions =
+                _resources is not null
+                    ? YouTubePoTokenSupport.BuildMpvRawOptions(
+                        _resources,
+                        usePoTokens: true)
+                    : _androidYtdlRawOptions;
+
+            SetYouTubeCookiesPath(
+                cookiesPath);
+
+            //
+            // Start with Android. Play() may select PO-token mode immediately
+            // before loading a particular YouTube video.
+            //
+            _ = mpv_set_option_string(
+                _mpvCtx,
+                "ytdl-raw-options",
+                _androidYtdlRawOptions);
+
+            _ = mpv_set_option_string(
+                _mpvCtx,
+                "idle",
+                "yes");
 			_ = mpv_set_option_string(_mpvCtx, "keep-open", "yes");
 
             // Live HLS streams such as MediaMTX need mpv to keep
@@ -156,7 +211,7 @@ namespace AlphaChannel.Plugin.Video
             _ = mpv_set_option_string(
                 _mpvCtx,
                 "af",
-                "@alphavol:lavfi=[astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=RMS_level]");
+                AudioLevelFilter);
 
             // Wine's own certificate store is essentially empty by default - only disabling
             // verification worked around it on this project's Wine setup. Never applies on real
@@ -209,10 +264,12 @@ namespace AlphaChannel.Plugin.Video
 
 			_closed = false;
 
-			AepLog.Debug("[MPV] Video Player started");
+			AepLog.Info("[MPV] Video Player started");
 		}
 
-		public bool RenderFrame()
+       
+
+        public bool RenderFrame()
 		{
 			try
 			{
@@ -224,7 +281,7 @@ namespace AlphaChannel.Plugin.Video
 				AepLog.Debug("[MPV] Video Player stopped");
 				return false;
 			}
-			if (_closed || _cancelToken!.Token.IsCancellationRequested)
+			if (_closed || _cancelToken.IsCancellationRequested)
 			{ AepLog.Debug("[MPV] Video Player stopped"); return false; }
 
             // Everything below touches state (_mpvRenderCtx, _bufferPtr, _snapA/_snapB,
@@ -257,7 +314,7 @@ namespace AlphaChannel.Plugin.Video
 				{
 					int rc = mpv_render_context_render(_mpvRenderCtx, _renderParamsPtr);
 
-					if (_closed || _cancelToken!.Token.IsCancellationRequested)
+					if (_closed || _cancelToken.IsCancellationRequested)
 					{
 						return false;
 					}
@@ -308,8 +365,6 @@ namespace AlphaChannel.Plugin.Video
         public void StopRender()
         {
             _closed = true;
-
-            _cancelToken?.Cancel();
 
             // Wake RenderFrame if it is currently blocked in _frameReady.Wait().
             try
@@ -399,11 +454,20 @@ namespace AlphaChannel.Plugin.Video
 
             lock (_mpvLock)
             {
+                _audioSpectrumEnabled =
+                    false;
+
+                _lavfiVisualizerGraphInstalled =
+                    false;
+
                 if (_mpvCtx != IntPtr.Zero)
                 {
                     mpv_terminate_destroy(_mpvCtx);
                     _mpvCtx = IntPtr.Zero;
                 }
+
+                _liveAudioRelay?.Dispose();
+                _liveAudioRelay = null;
             }
 
             if (_eventThread is not null &&
@@ -415,43 +479,296 @@ namespace AlphaChannel.Plugin.Video
             _eventThread = null;
         }
 
-        public void Play(string url, double playbackPosition, bool isPlaying)
+        internal void SetYouTubeCookiesPath(
+            string? cookiesPath)
         {
-            if (!_closed)
+            var baseOptions =
+                _poTokenYtdlRawOptions;
+
+            _authenticatedPoTokenYtdlRawOptions =
+                !string.IsNullOrWhiteSpace(cookiesPath) &&
+                File.Exists(cookiesPath)
+                    ? baseOptions +
+                      ",cookies=" +
+                      cookiesPath.Replace('\\', '/')
+                    : baseOptions;
+        }
+
+        public void Play(
+            string url,
+            double playbackPosition,
+            bool isPlaying,
+            bool useYouTubePoTokens = false,
+            bool useYouTubeCookies = false,
+            AudioVisualizerMode? preparedVisualizerMode = null,
+            AudioVisualizerTheme preparedVisualizerTheme =
+                AudioVisualizerTheme.AlphaPurple,
+            bool expectedAudioOnly = false)
+        {
+            if (_closed)
             {
-                _smoothedAudioLevel = 0f;
-                AepLog.Debug("Playing New Video at " + playbackPosition + " | " + isPlaying);
+                return;
+            }
 
-                lock (_mpvLock)
+            _smoothedAudioLevel = 0f;
+
+            AepLog.Debug(
+                "Playing New Video at " +
+                playbackPosition +
+                " | " +
+                isPlaying);
+
+            lock (_mpvLock)
+            {
+                _liveAudioRelay?.Dispose();
+                _liveAudioRelay = null;
+
+                var playbackUrl = url;
+
+                if (expectedAudioOnly &&
+                    _resources?.GetLocationFFmpeg() is { } ffmpegPath)
                 {
-                    if (url == string.Empty)
-                    {
-                        Stop();
-                    }
-                    else if (playbackPosition > 0)
-                    {
-                        string startStr = ((int)playbackPosition)
-                            .ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    _liveAudioRelay =
+                        LiveAudioFfmpegRelay.TryStart(
+                            ffmpegPath,
+                            url);
 
-                        string pauseStr = !isPlaying ? ",pause=yes" : string.Empty;
-
-                        _ = mpv_command(
-                            _mpvCtx,
-                            ["loadfile", url, "replace", "0", $"start={startStr}{pauseStr}", null!]);
-                    }
-                    else if (!isPlaying)
+                    if (_liveAudioRelay is not null)
                     {
-                        _ = mpv_command(
-                            _mpvCtx,
-                            ["loadfile", url, "replace", "0", "pause=yes", null!]);
+                        playbackUrl =
+                            _liveAudioRelay.PlaybackUrl;
                     }
                     else
                     {
-                        _ = mpv_command(
-                            _mpvCtx,
-                            ["loadfile", url, "replace", "0", null!]);
+                        AepLog.Warning(
+                            "[LIVE-AUDIO-RELAY] Falling back to direct libmpv playback.");
                     }
                 }
+
+                //
+                // When switching from video to an audio stream, install the
+                // requested visualizer before loadfile. This lets mpv build
+                // the new media pipeline with a video output from the start,
+                // instead of leaving the previous video's final frame visible.
+                //
+                if (preparedVisualizerMode is { } visualizerMode &&
+                    visualizerMode != AudioVisualizerMode.ClassicBars &&
+                    _mpvCtx != IntPtr.Zero)
+                {
+                    var graph =
+                        AudioVisualizerFilter.GetGraph(
+                            visualizerMode,
+                            preparedVisualizerTheme);
+
+                    var visualizerResult =
+                        mpv_command(
+                            _mpvCtx,
+                            [
+                                "set",
+                                "lavfi-complex",
+                                graph,
+                                null!
+                            ]);
+
+                    if (visualizerResult < 0)
+                    {
+                        _audioSpectrumEnabled =
+                            false;
+
+                        AepLog.Warning(
+                            $"[AudioVisualizer] Could not prepare the " +
+                            $"{visualizerMode} graph before loading media: " +
+                            $"rc={visualizerResult}");
+                    }
+                    else
+                    {
+                        _audioSpectrumEnabled =
+                            true;
+
+                        _lavfiVisualizerGraphInstalled =
+                            true;
+
+                        AepLog.Debug(
+                            $"[AudioVisualizer] Prepared {visualizerMode} " +
+                            "before loading the audio stream.");
+                    }
+                }
+                else if (_lavfiVisualizerGraphInstalled &&
+                         _mpvCtx != IntPtr.Zero)
+                {
+                    //
+                    // The next item is an ordinary video or uses Classic Bars.
+                    // Remove any FFmpeg video-generating graph left by the
+                    // previous audio stream.
+                    //
+                    var clearResult =
+                        mpv_command(
+                            _mpvCtx,
+                            [
+                                "set",
+                                "lavfi-complex",
+                                string.Empty,
+                                null!
+                            ]);
+
+                    if (clearResult < 0)
+                    {
+                        AepLog.Warning(
+                            "[AudioVisualizer] Could not clear the previous " +
+                            $"spectrum graph: rc={clearResult}");
+                    }
+
+                    _audioSpectrumEnabled = false;
+                    _lavfiVisualizerGraphInstalled =
+                        clearResult < 0;
+                }
+
+                if (url == string.Empty)
+                {
+                    Stop();
+                    return;
+                }
+
+                //
+                // Select the yt-dlp route immediately before loadfile.
+                //
+                var isAlphaChannelLiveHls =
+                    Uri.TryCreate(playbackUrl, UriKind.Absolute, out var mediaUri) &&
+                    mediaUri.Port == 8888 &&
+                    mediaUri.AbsolutePath.StartsWith(
+                        "/live/",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    mediaUri.AbsolutePath.EndsWith(
+                        "/index.m3u8",
+                        StringComparison.OrdinalIgnoreCase);
+
+                // A temporarily missing live playlist must fail promptly so
+                // the Watch Party retry loop can try it again. Letting
+                // ytdl_hook inspect a relay URL turns a simple startup 404 into
+                // a long generic webpage lookup and prevents timely retries.
+                var directLiveMedia =
+                    isAlphaChannelLiveHls ||
+                    expectedAudioOnly;
+
+                var ytdlResult =
+                    mpv_command(
+                        _mpvCtx,
+                        [
+                            "set",
+                            "ytdl",
+                            directLiveMedia ? "no" : "yes",
+                            null!
+                        ]);
+
+                if (ytdlResult < 0)
+                {
+                    AepLog.Warning(
+                        $"[MPV] Could not configure yt-dlp for this media: rc={ytdlResult}");
+                }
+
+                var selectedYtdlOptions =
+                    useYouTubePoTokens && useYouTubeCookies
+                        ? _authenticatedPoTokenYtdlRawOptions
+                        : useYouTubePoTokens
+                        ? _poTokenYtdlRawOptions
+                        : _androidYtdlRawOptions;
+
+                var optionsResult = directLiveMedia
+                    ? 0
+                    :
+                    mpv_command(
+                        _mpvCtx,
+                        [
+                            "set",
+                            "ytdl-raw-options",
+                            selectedYtdlOptions,
+                            null!
+                        ]);
+
+                if (optionsResult < 0)
+                {
+                    AepLog.Warning(
+                        "[YouTube/Policy] Could not change mpv's " +
+                        $"yt-dlp configuration: rc={optionsResult}");
+                }
+                else if (!directLiveMedia)
+                {
+                    AepLog.Info(
+                        useYouTubePoTokens
+                            ? useYouTubeCookies
+                                ? "[YouTube/Account] mpv load configured for authenticated PO-token mode."
+                                : "[YouTube/Policy] mpv load configured for PO-token compatibility mode."
+                            : "[YouTube/Policy] mpv load configured for the Android client.");
+                }
+
+                if (playbackPosition > 0)
+                {
+                    var startStr =
+                        ((int)playbackPosition).ToString(
+                            System.Globalization.CultureInfo.InvariantCulture);
+
+                    var pauseStr =
+                        !isPlaying
+                            ? ",pause=yes"
+                            : string.Empty;
+
+                    _ = mpv_command(
+                        _mpvCtx,
+                        [
+                            "loadfile",
+                            playbackUrl,
+                            "replace",
+                            "0",
+                            $"start={startStr}{pauseStr}",
+                            null!
+                        ]);
+                }
+                else if (!isPlaying)
+                {
+                    _ = mpv_command(
+                        _mpvCtx,
+                        [
+                            "loadfile",
+                            playbackUrl,
+                            "replace",
+                            "0",
+                            "pause=yes",
+                            null!
+                        ]);
+                }
+                else
+                {
+                    _ = mpv_command(
+                        _mpvCtx,
+                        [
+                            "loadfile",
+                            playbackUrl,
+                            "replace",
+                            "0",
+                            null!
+                        ]);
+                }
+            }
+        }
+
+        private void SetPlaybackOption(
+            string name,
+            string value)
+        {
+            var result =
+                mpv_command(
+                    _mpvCtx,
+                    [
+                        "set",
+                        name,
+                        value,
+                        null!
+                    ]);
+
+            if (result < 0)
+            {
+                AepLog.Warning(
+                    $"[MPV] Could not set {name}={value}: rc={result}");
             }
         }
 
@@ -462,6 +779,8 @@ namespace AlphaChannel.Plugin.Video
 				lock (_mpvLock)
 				{
 					_ = mpv_command(_mpvCtx, ["stop", null!]);
+					_liveAudioRelay?.Dispose();
+					_liveAudioRelay = null;
 					_closed = true;
 					_frameReady?.Set();
 				}
@@ -558,6 +877,19 @@ namespace AlphaChannel.Plugin.Video
 				lock (_mpvLock)
 				{
 					_ = mpv_command(_mpvCtx, ["set", "volume", volume.ToString(System.Globalization.CultureInfo.InvariantCulture), null!]);
+				}
+			}
+		}
+
+		public void SetMuted(bool muted)
+		{
+			if (!_closed)
+			{
+				lock (_mpvLock)
+				{
+					// mpv's mute property silences the audio device without reducing the
+					// decoded signal used by astats and the audio visualizer filters.
+					_ = mpv_command(_mpvCtx, ["set", "mute", muted ? "yes" : "no", null!]);
 				}
 			}
 		}
@@ -665,6 +997,74 @@ namespace AlphaChannel.Plugin.Video
                 {
                     mpv_free(ptr);
                 }
+            }
+        }
+
+        public bool SetAudioSpectrumEnabled(
+            bool enabled,
+            AudioVisualizerMode mode =
+                AudioVisualizerMode.FfmpegSpectrum,
+            AudioVisualizerTheme theme =
+                AudioVisualizerTheme.AlphaPurple)
+        {
+            if (_closed)
+            {
+                return false;
+            }
+
+            lock (_mpvLock)
+            {
+                if (_mpvCtx == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                // The generated visualizers route live audio through the
+                // lavfi-complex [ao] output. Removing that graph while an
+                // Icecast stream is active tears down MPV's audio pipeline and
+                // can end playback. Classic Bars are a presentation change:
+                // hide generated frames and let ScreenPainter use the separate
+                // astats measurement. Play() clears the old graph safely before
+                // the next media item is loaded.
+                if (!enabled)
+                {
+                    _audioSpectrumEnabled = false;
+                    return true;
+                }
+
+                var graph =
+                    AudioVisualizerFilter.GetGraph(
+                        mode,
+                        theme);
+
+                var result =
+                    mpv_command(
+                        _mpvCtx,
+                        [
+                            "set",
+                    "lavfi-complex",
+                    graph,
+                    null!
+                        ]);
+
+                if (result < 0)
+                {
+                    _audioSpectrumEnabled =
+                        false;
+
+                    AepLog.Warning(
+                        $"[AudioVisualizer] MPV rejected the {mode} graph: rc={result}");
+
+                    return false;
+                }
+
+                //
+                _audioSpectrumEnabled = true;
+                _lavfiVisualizerGraphInstalled = true;
+
+
+
+                return true;
             }
         }
 
@@ -1098,7 +1498,7 @@ namespace AlphaChannel.Plugin.Video
                                         dataPtr + 4);
 
 
-                                AepLog.Warning(
+                                AepLog.Debug(
                                     $"[MPV] END_FILE received. " +
                                     $"reason={reason}, error={error}");
 

@@ -35,22 +35,27 @@ internal sealed unsafe class ScreenPainter : IDisposable
 	private const float BaseWidth = 1.0f;
 	private const float BaseHeight = 0.6f;
 
-	//Absolute world transform for the screen quad. Unlike the old companion-relative offset, this is a
-	//fixed world position/yaw set once per "spawn" (see VideoEngine.SpawnScreenInFrontOfLocalPlayer) and
-	//updated live from the Settings UI - it does not track any game object's movement afterwards.
-	internal Vector3 WorldPosition;
-	internal float WorldYaw;
-	internal float Scale = 1.0f;
+    //Absolute world transform for the screen quad. Unlike the old companion-relative offset, this is a
+    //fixed world position/yaw set once per "spawn" (see VideoEngine.SpawnScreenInFrontOfLocalPlayer) and
+    //updated live from the Settings UI - it does not track any game object's movement afterwards.
+    internal Vector3 WorldPosition;
+    internal float WorldYaw;
 
-	private readonly VertexShader _vs;
+    internal float WidthScale = 1.0f;
+    internal float HeightScale = 1.0f;
+
+    private readonly VertexShader _vs;
     private readonly PixelShader _ps;
     private readonly PixelShader _loadingPs;
+    private readonly PixelShader _screensaverPs;
     private readonly PixelShader _audioPs;
     private readonly PixelShader _glowPs;
     private readonly PixelShader _titlePs;
     private readonly PixelShader _reactionsPs;
 
     private volatile bool _isLoading;
+    private volatile bool _isScreensaver;
+    private DateTime _screensaverStartedAtUtc = DateTime.MinValue;
     private volatile bool _isAudioOnly;
     private volatile float _audioLevel;
     private float _audioAnimationTime;
@@ -65,10 +70,10 @@ internal sealed unsafe class ScreenPainter : IDisposable
     private readonly BlendState _alphaBlend;
     private readonly Buffer _cbuf;
 	private readonly TitleTextureRenderer _titleRenderer = new();
+    private readonly ScreensaverTextureRenderer _screensaverRenderer = new();
 
-	//Aetherphone addition on top of the upstream port - a soft ambient-light quad drawn larger than and
-	//behind the real screen, so it reads as a light source in the room instead of a flat floating
-	//rectangle. Fixed, not user-adjustable, same reasoning as Curvature below.
+	// A soft ambient-light quad drawn larger than and behind the screen to create a glow.
+	// Its scale is fixed rather than user-adjustable.
 	private const float GlowScale = 1.28f;
 
 	//The "now playing" banner shows for a while after the title actually changes, then fades rather
@@ -78,14 +83,22 @@ internal sealed unsafe class ScreenPainter : IDisposable
 	private const float TitleFadeSeconds = 1f;
 	private DateTime _titleShownAtUtc = DateTime.MinValue;
 
-	private Texture2D? _texture;
-	private ShaderResourceView? _srv;
+    private Texture2D? _texture;
+    private ShaderResourceView? _srv;
 
-	//Wrapping the swapchain's own persistent back buffer/depth buffer views via SharpDX AddRefs/Releases them.
-	//Doing that fresh every single frame (60+ times/sec) tears down the engine's own refcount on objects it
-	//still needs - only re-wrap when the underlying pointer actually changes (e.g. on resize), and otherwise
-	//reuse the cached wrapper for the draw.
-	private nint _cachedRtvPtr;
+    //
+    // A second image texture is bound only while a slideshow transition is
+    // active. The pixel shader blends from _srv to _transitionSrv.
+    //
+    private Texture2D? _transitionTexture;
+    private ShaderResourceView? _transitionSrv;
+    private volatile float _imageTransitionBlend;
+
+    //Wrapping the swapchain's own persistent back buffer/depth buffer views via SharpDX AddRefs/Releases them.
+    //Doing that fresh every single frame (60+ times/sec) tears down the engine's own refcount on objects it
+    //still needs - only re-wrap when the underlying pointer actually changes (e.g. on resize), and otherwise
+    //reuse the cached wrapper for the draw.
+    private nint _cachedRtvPtr;
 	private nint _cachedDsvPtr;
 	private RenderTargetView? _cachedRtv;
 	private DepthStencilView? _cachedDsv;
@@ -102,7 +115,7 @@ internal sealed unsafe class ScreenPainter : IDisposable
 	//per-frame updates are just a cbuffer write instead of a CPU rasterize + texture upload.
 	private const int MaxReactions = 16;
 
-	//Aetherphone addition on top of the upstream port - a slight cylindrical bow (curved-monitor look)
+	// A slight cylindrical bow (curved-monitor look)
 	//across the screen's width. There's no per-vertex buffer at all here (the flat 4-corner quad was
 	//generated purely from SV_VertexID) - subdividing into a horizontal strip of quads and displacing
 	//each column along local Z by a parabola (max at the edges, zero at center) is still just procedural
@@ -127,7 +140,7 @@ internal sealed unsafe class ScreenPainter : IDisposable
         public float ReactionCount;
         public float LoadingTime;
         public float ReactionPad1;
-        public float ReactionPad2;
+        public float ImageTransitionBlend;
         public fixed float ReactionPos[MaxReactions * 4]; //xy = uv center (0..1), z = alpha, w = radius.
 		public fixed float ReactionColor[MaxReactions * 4]; //rgb = color, a unused.
 	}
@@ -172,8 +185,37 @@ internal sealed unsafe class ScreenPainter : IDisposable
 				return o;
 			}
 
-			Texture2D tex : register(t0);
-			SamplerState smp : register(s0);
+Texture2D tex : register(t0);
+Texture2D transitionTex : register(t2);
+Texture2D screensaverTex : register(t3);
+SamplerState smp : register(s0);
+
+float4 ScreensaverPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
+{
+    for (int r = 0; r < uiRectCount; r++)
+    {
+        float4 rect = uiRects[r];
+        if (i.pos.x >= rect.x && i.pos.x < rect.x + rect.z &&
+            i.pos.y >= rect.y && i.pos.y < rect.y + rect.w) discard;
+    }
+    if (!isFrontFace) return float4(0.015, 0.015, 0.02, 1.0);
+
+    float2 uv = i.uv;
+    float3 color = lerp(float3(0.018, 0.012, 0.050), float3(0.004, 0.006, 0.018), uv.y);
+    float2 logoSize = float2(0.28, 0.235);
+    float t = reactionMeta.y;
+    float2 travel = 1.0 - logoSize;
+    float2 phase = float2(t * 0.075, t * 0.103 + 0.31);
+    float2 bounce = 1.0 - abs(frac(phase) * 2.0 - 1.0);
+    float2 origin = bounce * travel;
+    float2 localUv = (uv - origin) / logoSize;
+    if (all(localUv >= 0.0) && all(localUv <= 1.0))
+    {
+        float4 mark = screensaverTex.Sample(smp, localUv);
+        color = lerp(color, mark.rgb, mark.a);
+    }
+    return float4(saturate(color), 1.0);
+}
 
 float4 LoadingPS(VOut i, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
 {
@@ -446,26 +488,7 @@ float height =
             eqColor,
             eq);
 
-    //
-    // Thin accent line underneath.
-//
-float accentLine =
-    (1.0 -
-     smoothstep(
-         0.001,
-         0.004,
-         abs(uv.y - 0.735))) *
-
-    (1.0 -
-     smoothstep(
-         0.32,
-         0.40,
-         abs(uv.x - 0.5)));
-
-color +=
-    accent *
-    accentLine *
-    0.5;
+ 
 
     return float4(
         saturate(color),
@@ -484,11 +507,29 @@ color +=
 					}
 				}
 
-				if (!isFrontFace)
-				{
-					return float4(0.015, 0.015, 0.02, 1.0); // subtle black plastic back
-				}
-				return tex.Sample(smp, i.uv);
+if (!isFrontFace)
+{
+    return float4(0.015, 0.015, 0.02, 1.0); // subtle black plastic back
+}
+
+float4 primaryColor =
+    tex.Sample(smp, i.uv);
+
+float transitionBlend =
+    saturate(reactionMeta.w);
+
+if (transitionBlend <= 0.0)
+{
+    return primaryColor;
+}
+
+float4 transitionColor =
+    transitionTex.Sample(smp, i.uv);
+
+return lerp(
+    primaryColor,
+    transitionColor,
+    transitionBlend);
 			}
 
 			// Same procedural geometry as VS above, drawn scaled up (via a separate, larger worldViewProj
@@ -622,6 +663,8 @@ color +=
                 hlsl,
                 "LoadingPS",
                 "ps_4_0"))
+        using (var screensaverPsb =
+            ShaderBytecode.Compile(hlsl, "ScreensaverPS", "ps_4_0"))
         using (var audioPsb =
             ShaderBytecode.Compile(
                 hlsl,
@@ -657,6 +700,8 @@ color +=
                 new PixelShader(
                     DxHandler.Device,
                     loadingPsb);
+
+            _screensaverPs = new PixelShader(DxHandler.Device, screensaverPsb);
 
             _audioPs =
                 new PixelShader(
@@ -774,6 +819,20 @@ color +=
         }
     }
 
+    internal bool IsLoading => _isLoading;
+
+    internal void SetScreensaver(string? status)
+    {
+        var enabled = !string.IsNullOrWhiteSpace(status);
+        if (enabled)
+        {
+            _screensaverRenderer.SetStatus(status!);
+            if (!_isScreensaver)
+                _screensaverStartedAtUtc = DateTime.UtcNow;
+        }
+        _isScreensaver = enabled;
+    }
+
     //Called from VideoEngine whenever the active video texture changes. Pass null to stop painting.
     internal void SetTarget(Texture2D? texture)
 	{
@@ -797,20 +856,98 @@ color +=
 		}
 	}
 
-	//Cheap per-tick update of where/how big to draw the quad - called continuously so live Settings edits
-	//are reflected immediately, without touching the SRV.
-	internal void SetTransform(Vector3 worldPosition, float worldYaw, float scale)
-	{
-		WorldPosition = worldPosition;
-		WorldYaw = worldYaw;
-		Scale = scale;
-	}
+    internal void SetImageTransitionTarget(
+    Texture2D? texture)
+    {
+        if (ReferenceEquals(
+                texture,
+                _transitionTexture))
+        {
+            return;
+        }
 
-	//Called whenever the queue advances, watch-along metadata resolves, or a viewer's ViewingEntry
-	//changes - a no-op on the renderer side unless the title/source pair actually changed. Only a
-	//genuine change (not a repeat call with the same text, e.g. WatchAlongSession's per-tick push)
-	//restarts the show-then-fade timer.
-	internal void SetTitle(string title, string source)
+        _transitionSrv?.Dispose();
+        _transitionSrv =
+            null;
+
+        _transitionTexture =
+            texture;
+
+        _imageTransitionBlend =
+            0f;
+
+        if (texture is not null)
+        {
+            _transitionSrv =
+                new ShaderResourceView(
+                    DxHandler.Device,
+                    texture,
+                    new ShaderResourceViewDescription
+                    {
+                        Format =
+                            texture.Description.Format,
+
+                        Dimension =
+                            ShaderResourceViewDimension.Texture2D,
+
+                        Texture2D =
+                        {
+                        MipLevels =
+                            texture.Description.MipLevels
+                        }
+                    });
+        }
+    }
+
+    internal void SetImageTransitionBlend(
+        float blend)
+    {
+        _imageTransitionBlend =
+            _transitionSrv is null
+                ? 0f
+                : Math.Clamp(
+                    blend,
+                    0f,
+                    1f);
+    }
+
+    internal void ClearImageTransition()
+    {
+        //
+        // Hide the transition texture without disposing its SRV while the
+        // Present hook may be drawing. The same transition texture is reused
+        // for every slide and is released when ScreenPainter is disposed.
+        //
+        _imageTransitionBlend =
+            0f;
+    }
+
+    //Cheap per-tick update of where/how big to draw the quad - called continuously so live Settings edits
+    //are reflected immediately, without touching the SRV.
+    internal void SetTransform(
+        Vector3 worldPosition,
+        float worldYaw,
+        float widthScale,
+        float heightScale)
+    {
+        WorldPosition =
+            worldPosition;
+
+        WorldYaw =
+            worldYaw;
+
+        WidthScale =
+            widthScale;
+
+        HeightScale =
+            heightScale;
+    }
+
+    //Called whenever the queue advances, watch-along metadata resolves, or a viewer's ViewingEntry
+    //changes - a no-op on the renderer side unless the title/source pair actually changed. Only a
+    //genuine change (not a repeat call with the same text, e.g. WatchAlongSession's per-tick push)
+    //restarts the show-then-fade timer.
+    internal void SetTitle(string title, string source)
 	{
 		if (_titleRenderer.SetText(title, source))
 		{
@@ -991,16 +1128,21 @@ color +=
           titleAlpha,
 
                 LoadingTime =
-    _isAudioOnly
+    _isScreensaver
+        ? (float)(DateTime.UtcNow - _screensaverStartedAtUtc).TotalSeconds
+        : _isAudioOnly
         ? _audioAnimationTime
         : _isLoading
             ? (float)(DateTime.UtcNow -
                 _loadingStartedAtUtc).TotalSeconds
             : 0f,
 
-                // HLSL sees this as reactionMeta.z.
+                // HLSL sees these as reactionMeta.z and reactionMeta.w.
                 ReactionPad1 =
-          _audioLevel
+    _audioLevel,
+
+                ImageTransitionBlend =
+    _imageTransitionBlend
             };
 
             p.UiRectCount = CollectUiRects(ref p);
@@ -1022,11 +1164,22 @@ color +=
             ctx.VertexShader.Set(_vs);
 			ctx.VertexShader.SetConstantBuffer(0, _cbuf);
 			ctx.PixelShader.SetConstantBuffer(0, _cbuf);
-			ctx.PixelShader.SetShaderResource(0, _srv);
-			ctx.PixelShader.SetSampler(0, _sampler);
+            ctx.PixelShader.SetShaderResource(
+                0,
+                _srv);
 
-        //Glow first, so the sharp screen quad drawn right after composites on top of it.
-        if (!_isLoading && glowWorldViewProj != null)
+            ctx.PixelShader.SetShaderResource(
+                2,
+                _transitionSrv);
+
+            ctx.PixelShader.SetShaderResource(3, _screensaverRenderer.Srv);
+
+            ctx.PixelShader.SetSampler(
+                0,
+                _sampler);
+
+            //Glow first, so the sharp screen quad drawn right after composites on top of it.
+            if (!_isLoading && glowWorldViewProj != null)
         {
 				ScreenParams glowParams = p;
 				glowParams.WorldViewProj = glowWorldViewProj.Value;
@@ -1046,7 +1199,11 @@ color +=
             ctx.OutputMerger.BlendState =
                 null;
 
-            if (_isLoading)
+            if (_isScreensaver)
+            {
+                ctx.PixelShader.Set(_screensaverPs);
+            }
+            else if (_isLoading)
             {
                 ctx.PixelShader.Set(
                     _loadingPs);
@@ -1088,8 +1245,15 @@ color +=
 				ctx.Draw(VertexCount, 0);
 			}
 
-			ctx.PixelShader.SetShaderResource(0, null);
-		}
+            ctx.PixelShader.SetShaderResource(
+    2,
+    null);
+            ctx.PixelShader.SetShaderResource(3, null);
+
+            ctx.PixelShader.SetShaderResource(
+                0,
+                null);
+        }
 		finally
 		{
 			ctx.OutputMerger.SetRenderTargets(prevDsv, prevRtvs);
@@ -1301,16 +1465,39 @@ color +=
 		NumericsMatrix4x4 view = NumericsMatrix4x4.CreateLookAt(camPos, camLookAt, Vector3.UnitY);
 		NumericsMatrix4x4 proj = CreatePerspectiveFieldOfViewReversedZ(renderCamera->FoV, renderCamera->AspectRatio, renderCamera->NearPlane, renderCamera->FarPlane);
 
-		float scale = Scale * extraScale;
-		NumericsMatrix4x4 world =
-			// Z scales with Scale too, not left at a flat 1 - otherwise the curvature depth (which is
-			// expressed in the same pre-scale local units as X/Y) would look progressively flatter as
-			// the screen is resized up, instead of bowing proportionally to its own size.
-			NumericsMatrix4x4.CreateScale(BaseWidth * scale, BaseHeight * scale, scale) *
-			NumericsMatrix4x4.CreateFromAxisAngle(Vector3.UnitY, WorldYaw) *
-			NumericsMatrix4x4.CreateTranslation(WorldPosition);
+        float widthScale =
+    WidthScale *
+    extraScale;
 
-		return world * view * proj;
+        float heightScale =
+            HeightScale *
+            extraScale;
+
+        //
+        // Curvature depth follows the average size so independently scaling one
+        // axis does not make the screen bow excessively or become completely flat.
+        //
+        float depthScale =
+            (
+                widthScale +
+                heightScale
+            ) *
+            0.5f;
+
+        NumericsMatrix4x4 world =
+            NumericsMatrix4x4.CreateScale(
+                BaseWidth *
+                widthScale,
+                BaseHeight *
+                heightScale,
+                depthScale) *
+            NumericsMatrix4x4.CreateFromAxisAngle(
+                Vector3.UnitY,
+                WorldYaw) *
+            NumericsMatrix4x4.CreateTranslation(
+                WorldPosition);
+
+        return world * view * proj;
 	}
 
 	//Same X/Y as System.Numerics' right-handed CreatePerspectiveFieldOfView (M34=-1 layout), but with the Z
@@ -1339,7 +1526,8 @@ color +=
 
 		_titleRenderer.Dispose();
 		_srv?.Dispose();
-		_cachedRtv?.Dispose();
+        _transitionSrv?.Dispose();
+        _cachedRtv?.Dispose();
 		_cachedDsv?.Dispose();
 		_cbuf.Dispose();
         _alphaBlend.Dispose();
@@ -1352,6 +1540,8 @@ color +=
         _glowPs.Dispose();
         _audioPs.Dispose();
         _loadingPs.Dispose();
+        _screensaverPs.Dispose();
+        _screensaverRenderer.Dispose();
         _ps.Dispose();
         _vs.Dispose();
     }

@@ -42,7 +42,10 @@ internal sealed class Snes9xRenderer(string corePath, string romsDirectory) : ID
     private bool _crtFilterEnabled;
     private Thread? _runThread;
     private CancellationTokenSource? _cancel;
+    private volatile bool _deferredTeardown;
     private volatile bool _running;
+    private volatile bool _failed;
+    private string? _failureMessage;
     private bool _coreInited;
 
     private double _fps =
@@ -56,6 +59,12 @@ internal sealed class Snes9xRenderer(string corePath, string romsDirectory) : ID
 
     internal bool IsBroadcasting =>
     _broadcastEncoder?.IsRunning == true;
+
+    internal bool HasFailed => _failed;
+    internal string? FailureMessage => _failureMessage;
+
+    internal BroadcastDiagnosticsSnapshot BroadcastDiagnostics =>
+        _broadcastEncoder?.Diagnostics ?? BroadcastDiagnosticsSnapshot.Idle;
 
     #region native loading (manual, so the DLL can be unloaded for a clean re-init)
     //Global c++ state, not safe to init twice in one process, un/load dll during runtime with native lib to avoid dangling
@@ -322,6 +331,8 @@ internal sealed class Snes9xRenderer(string corePath, string romsDirectory) : ID
         }
 
 			_running = true;
+			_failed = false;
+			_failureMessage = null;
 			_runThread = new Thread(RunLoop) { IsBackground = true, Name = "snes9x-run" };
 			_runThread.Start();
 			return true;
@@ -336,7 +347,34 @@ internal sealed class Snes9xRenderer(string corePath, string romsDirectory) : ID
 
         _cancel?.Cancel();
 
-        _runThread?.Join();
+        var runThread =
+            _runThread;
+
+        if (runThread is not null &&
+            runThread != Thread.CurrentThread)
+        {
+            _deferredTeardown = true;
+
+            if (!runThread.Join(TimeSpan.FromSeconds(3)))
+            {
+            // A native core can theoretically remain blocked inside retro_run.
+            // Do not freeze Dalamud's plugin unload or free memory beneath that
+            // still-running native call. The background thread is allowed to
+            // finish on its own and the remaining plugin cleanup can continue.
+            AepLog.Error(
+                "[SNES9X] Emulator thread did not stop within 3 seconds; " +
+                "native teardown will run when the core call returns.");
+                return;
+            }
+
+            if (!_deferredTeardown)
+            {
+                _runThread = null;
+                return;
+            }
+
+            _deferredTeardown = false;
+        }
 
         _runThread =
             null;
@@ -471,33 +509,62 @@ internal sealed class Snes9xRenderer(string corePath, string romsDirectory) : ID
 
 		private void RunLoop()
 		{
-			double frameMs = 1000.0 / _fps;
-			var sw = Stopwatch.StartNew();
-			double next = 0;
-			while (_running)
+			try
 			{
-				if (_cancel?.IsCancellationRequested == true)
+				double frameMs = 1000.0 / _fps;
+				var sw = Stopwatch.StartNew();
+				double next = 0;
+				while (_running)
 				{
-					break;
-				}
-				lock (_lock)
-				{
-					if (!_running || _run == null)
+					if (_cancel?.IsCancellationRequested == true)
 					{
 						break;
 					}
-					_run();
+					lock (_lock)
+					{
+						if (!_running || _run == null)
+						{
+							break;
+						}
+						_run();
+					}
+					next += frameMs;
+					double wait = next - sw.Elapsed.TotalMilliseconds;
+					if (wait > 1)
+					{
+						Thread.Sleep((int)wait);
+					}
+					else if (wait < -250)
+					{
+						next = sw.Elapsed.TotalMilliseconds; //resync
+					}
 				}
-				next += frameMs;
-				double wait = next - sw.Elapsed.TotalMilliseconds;
-				if (wait > 1)
+			}
+			catch (Exception exception)
+			{
+				if (_running)
 				{
-					Thread.Sleep((int)wait);
+					_failureMessage = "The Super Nintendo emulator stopped unexpectedly.";
+					_failed = true;
+					AepLog.Error($"[SNES9X] Emulator loop failed: {exception}");
 				}
-				else if (wait < -250)
-				{
-					next = sw.Elapsed.TotalMilliseconds; //resync
-				}
+			}
+			finally
+			{
+				_running = false;
+
+                if (_deferredTeardown)
+                {
+                    lock (_lock)
+                    {
+                        if (_deferredTeardown)
+                        {
+                            _deferredTeardown = false;
+                            TeardownLocked();
+                            _runThread = null;
+                        }
+                    }
+                }
 			}
 		}
 		private static void AudioSampleCb(short left, short right) { } //snes9x uses batch, assign but leave it empty
@@ -687,7 +754,8 @@ internal sealed class Snes9xRenderer(string corePath, string romsDirectory) : ID
                 _videoWidth,
                 _videoHeight,
                 _fps,
-                _sampleRate))
+                _sampleRate,
+                sourceName: "Super Nintendo"))
         {
             encoder.Dispose();
 

@@ -6,15 +6,15 @@ using System.Runtime.InteropServices;
 namespace AlphaChannel.Plugin.Video;
 
 /// <summary>
-/// Encodes raw emulator video frames with FFmpeg and publishes them
-/// to an RTMP endpoint.
-///
-/// Version 1 is intentionally video-only. Audio will be added after
-/// the basic emulator -> FFmpeg -> RTMP path has been proven.
+/// Encodes raw emulator video frames and stereo PCM audio with FFmpeg,
+/// then publishes the resulting H.264/AAC stream to an RTMP endpoint.
 /// </summary>
 internal sealed class GameBroadcastEncoder : IDisposable
 {
+    private readonly BroadcastDiagnosticsTracker diagnostics = new();
     private readonly object _frameLock =
+        new();
+    private readonly object _stopLock =
         new();
 
     private Process? _process;
@@ -25,6 +25,8 @@ internal sealed class GameBroadcastEncoder : IDisposable
 
     private Thread? _writerThread;
     private CancellationTokenSource? _cancel;
+    private Task? _stderrTask;
+    private Task? _audioWriterTask;
 
     private byte[]? _pendingFrame;
 
@@ -34,6 +36,7 @@ internal sealed class GameBroadcastEncoder : IDisposable
     private int _frameWidth;
     private int _frameHeight;
     private int _frameBytes;
+    private int _maxPendingAudioPackets = 256;
 
     // Temporary framebuffer diagnostics.
 
@@ -46,6 +49,8 @@ internal sealed class GameBroadcastEncoder : IDisposable
         _process is not null &&
         !_process.HasExited;
 
+    internal BroadcastDiagnosticsSnapshot Diagnostics => diagnostics.Snapshot;
+
 
     /// <summary>
     /// Starts FFmpeg and prepares it to receive tightly-packed
@@ -57,7 +62,12 @@ internal sealed class GameBroadcastEncoder : IDisposable
         int width,
         int height,
         double fps,
-        int audioSampleRate)
+        int audioSampleRate,
+        int? outputWidth = null,
+        int? outputHeight = null,
+        int maxPendingAudioPackets = 256,
+        int ffmpegAudioQueuePackets = 0,
+        string sourceName = "Retro game")
     {
         if (_disposed)
         {
@@ -130,6 +140,9 @@ internal sealed class GameBroadcastEncoder : IDisposable
                height *
                4);
 
+        _maxPendingAudioPackets = Math.Max(1, maxPendingAudioPackets);
+        diagnostics.Start(sourceName, outputWidth ?? width, outputHeight ?? height, fps);
+
         try
         {
             //
@@ -155,6 +168,9 @@ internal sealed class GameBroadcastEncoder : IDisposable
                     " ",
                     "-hide_banner",
                     "-loglevel warning",
+                    "-nostats",
+                    "-stats_period 2",
+                    "-progress pipe:2",
 
 // Raw emulator video from stdin.
 //
@@ -170,6 +186,7 @@ $"-framerate {fps.ToString(
     System.Globalization.CultureInfo.InvariantCulture)}",
 "-i pipe:0",
 
+ffmpegAudioQueuePackets > 0 ? $"-thread_queue_size {ffmpegAudioQueuePackets}" : string.Empty,
 "-f s16le",
 $"-ar {audioSampleRate}",
 "-ac 2",
@@ -181,6 +198,11 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
 
 "-map",
 "1:a:0",
+
+// Browser capture is rendered at 1080p so text stays clear on the in-game
+// screen, but scaling before H.264 encoding keeps software OpenH264 comfortably
+// ahead of real time. Emulator callers leave these values unset.
+outputWidth is > 0 && outputHeight is > 0 ? $"-vf scale={outputWidth}:{outputHeight}:flags=fast_bilinear" : string.Empty,
 
 // Encode video to H.264.
 "-c:v",
@@ -238,7 +260,9 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
                 OnFFmpegExited;
 
             AepLog.Info(
-                $"[GAME-BROADCAST] Starting FFmpeg for {width}x{height} @ {fps:0.###}fps.");
+                $"[GAME-BROADCAST] Starting FFmpeg for {width}x{height}" +
+                (outputWidth is > 0 && outputHeight is > 0 ? $" -> {outputWidth}x{outputHeight}" : string.Empty) +
+                $" @ {fps:0.###}fps.");
 
             //
             // Do NOT log the complete FFmpeg command line here because
@@ -249,6 +273,8 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
             {
                 AepLog.Error(
                     "[GAME-BROADCAST] FFmpeg Process.Start returned false.");
+
+                diagnostics.Failed("FFmpeg could not start.");
 
                 CleanupProcess();
 
@@ -269,7 +295,7 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
             // because its stderr pipe filled up.
             //
 
-            _ =
+            _stderrTask =
                 Task.Run(
                     () => ReadFFmpegErrorsAsync(
                         _process,
@@ -295,7 +321,10 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
             // is already used by the raw video stream.
             //
 
-            _ = Task.Run(
+            var workerCancellation =
+                _cancel.Token;
+
+            _audioWriterTask = Task.Run(
                 async () =>
                 {
                     try
@@ -308,7 +337,8 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
                             return;
                         }
 
-                        await audioPipe.WaitForConnectionAsync();
+                        await audioPipe.WaitForConnectionAsync(
+                            workerCancellation);
 
                         AepLog.Info(
                             "[GAME-BROADCAST] Audio writer started.");
@@ -325,20 +355,22 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
                                     audio =
                                         _pendingAudio.Dequeue();
                                 }
+
+                                diagnostics.SetQueues(_pendingFrame is null ? 0 : 1, _pendingAudio.Count);
                             }
 
                             if (audio is null)
                             {
                                 await Task.Delay(
-                                    2);
+                                    2,
+                                    workerCancellation);
 
                                 continue;
                             }
 
                             await audioPipe.WriteAsync(
-                                audio,
-                                0,
-                                audio.Length);
+                                audio.AsMemory(),
+                                workerCancellation);
                         }
                     }
                     catch (OperationCanceledException)
@@ -376,6 +408,8 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
         {
             AepLog.Error(
                 $"[GAME-BROADCAST] Failed to start FFmpeg: {exception}");
+
+            diagnostics.Failed("FFmpeg could not start.");
 
             Stop();
 
@@ -415,13 +449,17 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
                 _pendingAudio.Enqueue(
                     audio);
 
-                // Keep the emulator thread non-blocking if FFmpeg ever
-                // falls badly behind. This is intentionally generous;
-                // normal operation should never reach this limit.
-                while (_pendingAudio.Count > 256)
+                // Never allow stale audio to build unlimited latency. Browser
+                // capture selects a much tighter limit than emulators.
+                long discarded = 0;
+                while (_pendingAudio.Count > _maxPendingAudioPackets)
                 {
                     _pendingAudio.Dequeue();
+                    discarded++;
                 }
+
+                diagnostics.DroppedAudio(discarded);
+                diagnostics.SetQueues(_pendingFrame is null ? 0 : 1, _pendingAudio.Count);
             }
         }
         catch (Exception exception)
@@ -632,6 +670,7 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
 
             lock (_frameLock)
             {
+                var replaced = _pendingFrame is not null;
                 if (_pendingFrame is not null)
                 {
                     ArrayPool<byte>.Shared.Return(
@@ -640,6 +679,8 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
 
                 _pendingFrame =
                     frame;
+
+                diagnostics.CapturedFrame(replaced);
 
                 frame =
                     null;
@@ -660,6 +701,59 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
                 ArrayPool<byte>.Shared.Return(
                     frame);
             }
+        }
+    }
+
+    internal void DiscardPendingAudio()
+    {
+        lock (_frameLock)
+        {
+            _pendingAudio.Clear();
+            diagnostics.SetQueues(_pendingFrame is null ? 0 : 1, 0);
+        }
+    }
+
+    // Alpha Channel embedded-browser integration. CEF already supplies BGRA32,
+    // so browser frames can enter the established FFmpeg queue without a
+    // needless RGB565 round trip.
+    internal unsafe void SubmitBgraVideoFrame(IntPtr data, int width, int height, int pitch)
+    {
+        if (!_running || data == IntPtr.Zero || width != _frameWidth || height != _frameHeight)
+            return;
+
+        var rowBytes = checked(width * 4);
+        var requiredBytes = checked(rowBytes * height);
+        if (pitch < rowBytes || requiredBytes != _frameBytes) return;
+
+        byte[]? frame = null;
+        try
+        {
+            frame = ArrayPool<byte>.Shared.Rent(requiredBytes);
+            fixed (byte* destinationBase = frame)
+            {
+                var sourceBase = (byte*)data;
+                for (var y = 0; y < height; y++)
+                    Buffer.MemoryCopy(sourceBase + y * pitch, destinationBase + y * rowBytes,
+                        rowBytes, rowBytes);
+            }
+
+            lock (_frameLock)
+            {
+                var replaced = _pendingFrame is not null;
+                if (_pendingFrame is not null) ArrayPool<byte>.Shared.Return(_pendingFrame);
+                _pendingFrame = frame;
+                diagnostics.CapturedFrame(replaced);
+                frame = null;
+                Monitor.Pulse(_frameLock);
+            }
+        }
+        catch (Exception exception)
+        {
+            AepLog.Warning($"[GAME-BROADCAST] Browser frame submission failed: {exception.Message}");
+        }
+        finally
+        {
+            if (frame is not null) ArrayPool<byte>.Shared.Return(frame);
         }
     }
 
@@ -693,6 +787,8 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
 
                     _pendingFrame =
                         null;
+
+                    diagnostics.SetQueues(0, _pendingAudio.Count);
                 }
 
                 if (frame is null)
@@ -754,7 +850,7 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
     }
 
 
-    private static async Task ReadFFmpegErrorsAsync(
+    private async Task ReadFFmpegErrorsAsync(
         Process process,
         CancellationToken cancellationToken)
     {
@@ -773,8 +869,13 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
 
                 if (!string.IsNullOrWhiteSpace(line))
                 {
+                    if (diagnostics.TryConsumeProgress(line))
+                    {
+                        continue;
+                    }
+
                     AepLog.Warning(
-                        $"[FFMPEG-BROADCAST] {line}");
+                        $"[FFMPEG-BROADCAST] {SanitizeFFmpegLine(line)}");
                 }
             }
         }
@@ -850,6 +951,8 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
         _running =
             false;
 
+        diagnostics.Failed("FFmpeg stopped unexpectedly.", exitCode);
+
         _cancel?.Cancel();
 
 
@@ -886,6 +989,8 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
 
     internal void Stop()
     {
+        lock (_stopLock)
+        {
         if (_stopping)
         {
             return;
@@ -1012,8 +1117,22 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
                 }
             }
 
+            WaitForWorker(
+                _audioWriterTask,
+                "audio writer");
+            WaitForWorker(
+                _stderrTask,
+                "stderr reader");
+
+            _audioWriterTask =
+                null;
+            _stderrTask =
+                null;
+
 
             CleanupProcess();
+
+            diagnostics.Stop();
 
 
             try
@@ -1036,6 +1155,7 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
         {
             _stopping =
                 false;
+        }
         }
     }
 
@@ -1085,6 +1205,47 @@ $"-i \\\\.\\pipe\\{_ffmpegAudioPipeName}",
                    "\"",
                    "\\\"") +
                "\"";
+    }
+
+    private static void WaitForWorker(
+        Task? task,
+        string name)
+    {
+        if (task is null || task.IsCompleted)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!task.Wait(TimeSpan.FromSeconds(2)))
+            {
+                AepLog.Warning(
+                    $"[GAME-BROADCAST] {name} did not stop within 2 seconds.");
+            }
+        }
+        catch (Exception exception)
+        {
+            AepLog.Debug(
+                $"[GAME-BROADCAST] {name} cleanup warning: {exception.Message}");
+        }
+    }
+
+    private static string SanitizeFFmpegLine(string line)
+    {
+        foreach (var scheme in new[] { "rtmp://", "rtmps://", "http://", "https://" })
+        {
+            var start = line.IndexOf(scheme, StringComparison.OrdinalIgnoreCase);
+            while (start >= 0)
+            {
+                var end = start;
+                while (end < line.Length && !char.IsWhiteSpace(line[end])) end++;
+                line = line[..start] + "[address redacted]" + line[end..];
+                start = line.IndexOf(scheme, start + 18, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return line;
     }
 
 
