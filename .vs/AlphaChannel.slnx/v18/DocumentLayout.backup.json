@@ -465,7 +465,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 7,
+          "SelectedChildIndex": 4,
           "Children": [
             {
               "$type": "Document",
@@ -508,18 +508,6 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 5,
-              "Title": "Plugin.cs",
-              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Plugin.cs",
-              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Plugin.cs",
-              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Plugin.cs",
-              "RelativeToolTip": "src\\AlphaChannel.Plugin\\Plugin.cs",
-              "ViewState": "AgIAAAsAAAAAAAAAAADgvxEAAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-17T07:47:15.167Z"
-            },
-            {
-              "$type": "Document",
               "DocumentIndex": 6,
               "Title": "VideoPlayer.cs",
               "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Core\\Video\\VideoPlayer.cs",
@@ -529,6 +517,31 @@
               "ViewState": "AgIAALQAAAAAAAAAAAAAALQAAAAsAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-08-17T05:26:59.954Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "MainWindow.DJLive.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.DJLive.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.DJLive.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.DJLive.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.DJLive.cs",
+              "ViewState": "AgIAAJYRAAAAAAAAAAAjwKERAAAFAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-27T15:04:28.588Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "Plugin.cs",
+              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Plugin.cs",
+              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\Plugin.cs",
+              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\Plugin.cs",
+              "RelativeToolTip": "src\\AlphaChannel.Plugin\\Plugin.cs",
+              "ViewState": "AgIAAAsAAAAAAAAAAADgvxEAAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-08-17T07:47:15.167Z"
             },
             {
               "$type": "Document",
@@ -553,19 +566,6 @@
               "ViewState": "AgIAAI0NAAAAAAAAAAD4v5kNAAAeAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-08-21T00:54:00.87Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 0,
-              "Title": "MainWindow.DJLive.cs",
-              "DocumentMoniker": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.DJLive.cs",
-              "RelativeDocumentMoniker": "src\\AlphaChannel.Plugin\\MainWindow.DJLive.cs",
-              "ToolTip": "D:\\Users\\Mattie\\Documents\\Coding Projects\\TV\\AlphaChannel\\src\\AlphaChannel.Plugin\\MainWindow.DJLive.cs",
-              "RelativeToolTip": "src\\AlphaChannel.Plugin\\MainWindow.DJLive.cs",
-              "ViewState": "AgIAAJYRAAAAAAAAAAAjwKERAAAFAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-08-27T15:04:28.588Z",
-              "EditorCaption": ""
             },
             {
               "$type": "Document",
