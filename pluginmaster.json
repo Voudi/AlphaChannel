@@ -1,11 +1,11 @@
 [
   {
     "Author": "Alpha Channel Team",
-    "Name": "AlphaChannel",
+    "Name": "Alpha Channel",
     "IconUrl": "https://alphachannel-assets.pages.dev/alpha-channel-icon.png",
     "InternalName": "AlphaChannel.Plugin",
     "AssemblyVersion": "2.2.1.5",
-    "Description": "Renders an in-world video screen and syncs playback with other players running AlphaChannel over a self-hosted relay.",
+    "Description": "The ultimate social watch together hub, right in Eorzea! Watch movies, DJ Live and play Retro games.",
     "ApplicableVersion": "any",
     "Tags": [
       "video",
